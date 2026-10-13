@@ -1,0 +1,85 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<EnableUnsafeBinaryFormatterSerialization>true</EnableUnsafeBinaryFormatterSerialization>
+	</PropertyGroup>
+
+	<ItemGroup>
+	  <Content Remove="service_key.json" />
+	</ItemGroup>
+
+
+	<ItemGroup>
+          <PackageReference Include="FirebaseAdmin" Version="3.0.0" />
+          <PackageReference Include="Google.Apis.Auth" Version="1.68.0" />
+          <PackageReference Include="OpenAI" Version="2.1.0" />
+         <PackageReference Include="Swashbuckle.AspNetCore" Version="6.4.0" />
+         <PackageReference Include="System.Configuration.ConfigurationManager" Version="8.0.0" />
+		<PackageReference Include="AutoMapper" Version="12.0.0" />
+		<PackageReference Include="Dapper" Version="2.0.123" />
+		<PackageReference Include="ExcelDataReader" Version="3.6.0" />
+		<PackageReference Include="ExcelDataReader.DataSet" Version="3.6.0" />
+		<PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="6.0.10" />
+		<PackageReference Include="Microsoft.AspNetCore.Cors" Version="2.2.0" />
+		<PackageReference Include="Microsoft.AspNetCore.Http.Extensions" Version="2.2.0" />
+		<PackageReference Include="Microsoft.AspNetCore.Mvc.Versioning" Version="5.0.0" />
+		<PackageReference Include="Microsoft.AspNetCore.Mvc.Versioning.ApiExplorer" Version="5.0.0" />
+		<PackageReference Include="Microsoft.AspNetCore.SignalR.Core" Version="1.1.0" />
+		<PackageReference Include="Microsoft.AspNetCore.WebSockets" Version="2.2.1" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore" Version="6.0.10" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="6.0.10">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="6.0.10" />
+		<PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
+		<PackageReference Include="Microsoft.IdentityModel.Tokens" Version="6.25.0" />
+		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+		<PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="6.0.7" />
+		<PackageReference Include="NPOI" Version="2.6.0" />
+		<PackageReference Include="StackExchange.Redis" Version="2.8.0" />
+		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.4.0" />
+		<PackageReference Include="RabbitMQ.Client" Version="6.4.0" />
+		<PackageReference Include="System.Data.Odbc" Version="9.0.1" />
+	    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="6.25.0" />
+		<PackageReference Include="Microsoft.AspNetCore.StaticFiles" Version="2.2.0" />
+		<PackageReference Include="Twilio" Version="6.2.5" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Folder Include="Helpers\" />
+	</ItemGroup>
+ 
+  <ItemGroup>
+    <None Include="AxParser.csproj" />
+    <None Include="service_key.json" />
+    <None Include="wwwroot\css\AxProcessFlow.css" />
+    <None Include="wwwroot\css\AxTaskListing.css" />
+    <None Include="wwwroot\js\AxProcessFlow.js" />
+    <None Include="wwwroot\js\AxTaskListing.js" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ARMCommon\ARMCommon.csproj" />
+    <ProjectReference Include="..\AxParserApp\AxParser.csproj" />
+    <ProjectReference Include="..\AxStructDef\AxStructDef.csproj" />
+    <ProjectReference Include="..\AxValidate\AxValidate.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="ALC_CLIENT">
+      <HintPath>bin\ALC_CLIENT.dll</HintPath>
+    </Reference>
+    <Reference Include="ARMEncryptSecret">
+      <HintPath>C:\Users\mohan\source\repos\ARMEncryptSecret\ARMEncryptSecret\bin\Release\netstandard2.0\net8.0\ARMEncryptSecret.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+	<PropertyGroup>
+		<ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
+
+	</PropertyGroup>
+</Project>

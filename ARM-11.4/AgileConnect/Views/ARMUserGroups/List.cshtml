@@ -1,0 +1,74 @@
+﻿@model IEnumerable<ARMCommon.Model.ARMUserGroup>
+
+@{
+    ViewData["Title"] = "UserGroupList";
+}
+
+<h1>UserGroupList</h1>
+@*    <a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </ *@a>
+<p>
+    <a asp-action="Create">Create UserGroup</a>
+</p>
+<table class="table">
+    <thead>
+        <tr>
+            <th>
+                @Html.DisplayNameFor(model => model.AppName)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Name)
+            </th>
+            </th>
+ 
+            <th>
+                @Html.DisplayNameFor(model => model.IsActive)
+            </th>
+              <th>
+                @Html.DisplayNameFor(model => model.Role)
+            </th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+@foreach (var item in Model) {
+        <tr>
+            <td>
+                @Html.DisplayFor(modelItem => item.AppName)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.Name)
+            </td>
+ 
+            <td>
+                @Html.DisplayFor(modelItem => item.IsActive)
+            </td>
+            
+            <td>
+                @Html.DisplayFor(modelItem => item.Roles)
+            </td>
+            <td>
+                <a asp-action="Edit" asp-route-id="@item.ID">Edit</a> |
+                <a asp-action="Delete" asp-route-id="@item.ID">Delete</a>
+            </td>
+        </tr>
+}
+    </tbody>
+</table>
+
+                    <div class="col-sm-6"> 
+     <a asp-controller="ARMApps" asp-action="List"  id="redirectApp" class="redirectButton" title="redirectButton"> View Connected Apps </a>
+   </div>
+       @section Scripts {
+
+    <style>
+ 
+        a#SignOut {
+    position: absolute;
+    top: 19px;
+    right: 40px;
+    font-size: large;
+}
+    </style>
+ 
+}
+

@@ -1,0 +1,99 @@
+﻿@model IEnumerable<ARMCommon.Model.ARMNotificationTemplate>
+
+@{
+    ViewData["Title"] = "List";
+}
+
+<h1 id="notification-app">Notification Templates</h1>
+@* <a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a> *@
+@*<p>
+    <a asp-action="Create" asp-route-Appname=@ViewBag.result>Create Templates</a>
+</p>*@
+
+
+<div class="Notification-by-app d-flex justify-content-between mt-3 mb-3">
+    <div class="back-list">
+        <a asp-controller="ARMApps" asp-action="List" id="redirectApp" class="redirectButton btn btn-primary" title="redirectButton">
+            <span class="btn-label"> <i class="fa-solid fa-arrow-left"></i></span> Back To List
+        </a>
+    </div>
+    <div class="configure-app">
+        <a asp-action="Create" asp-route-Appname=@ViewBag.result id="redirectApp" class="redirectButton btn btn-primary" title="Create_Templates">
+            <span class="btn-label"><i class="fa-regular fa-square-plus"></i></span> Create Templates
+        </a>
+    </div>
+</div>
+
+<hr />
+@if (Model != null && Model.Any())
+{
+<table class="table">
+    <thead>
+        <tr>
+            <th>
+                @Html.DisplayNameFor(model => model.AppName)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.TemplateId)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.TemplateString)
+            </th>
+            <th> Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var item in Model)
+        {
+            <tr>
+                <td>
+                    <a asp-action="Edit" asp-route-id="@item.Id">@Html.DisplayFor(modelItem => item.AppName)</a>
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.TemplateId)
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.TemplateString)
+                </td>
+                <td>
+
+                    <a asp-action="Delete" asp-route-id="@item.Id">Delete</a>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+}
+else
+{
+<div class="alert alert-info" role="alert">
+    Notification Template Not Found
+</div>
+}
+
+@*<div class="col-sm-6">
+     <a asp-controller="ARMApps" asp-action="List" id="redirectApp" class="redirectButton" title="redirectButton"> View Connected Apps </a>
+   </div>*@
+
+@section Scripts {
+
+    <style>
+
+        a#SignOut {
+            position: absolute;
+            top: 25px;
+            right: 40px;
+            font-size: large;
+        }
+
+        h1#notification-app {
+            font-size: 20px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+        a{
+            text-decoration:none;
+        }
+    </style>
+
+}

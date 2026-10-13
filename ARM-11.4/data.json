@@ -1,0 +1,104 @@
+{
+	"Title": "Purchase Order",
+	"AddNewNode": [{
+			"transid": "pr",
+			"Caption": "Purchase Request"
+		},
+		{
+			"transid": "po",
+			"Caption": "Purchase Order"
+		},
+		{
+			"transid": "pbill",
+			"Caption": "Purchase Bill"
+		}
+	],
+	"List": [{
+			"Fromuser": "user 1",
+			"eventtime": 1,
+			"Process Name": "Purchase Order",
+			"Task Icon": "Icon1",
+			"Task Caption": "Make PR #0001",
+			"TaskType": "Make",
+			"TaskStatus": "Made",
+			"Keyfield": "PRNO",
+			"Keyvalue": "#0001",
+			"transid": "pr",
+			"Caption": "Purchase Request",
+			"recordid": 101,
+                  "nexttask" : ""
+		},
+		{
+			"Fromuser": "user 2",
+			"eventtime": 2,
+			"Process Name": "Purchase Order",
+			"Task Icon": "Icon2",
+			"Task Caption": "Make PO for PR #0001",
+			"TaskType": "Make",
+			"TaskStatus": "Made",
+			"Keyfield": "PRNO",
+			"Keyvalue": "#0001",
+			"transid": "po",
+			"Caption": "Purchase Order",
+			"recordid": 102,
+                  "nexttask" : ""
+		},
+		{
+			"Fromuser": "user 3",
+			"eventtime": 3,
+			"Process Name": "Purchase Order",
+			"Task Icon": "Icon3",
+			"Task Caption": "Approve PO for PR #0001",
+			"TaskType": "Approve",
+			"TaskStatus": "Returned",
+			"Keyfield": "PRNO",
+			"Keyvalue": "#0001",
+			"transid": "po",
+			"Caption": "Purchase Order",
+			"recordid": null,
+                  "nexttask" : ""
+		},
+		{
+			"Fromuser": "user 4",
+			"eventtime": 4,
+			"Process Name": "Purchase Order",
+			"Task Icon": "Icon2",
+			"Task Caption": "Make PO for PR #0001",
+			"TaskType": "Make",
+			"TaskStatus": "Made",
+			"Keyfield": "PRNO",
+			"Keyvalue": "#0001",
+			"transid": "po",
+			"Caption": "Purchase Order",
+			"recordid": 102
+		},
+		{
+			"Fromuser": "user 5",
+			"eventtime": 5,
+			"Process Name": "Purchase Order",
+			"Task Icon": "Icon3",
+			"Task Caption": "Approve PO for PR #0001",
+			"TaskType": "Approve",
+			"TaskStatus": "Approved",
+			"Keyfield": "PRNO",
+			"Keyvalue": "#0001",
+			"transid": "po",
+			"Caption": "Purchase Order",
+			"recordid": null
+		},
+		{
+			"Fromuser": "user 6",
+			"eventtime": 6,
+			"Process Name": "Purchase Order",
+			"Task Icon": "Icon3",
+			"Task Caption": "Approve PO for PR #0001",
+			"TaskType": "Approve",
+			"TaskStatus": "Approved",
+			"Keyfield": "PRNO",
+			"Keyvalue": "#0001",
+			"transid": "po",
+			"Caption": "Purchase Order",
+			"recordid": null
+		}
+	]
+}

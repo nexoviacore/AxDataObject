@@ -1,0 +1,93 @@
+﻿@model IEnumerable<ARMCommon.Model.AxModulePages>
+
+@{
+    ViewData["Title"] = "List";
+}
+
+<h1>List</h1>
+   <a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a>
+<p>
+    <a asp-action="Create" asp-route-Appname=@ViewBag.result>Create New</a>
+</p>
+<table class="table">
+    <thead>
+        <tr>
+            <th>
+                @Html.DisplayNameFor(model => model.PageTitle)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.PageName)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.PageIcon)
+            </th>
+ 
+            <th>
+                @Html.DisplayNameFor(model => model.PageDataTable)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.PageOwner)
+            </th>
+ 
+            <th>
+                @Html.DisplayNameFor(model => model.KeyField)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.AddQuickAccess)
+            </th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+@foreach (var item in Model) {
+        <tr>
+           
+              <td>
+                <a asp-action="Edit" asp-route-id="@item.Id">@Html.DisplayFor(modelItem => item.PageTitle)</a>
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.PageName)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.PageIcon)
+            </td>
+ 
+            <td>
+                @Html.DisplayFor(modelItem => item.PageDataTable)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.PageOwner)
+            </td>
+ 
+            <td>
+                @Html.DisplayFor(modelItem => item.KeyField)
+            </td>
+ 
+            <td>
+                @Html.DisplayFor(modelItem => item.AddQuickAccess)
+            </td>
+            <td>
+                
+                <a asp-action="Delete" asp-route-id="@item.Id">Delete</a>
+            </td>
+        </tr>
+}
+    </tbody>
+</table>
+  <div class="col-sm-6"> 
+     <a asp-controller="ARMApps" asp-action="List" id="redirectApp" class="redirectButton" title="redirectButton"> View Connected Apps </a>
+   </div>
+
+          @section Scripts {
+
+    <style>
+ 
+        a#SignOut {
+    position: absolute;
+    top: 19px;
+    right: 40px;
+    font-size: large;
+}
+    </style>
+ 
+}

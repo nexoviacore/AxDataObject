@@ -1,0 +1,51 @@
+﻿axdata {
+    display:none;
+}
+
+.bgloader {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 1;
+    background-color: #e1e1e1;
+}
+
+.spinner-border {
+    margin-top: 30%;
+}
+
+.ax-hidden, .ax-tempgridrow {
+    display: none !important;
+}
+
+.ax-disabled, .ax-save-disabled {
+    pointer-events: none;
+    cursor: not-allowed;
+    opacity: 0.65;
+    filter: alpha(opacity=65);
+    -webkit-box-shadow: none;
+    box-shadow: none;
+}
+
+.ax-disabled-modal {
+    pointer-events: none;
+    opacity: 0.8;
+}
+
+#confirmPopup .modal-content, #confirmPopup .modal-footer, #messagePopup .modal-content, #messagePopup .modal-footer {
+    background-color: #e3e3e3;
+}
+
+.magicsearch-wrapper .magicsearch-box {
+    z-index: 3 !important;
+}
+
+.magicsearch-wrapper input.dropdown {
+    height: auto !important;
+}
+
+.toolbar-bottom {
+    z-index: 4 !important;
+}

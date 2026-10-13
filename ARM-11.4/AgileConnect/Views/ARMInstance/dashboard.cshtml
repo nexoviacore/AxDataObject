@@ -1,0 +1,86 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARM Dashboard</title>
+    <style>
+        body 
+        {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+
+        .container
+        {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+
+        .card 
+        {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            margin: 20px;
+            text-align: center;
+            transition: transform 0.3s ease-in-out;
+        }
+
+        .card:hover
+        {
+            transform: scale(1.05);
+        }
+
+        h4 
+        {
+            color: #333;
+        }
+
+        a
+        {
+            text-decoration: none;
+            color: #3498db;
+            font-weight: bold;
+            transition: color 0.3s ease-in-out;
+        }
+
+        a:hover
+        {
+            color: #1b4fa3;
+        }
+
+     
+        #redirectApp {
+            margin-left: 0px;
+            font-weight: 600;
+            text-decoration: none;
+            text-align: center
+        }
+
+       
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h4>Apps</h4>
+            <a asp-controller="ARMApps" asp-action="List" id="redirectApp">Apps</a>
+        </div>
+        <div class="card">
+            <h4>Configure</h4>
+            <a asp-controller="ARMInstance" asp-action="Configure" id="redirectApp">Configure</a>
+        </div>
+        <div class="card">
+            <h4>Services</h4>
+            <a asp-controller="ARMInstance" asp-action="Service" id="redirectApp">Services</a>
+        </div>
+    </div>
+</body>
+</html>

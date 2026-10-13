@@ -1,0 +1,96 @@
+﻿@model ARMCommon.Model.ARMNotificationTemplate
+
+@{
+    ViewData["Title"] = "Create Template";
+}
+
+<h1 id="notification-create">Create Template</h1>
+@* <a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a>
+ *@
+
+<div class="create-container">
+    <form asp-action="Create">
+        <div class="notication-create d-flex justify-content-between mt-3 mb-3">
+            <div class="back-list">
+                <a asp-controller="ARMNotification" asp-action="ListByApp" asp-route-Appname="@Html.ValueFor(model => model.AppName)" id="redirectApp" class="redirectButton btn btn-primary" title="redirectButton">
+                    <span class="btn-label"> <i class="fa-solid fa-arrow-left"></i></span> Back To List
+                </a>
+            </div>
+            <div class="notification-submit-app">
+                <input type="submit" value="Create" class="btn btn-primary" />
+            </div>
+        </div>
+        <hr />
+        <div id="Create-template" class="input-group row g-4">
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+            <div class="col-md-6">
+
+                <label asp-for="AppName" class="control-label"></label>
+                <input asp-for="AppName" ReadOnly="true" id="txtkey" class="form-control" />
+                @*
+                <select asp-for="AppName"
+                asp-items="@(new SelectList(Model.app1,"ID","Name"))" class="form-control">
+                <option disabled>Please select one</option>
+                </select>*@
+
+            </div>
+            <div class="col-md-6">
+                <label asp-for="TemplateId" class="control-label"></label>
+                <input asp-for="TemplateId" class="form-control" />
+                <span asp-validation-for="TemplateId" class="text-danger"></span>
+            </div>
+            <div class="col-md-6">
+                <label asp-for="TemplateString" class="control-label"></label>
+                <input asp-for="TemplateString" class="form-control" />
+                <span asp-validation-for="TemplateString" class="text-danger"></span>
+            </div>
+        </div>
+    </form>
+</div>
+
+@*<div>
+        <a asp-controller="ARMNotification" asp-action="ListByApp" asp-route-Appname="@Html.ValueFor(model => model.AppName)">  Back to List</a>
+
+</div>*@
+
+@section Scripts {
+
+    <style>
+
+        a#SignOut {
+            position: absolute;
+            top: 25px;
+            right: 40px;
+            font-size: large;
+        }
+
+        h1#notification-create {
+            font-size: 20px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        label.control-label {
+            margin-bottom: 20px;
+        }
+
+        div#Create-template {
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 6px 0 #ddd;
+            margin-top: 2rem;
+        }
+
+        label.control-label {
+            margin-bottom: 1rem;
+        }
+        a{
+            text-decoration:none;
+        }
+    </style>
+
+}
+
+
+

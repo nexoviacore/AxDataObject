@@ -1,0 +1,191 @@
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+
+    <link rel="stylesheet" href="../../UI/axpertUI/style.bundle.css">
+    <link rel="stylesheet" href="../../UI/axpertUI/plugins.bundle.css">
+    <link rel="stylesheet" href="../../ThirdParty/jquery-confirm-master/jquery-confirm.min.css">
+    <link type="text/css" rel="stylesheet" href="../../Css/ActiveList_MainPage.css?v=1667890884781">
+    <style>
+        #Homepage_ActiveList .card-title {
+            font-weight: bold !important;
+            font-size: 18px;
+            margin-right: 25px;
+        }
+
+        .HomeP-ActiveList-Title {
+            font-size: 14px;
+            color: #333 !important;
+            font-weight: bold;
+        }
+
+        #Homepage_ActiveList .card-header {
+            border-bottom: 1px solid #f0f0f0;
+            justify-content: flex-start;
+        }
+
+        .HomeP-ActiveList-Desc {
+            display: block;
+            font-size: 13px;
+            color: #737373;
+        }
+
+        .HP-ActiveList-Items {
+            border-bottom: 1px dashed #ccc;
+            padding: 15px 0;
+        }
+
+        #Homepage_ActiveList .card-body {
+            padding-top: 0;
+            /* border-top: 1px solid #ececec; */
+            overflow: auto;
+        }
+
+        #Homepage_ActiveList .card-title {
+            font-weight: bold !important;
+            font-size: 18px;
+        }
+
+        #Homepage_ActiveList .nav-item {
+            border-left: 1px solid #ececec;
+        }
+
+            #Homepage_ActiveList .nav-item .nav-link {
+                padding: 12px 18px;
+                margin: 0 !important;
+            }
+
+        .HomeP-ActiveList-btn {
+            text-decoration: underline;
+            color: #333 !important;
+            font-size: 12px;
+        }
+
+        #Homepage_ActiveList .nav-item .nav-link img {
+            width: 25px !important;
+        }
+
+        .HP-ActiveList-Items .badge-dark {
+            color: #ffe720 !important;
+            font-weight: normal;
+            font-size: 10px;
+        }
+
+        #Homepage_ActiveList .card {
+            border: 1px solid #eeeff0;
+            border-radius: 8px;
+        }
+
+        #Homepage_ActiveList {
+            height: 86vh;
+            min-height: 86vh;
+            position: relative;
+        }
+
+        #Homepage_CardsList {
+            height: 86vh;
+            min-height: 86vh;
+            overflow: scroll;
+        }
+
+        #New-Landing-layout {
+            height: 86vh;
+        }
+
+        #Homepage_ActiveList .btn.btn-white .material-icons.material-icons-style.material-icons-2 {
+            margin-right: 0;
+        }
+
+        #Homepage_ActiveList .btn.btn-white {
+            margin: 5px 0;
+            border-radius: 4px;
+        }
+
+        #Homepage_ActiveList .nav-line-tabs {
+            border-bottom: 0;
+        }
+
+        #Homepage_ActiveList .activelist-tabs {
+            display: flex;
+            overflow-x: scroll;
+            overflow-y: hidden;
+            width: 73%;
+            list-style: none;
+            border-right: 1px solid #ececec;
+            padding-left: 0;
+            margin-bottom: 0;
+        }
+
+        #Homepage_ActiveList .card-toolbar {
+            position: absolute;
+            right: 0;
+            background: #fff !important;
+        }
+
+        #Homepage_ActiveList .nav-item .nav-link.active {
+            border-bottom: 2px solid;
+        }
+
+        #Homepage_ActiveList .task-actions-sets.d-flex:hover {
+            box-shadow: none;
+        }
+
+        #Homepage_ActiveList .btn-group-sm > .btn,
+        .btn-sm {
+            padding: 3px 7px !important;
+        }
+    </style>
+</head>
+
+<body id="Task_activity" class="header-fixed header-tablet-and-mobile-fixed aside-fixed">
+    <div class="content d-flex flex-column flex-column-fluid ">
+        <div id="Homepage_ActiveList" class="col-md-12">
+            <div class="card card-flush h-xl-100">
+                <div class="card-header">
+                    <h3 class="card-title">
+                        Active List
+                    </h3>
+                    <ul role="tablist" class="activelist-tabs">
+                    </ul>
+                    <div class="card-toolbar">
+                        <button data-kt-menu-trigger="click" data-kt-menu-placement="bottom-end"
+                                data-kt-menu-overflow="true" class="btn btn-sm btn-white sm-shadow">
+                            <span class="material-icons material-icons-style">
+                                filter_alt
+                            </span>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body d-flex ">
+                    <div class="w-100" id="ActiveList_Container">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+    <div id="waitDiv" class="page-loader rounded-2 bg-radial-gradient">
+        <div class="loader-box-wrapper d-flex bg-white p-20 shadow rounded">
+            <span class="loader"></span>
+        </div>
+    </div>
+    <script src="../../UI/axpertUI/plugins.bundle.js"></script>
+    <script src="../../UI/axpertUI/scripts.bundle.js"></script>
+    <script type="../../text/javascript" src="../../ThirdParty/jquery-confirm-master/jquery-confirm.min.js"></script>
+    <script type="text/javascript" src="../../Js/alerts.min.js"></script>
+    <script src="../../js/handlebars.js"></script>
+
+    <script src="../../js/common.js"></script>
+    <script src="../../CustomPages/js/custom_common.js"></script>
+    <script src="../../js/ActiveList_MainPage.js?v=1"></script>
+    <script type="text/javascript">
+        var _processName = 'ActiveList';
+        var axTasksObj;
+        $(document).ready(function () {
+            axTasksObj = new AxTasks();
+            axTasksObj.init();
+        });
+    </script>
+
+
+</body>
+</html>

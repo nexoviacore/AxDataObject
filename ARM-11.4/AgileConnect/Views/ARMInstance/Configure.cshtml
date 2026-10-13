@@ -1,0 +1,323 @@
+﻿@model ARMCommon.Model.ARMModel
+@{
+    ViewData["Title"] = "ConfigureUsers";
+   var Jsontext = ViewBag.ARMText != null ? ViewBag.ARMText :"";
+}
+
+<h2>ARM Instance </h2>
+           
+   @* <a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a>
+ *@
+   @* <div class="col-sm-6"> 
+    <a asp-controller="ARMApps" asp-action="List" id="redirectApp" class="redirectButton" title="redirectButton"> View Connected Apps </a>
+   </div>*@
+
+
+ 
+<div class="container p-4">
+    <div class="accordion" id="agile-connect-arm">
+        <form asp-action="Configure">
+            <div class="arm-Instance d-flex justify-content-between mt-3 mb-3">
+                <div class="view-connect">
+                    <a asp-controller="ARMInstance" asp-action="Dashboard" id="redirectApp" class="redirectButton btn btn-primary" title="redirectButton"><span class="btn-label"><i class="fa-solid fa-link"></i></span> Back To Dashboard </a>
+                </div>
+                <div class="arm-configure">
+                    <input type="submit" value="Configure" class="btn btn-primary">
+                </div>
+            </div>
+
+            <hr />
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+            <div class="accordion-item rounded-3 border-0 shadow mb-2">
+                <h3 class="accordion-header">
+                    <button class="accordion-button border-bottom collapsed fw-semibold" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#email-gateways" aria-expanded="false"
+                            aria-controls="email-gateways">
+                        &#11162 Email gateways
+                    </button>
+                </h3>
+            <div id="email-gateways" class="accordion-collapse collapse show" data-bs-parent="#agile-connect-arm">
+               <div class="accordion-body">
+              <div class="input-group">
+            <div class="form-group col-md-6">
+                <label asp-for="From" class="control-label"> From</label>
+                   <div class = "col-md-8">
+                    <input asp-for="From" id="txtfrom" class="form-control" />
+                    <span asp-validation-for="From" class="text-danger"></span>
+            </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="SmtpServer" class="control-label"> SmtpServer</label>
+                <div class="col-md-8">
+                    <input asp-for="SmtpServer" id="txtSmtpServer" class="form-control" />
+                    <span asp-validation-for="SmtpServer" class="text-danger"></span>
+                </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="Portno" class="control-label"> Port No.</label>
+                 <div class = "col-md-8"> 
+                <input asp-for="Portno" id="txtport" class="form-control" />
+                <span asp-validation-for="Portno" class="text-danger"></span>
+            </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="Username" class="control-label"> User Id</label>
+                 <div class = "col-md-8">
+                    <input asp-for="Username" id="txtUsername" class="form-control" />
+                    <span asp-validation-for="Username" class="text-danger"></span>
+            </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="Password" class="control-label"> Password</label>
+                <div class="col-md-8">
+                    <input asp-for="Password" id="txtPassword" class="form-control" />
+                    <span asp-validation-for="Password" class="text-danger"></span>
+                </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="Server" class="control-label">Server</label>
+                <div class="col-md-8">
+                    <input asp-for="Server" id="txtServer" class="form-control" />
+                    <span asp-validation-for="Server" class="text-danger"></span>
+                </div>
+            </div>
+            </div>
+            </div>
+            </div>
+            </div>
+
+            <div class="accordion-item rounded-3 border-0 shadow mb-2">
+                <h3 class="accordion-header">
+                    <button class="accordion-button border-bottom collapsed fw-semibold" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#sms-gateway" aria-expanded="false"
+                            aria-controls="sms-gateway">
+                        &#11162 SMS Gateway
+                    </button>
+                </h3>
+                <div id="sms-gateway" class="accordion-collapse collapse" data-bs-parent="#agile-connect-arm">
+                    <div class="accordion-body">
+              <div class="input-group">
+            <div class="form-group col-md-6">
+                <label asp-for="UserTo" class="control-label"> To</label>
+                 <div class = "col-md-8"> 
+                <input asp-for="UserTo" id="txtuserto" class="form-control" />
+                <span asp-validation-for="UserTo" class="text-danger"></span>
+            </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="UserFrom" class="control-label"> From</label>
+                 <div class = "col-md-8"> 
+                <input asp-for="UserFrom"  id= "txtuserfrom" class="form-control" />
+                <span asp-validation-for="UserFrom" class="text-danger"></span>
+            </div>
+            </div>
+              <div class="form-group col-md-6">
+                <label asp-for="Message" class="control-label"> Message</label>
+                 <div class = "col-md-8"> 
+                <input asp-for="Message" id="txtMessage" class="form-control" />
+                <span asp-validation-for="Message" class="text-danger"></span>
+            </div>
+         </div>
+         </div>
+         </div>
+         </div>
+         </div>
+
+            <div class="accordion-item rounded-3 border-0 mb-2 shadow">
+                <h3 class="accordion-header">
+                    <button class="accordion-button border-bottom collapsed fw-semibold" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#whatsapp-log" aria-expanded="false"
+                            aria-controls="whatsapp-log">
+                        &#11162 WhatsApp login Details
+                    </button>
+                </h3>
+                <div id="whatsapp-log" class="accordion-collapse collapse" data-bs-parent="#agile-connect-arm">
+                    <div class="accordion-body">
+              <div class="input-group">
+               <div class="form-group col-md-6">
+                <label asp-for="MobileNo" class="control-label"> Mobile No.</label>
+                 <div class = "col-md-8"> 
+                <input asp-for="MobileNo" id="txtMobNo" class="form-control" />
+                <span asp-validation-for="MobileNo" class="text-danger"></span>
+            </div>
+            </div>
+              <div class="form-group col-md-6">
+                <label asp-for="AuthCode" class="control-label">Auth Code</label>
+                 <div class = "col-md-8"> 
+                <input asp-for="AuthCode" id="txtauthcode" class="form-control" />
+                <span asp-validation-for="AuthCode" class="text-danger"></span>
+            </div>
+            </div>
+            </div>
+            </div>
+            </div>
+            </div>
+            <div class="accordion-item rounded-3 border-0 mb-2 shadow">
+                <h3 class="accordion-header">
+                    <button class="accordion-button border-bottom collapsed fw-semibold" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#admin-details" aria-expanded="false"
+                            aria-controls="admin-details">
+                        &#11162 Admin Details
+                    </button>
+                </h3>
+                <div id="admin-details" class="accordion-collapse collapse" data-bs-parent="#agile-connect-arm">
+                    <div class="accordion-body">
+              <div class="input-group">
+                 <div class="form-group col-md-6">
+                <label asp-for="Admin" class="control-label"> Admin</label>
+                 <div class = "col-md-8"> 
+                <input asp-for="Admin" id="txtadmin" class="form-control" />
+                <span asp-validation-for="Admin" class="text-danger"></span>
+            </div>
+            </div>
+              <div class="form-group col-md-6">
+                <label asp-for="loginPassword" class="control-label">loginPassword</label>
+                 <div class = "col-md-8">
+                    <input asp-for="loginPassword" id="txtloginpsswrd" class="form-control" />
+                    <span asp-validation-for="loginPassword" class="text-danger"></span>
+            </div>
+            </div>
+                          <div class="form-group col-md-6">
+                <label asp-for="AdminEmailId" class="control-label"> Email Address</label>
+                 <div class = "col-md-8"> 
+                <input asp-for="AdminEmailId" id="txtAdminEmail"  class="form-control" />
+                <span asp-validation-for="AdminEmailId" class="text-danger"></span>
+            </div>
+            </div>
+      </div>
+      </div>
+      </div>
+      </div>
+            <div class="accordion-item rounded-3 border-0 mb-2 shadow">
+                <h3 class="accordion-header">
+                    <button class="accordion-button border-bottom collapsed fw-semibold" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#key-details" aria-expanded="false"
+                            aria-controls="key-details">
+                        &#11162 Key
+                    </button>
+                </h3>
+                <div id="key-details" class="accordion-collapse collapse" data-bs-parent="#agile-connect-arm">
+                 <div class="accordion-body">
+              <div class="input-group">
+               <div class="form-group col-md-6">
+                <label asp-for="KeyInterval" class="control-label">Key Interval</label>
+                 <div class = "col-md-8"> 
+                <input asp-for="KeyInterval" id="txtkeyInterval"  class="form-control" />
+                <span asp-validation-for="KeyInterval" class="text-danger"></span>
+              </div>
+            </div>           
+            <div class="form-group col-md-6">
+             
+                <input type="submit" value="Refresh Key" class="btn btn-secondary" />
+            </div>
+             <div class="form-group col-md-6">
+                <label asp-for="PrivateKey" class="control-label">Key</label>
+                 <div class = "col-md-8"> 
+                <input asp-for="PrivateKey" ReadOnly="true" id="txtkey"  class="form-control" />
+                </div>
+            </div>
+       </div>
+ </div>
+ </div>
+ </div>
+            @*<div class="form-group">
+                <input type="submit" value="Configure" class="btn btn-primary" />
+            </div>*@
+
+        </form>
+    </div>
+    </div>
+ 
+ 
+
+@section Scripts {
+
+    <style>
+
+        .form-group.col-md-6 {
+            margin-top: 10px;
+            margin-bottom: 15px;
+        }
+
+        label {
+            margin-left: 0;
+            font-weight: 500;
+            margin-bottom: 10px;
+        }
+
+        h2 {
+            font-size: 20px;
+            letter-spacing: 2px;
+        }
+
+        span.btn-label {
+            padding: 7.6px 12px;
+            background: rgba(0, 0, 0, 0.15);
+            position: relative;
+            left: -12px;
+            border-radius: 3px 0px 0px 3px;
+        }
+
+        label {
+            margin-left: 15px;
+            font-weight: 500;
+        }
+
+        input.btn.btn-secondary {
+            margin: 16px;
+        }
+
+        a {
+            margin-left: 40px;
+            font-weight: 600;
+            text-decoration:none;
+        }
+
+            a#SignOut {
+                position: absolute;
+                top: 25px;
+                right: 40px;
+                font-size: large;
+            }
+
+        .p-4 {
+            padding: 1rem !important;
+        }
+    </style>
+
+    <script type="text/javascript">
+ $(document).ready(function () {
+
+     
+     var JObj = '';
+        JObj = JSON.stringify(@Html.Raw(ViewBag.ARMText));
+      
+   
+        if (JObj != undefined && JObj!='') {
+         JObj = JSON.parse(JObj);
+            console.log(JObj);
+           $("#txtfrom").val(JObj.EmailGateway.From);
+           $("#txtSmtpServer").val(JObj.EmailGateway.SmtpServer);
+           $("#txtPort").val(JObj.EmailGateway.Port);
+           $("#txtUsername").val(JObj.EmailGateway.Username);
+           $("#txtPassword").val(JObj.EmailGateway.Password);
+           $("#txtServer").val(JObj.EmailGateway.Server);
+          $("#txtuserto").val(JObj.SMSGateway.userto);
+          $("#txtuserfrom").val(JObj.SMSGateway.userfrom);
+          $("#txtMessage").val(JObj.SMSGateway.message);
+          $("#txtMobNo").val(JObj.WhatsappLogin.Mobile);
+          $("#txtauthcode").val(JObj.WhatsappLogin.AuthCode);
+           $("#txtadmin").val(JObj.AdminInstance.admin);
+          $("#txtloginpsswrd").val(JObj.AdminInstance.loginPassword);
+          $("#txtAdminEmail").val(JObj.AdminInstance.adminEmailId);
+           $("#txtkeyInterval").val(JObj.KeyData.keyInterval);
+          $("#txtkey").val(JObj.KeyData.privateKey);
+          
+       
+  
+     }
+    });
+ 
+
+</script>
+}

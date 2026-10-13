@@ -1,0 +1,481 @@
+@charset "UTF-8";
+
+
+
+
+:root {
+	--En-blue: #4F96F7;
+	--Ver-rose: #E95A92;
+	--Dep-Orange: #F98036;
+	--off-pink: #D189E1;
+	--light-btn-text: #2F2F65
+}
+
+body {
+	font-size: 1.1rem !important; overflow-x: hidden;
+	
+}
+
+#Process_Flow .card {
+	border: 1px solid #eeeeef !important;
+	box-shadow: none !important;
+	border-radius: 0 !important;
+}
+#Process_Flow .content {
+	padding: 0 !important;
+	background: #fff;
+	width: 99.9%;
+}
+
+#Process_Flow .min-vh-100 {
+	min-height: 90vh !important;
+}
+#Process_Flow .vh-100 {
+	height: 90vh !important;
+}
+
+/* #PROFLOW_Left.vh-100, #PROFLOW_Right.vh-100, #PROFLOW_Left.min-vh-100, #PROFLOW_Right.min-vh-100 {
+	height: 98vh !important;
+	min-height: 98vh !important;
+} */
+
+.PROFLOW-name {
+	font-size: 1.15rem;
+	font-weight: bold !important;
+}
+
+.PROFLOW-page-Title {
+	background: #f5f6f8;
+	padding: 8px 22px;
+	margin-bottom: 2px !important;
+}
+#PROFLOW_Left .tree-footer {
+	padding: 0 20px !important;
+	border-right: 1px solid #eeeeef;
+}
+#PROFLOW_Right .card-body {
+	padding-top: 0;
+}
+#PROFLOW_Right .PROFLOW-page-Title {
+	background: transparent;
+	text-align: center;
+	border-bottom: 1px dashed #eeeeef;
+	font-size: 1.3rem !important; display: none;
+}
+
+#PROFLOW_Left {
+	padding-right: 0; margin-top: 0;
+  }
+  #PROFLOW_Right {
+	padding-left: 0; margin-top: 0;
+  }
+  #PROFLOW_Right .card {
+	border-left: 0 !important;
+}
+
+/* -------------------------------------------------------------------------
+  VERTICAL STEPPERS
+-------------------------------------------------------------------------- */
+
+		/* Steps */
+		.step {
+			position: relative;
+			min-height: 1em;
+			color: gray;
+		}
+
+		.step+.step {
+			margin-top: 1em
+		}
+
+		.step>div:first-child {
+			position: static;
+			height: 0;
+		}
+
+		.step>div:not(:first-child) {
+			margin-left: 1.5em;
+			padding-left: 1em;
+		}
+
+		.step.step-active {
+			color: #1bb587
+		}
+
+		/* .circle.success {
+	background: #1bb587; 	border-color: #1bb587 !important;
+} */
+
+/* .step.step-active .circle {
+	background-color: #fff;
+	border: 1px solid #1bb587 !important;
+	color: #1bb587;
+} */
+
+.step.step-active .circle {
+	background-color: #006cff;
+	border: 1px solid #006cff !important;
+	color: #fff;
+}
+
+.step.step-completed .circle {
+	color: #fff;
+	background: #1bb587; 	border-color: #1bb587 !important;
+}
+
+.circle.pending {
+	background: #ffbc20;
+	border-color: #ffbc20 !important;
+}
+
+		/* Circle */
+		.circle {
+			background: #fff;
+			position: relative;
+			width: 1.7em;
+			height: 1.7em;
+			line-height: 1.5em;
+			border-radius: 100%;
+			color: #838383;
+			text-align: center;
+			box-shadow: 0 0 0 3px #fff;
+			border: 1px solid #ccc !important;
+		}
+
+	
+		.step .line {
+			top: 23px;
+		  left: 12px;
+		  height: 100%;
+			 position: absolute;
+			border-left: 1px solid  rgba(0, 0, 0, 0.1);;
+		}
+		.step:last-child .line {
+			display: none
+		}
+
+		/* Stepper Titles */
+		.PROFLOW-Info-Steps .title {
+			line-height: 1.5em;
+			font-weight: bold;
+			color: #3f4254 !important;
+			transition: all ease 0.3s;
+			margin-bottom: 5px;
+		}
+		.PROFLOW-Info-Steps .title:hover {
+			padding-left: 4px;
+		}
+		.PROFLOW-Info-Steps .title a {
+			color: inherit;
+			text-decoration: none;
+			transition: all ease 0.3s;
+		}
+
+		.caption {
+			font-size: 0.8em;
+		}
+
+		.Task-process-list {
+			padding: 5px 0;
+		}
+		  .Task-process-list a {
+			color: #333;
+		  }
+
+		/*Profile*/
+		.PROFLOW-profile-wrap {
+			padding: 15px ;
+			border-bottom: 1px solid #eeeeef;
+			/* margin-bottom: 25px; */
+			position: fixed; 
+			z-index: 9;
+			 width: 22.5%;
+			background: white;
+		}
+
+		.PROFLOW-steps-counts {
+			/* position: absolute;
+			left: 6px;
+			top: 1px; */ font-size: 12px;
+		}
+		  .circle i {
+			display: none;
+		  }
+		  
+		  .circle.success .PROFLOW-steps-counts,.circle.pending .PROFLOW-steps-counts {
+			/* display: none; */ color: #fff;
+		  }
+
+		  /* .circle.success i,.circle.pending i  {
+			display: block;
+			color: #fff;
+			position: relative;
+			top: 5px;
+		} */
+
+.profile-progress-bar{ background: #d9d9d9 !important; }
+/* .step.step-active .Task-process-list.Active a::after { */
+	.Task-process-list.Active a::after {
+	position: absolute;
+	content: "";
+	width: 8px;
+	height: 8px;
+	background: #1eb688;
+	border-radius: 50px;
+	margin-top: 8px;
+	/* left: 0; */
+	margin-left: 6px;
+}
+
+
+.circle.success:after {
+	background-color: #1eb588;
+  }
+  .circle.pending::after {
+	background-color: orange;
+  }
+
+  .step .title a {
+	text-decoration: none aliceblue;
+	color: #333 !important;
+	font-size: 1.1rem !important;
+}
+.accordion .accordion-header {
+	cursor: pointer;
+	border-bottom: 1px solid #eeeeef;
+	
+}
+.accordion .accordion-body {
+	margin-top: 10px;
+}
+
+.accordion-header.collapsed h3 {
+	font-weight: normal !important;
+}
+
+.accordion.accordion-icon-toggle .mb-5 {
+	margin: 0 !important;
+}
+
+#PROFLOW_Left .card-body {
+	overflow-y: scroll;
+	padding-top: 0;
+	padding-left: 10px !important;
+	padding-right: 10px !important;
+}
+
+.PROFLOW-Info-Steps {
+	padding-top: 20px;
+	padding-left: 7px;
+}
+#PROFLOWloyeeInfoSteps .accordion-body {
+	padding-left: 10px !important;
+}
+#PROFLOWloyeeInfoSteps .accordion .accordion-header h3 {
+	font-size: 15px !important;
+	margin-left: 10px !important;
+}
+.step.step-active .title a {
+	font-weight: bold; white-space: nowrap;
+}
+::-webkit-scrollbar {
+	width: 2px;
+  }
+  #ProcessTitle.card-header {
+	padding: 8px 15px 12px 19px;
+	min-height: auto !important;
+}
+
+#Create_process {
+	background: #006cff !important;
+	border-radius: 4px;
+	color: #fff !important;
+	display: flex;
+  }
+  #Create_process .material-icons {
+	color: white !important;
+	margin-right: 0;
+  }
+  #process-name, #process-ref {
+	padding-bottom: 4px;
+}
+
+#ProcessTitle .card-toolbar{ align-items: flex-start !important; }
+
+.Processflow-Icons .btn{ padding: 0 !important ; background: transparent !important; }
+.Task-process-list.status-disabled {
+	pointer-events: none;
+	cursor: not-allowed;
+	opacity: 0.5;
+}
+
+
+.Task-process-list.Completed:after {
+	content: "\e86c";
+   color: #47BE7D;
+   margin-top: -4px;
+   margin-left: 10px;
+   font-family: "Material Icons Outlined";
+   position: absolute;
+   font-size: 21px;
+}
+.step.step-completed .line {
+	border-left: 1px solid rgb(31, 181, 136);
+}
+
+
+/* .Task-process-list.status-made:after {
+  content: "\e85d";
+ color: orange;
+ margin-top: -4px;
+ margin-left: 10px;
+ font-family: "Material Icons Outlined";
+ position: absolute;
+ font-size: 21px;
+}
+.Task-process-list.status-approved:after {
+  content: "\e86c";
+  color: #47BE7D;
+  margin-top: -4px;
+  margin-left: 10px;
+  font-family: "Material Icons Outlined";
+  position: absolute;
+  font-size: 21px;
+}
+.Task-process-list.status-rejected:after {
+  content: "\e5c9";
+  color: red;
+  margin-top: -4px;
+  margin-left: 10px;
+  font-family: "Material Icons Outlined";
+  position: absolute;
+  font-size: 21px;
+}
+.Task-process-list.status-returned:after {
+  content: "\e15e";
+  color: blueviolet;
+  margin-top: -4px;
+  margin-left: 10px;
+  font-family: "Material Icons Outlined";
+  position: absolute;
+  font-size: 21px;
+}
+.Task-process-list.status-forwarded:after {
+  content: "\e154";
+  color: brown;
+  margin-top: -4px;
+  margin-left: 10px;
+  font-family: "Material Icons Outlined";
+  position: absolute;
+  font-size: 21px;
+}
+.Task-process-list.status-checked:after {
+  content: "\e877";
+  color: #47BE7D;
+  margin-top: -4px;
+  margin-left: 10px;
+  font-family: "Material Icons Outlined";
+  position: absolute;
+  font-size: 21px;
+} */
+
+/* .Task-process-list.Completed:after {
+	content: "\e86c";
+   color: #47BE7D;
+   margin-top: -4px;
+   margin-left: 10px;
+   font-family: "Material Icons Outlined";
+   position: absolute;
+   font-size: 21px;
+} */
+.step.step-completed .line {
+	border-left: 1px solid rgb(31, 181, 136);
+}
+
+
+
+.Task-process-list.status-rejected::after, .Task-process-list.status-returned::after, .Task-process-list.status-forwarded::after, .Task-process-list.status-checked::after, .Task-process-list.status-made::after, .Task-process-list.status-approved::after {
+	margin-top: 1px;
+	margin-left: 5px;
+	font-size: 10px;
+	padding: 2px 10px;
+	border-radius: 50px;
+	position: absolute;
+	right: 0;
+}
+
+
+.Task-process-list.status-made:after {
+    content: "Made";
+    background: #ffeeaf;
+
+    color: #91730a !important;
+}
+.Task-process-list.status-approved:after {
+    content: "Approved";
+    background: #e2f0cc;
+    color: #43522d;
+}
+
+
+.Task-process-list.status-rejected:after {
+    content: "Rejected";
+    background: #fff5f8;
+
+    color: #f1416c;
+}
+.Task-process-list.status-returned:after {
+    content: "Returned";
+    background: #eff2f5;
+
+    color: #181C32;
+}
+.Task-process-list.status-forwarded:after {
+    content: "Forwarded";
+    background: #f8f5ff;
+
+    color: #743cea;
+}
+.Task-process-list.status-checked::after {
+	content: "Checked";
+	background: #d0ffe5;
+	color: #308055;
+}
+
+#ProcessTitle .card-title {
+	width: 79%;
+  }
+  #ProcessTitle .searchBoxChildContainer {
+	position: absolute;
+	top: 42px;
+  }
+
+  #ProcessTitle .select2-selection.select2-selection--single.keyvalues-select.form-control {
+	min-height: 37px;
+}	 
+
+
+@media screen and (max-width: 768px) {
+
+
+	.visibleMobileCol { 
+		word-break: inherit !important; 
+	}
+	.buz-logo {
+		display: block;
+	}
+	/* .content {
+	  padding: 1.75rem 1rem 0 1rem !important;
+  } */
+  .card-body.iviewTableWrapper {
+	  padding: 0 !important;
+  }
+
+.PROFLOW-profile-wrap {
+    width: 100% !important;
+	position: inherit !important;
+}
+.PROFLOW-Info-Steps {
+    padding-top: 0 !important;
+}
+}

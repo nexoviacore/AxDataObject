@@ -1,0 +1,98 @@
+﻿@model IEnumerable<ARMCommon.Model.ARMNotificationTemplate>
+
+@{
+    ViewData["Title"] = "List";
+}
+
+<h3>Notification Templates</h3>
+  @*  <a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a> *@
+
+<div class="connect-app d-flex justify-content-between mt-3 mb-3">
+    <div class="arm-back-list">
+        <a asp-controller="ARMInstance" asp-action="Configure" id="redirectApp" class="redirectButton btn btn-primary" title="redirectButton">
+            <span class="btn-label"><i class="fa-solid fa-arrow-left"></i></span> Back To ARM
+        </a>
+    </div>
+    <div class="create-app">
+        <a asp-action="Create" id="redirectApp" class="redirectButton btn btn-primary" title="redirectButton">
+            <span class="btn-label"><i class="fa-solid fa-pen-to-square"></i></span> Create App
+        </a>
+    </div>
+</div>
+
+<hr />
+
+@if (Model != null && Model.Any())
+{
+<table class="table">
+    <thead>
+        <tr>
+            <th>
+                @Html.DisplayNameFor(model => model.AppName)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.TemplateId)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.TemplateString)
+            </th>
+            <th> Action</th>
+        </tr>
+    </thead>
+    <tbody>
+@foreach (var item in Model) {
+        <tr>
+            <td>
+                @Html.DisplayFor(modelItem => item.AppName)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.TemplateId)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.TemplateString)
+            </td>
+            <td>
+                <a asp-action="Edit" asp-route-id="@item.Id">Edit</a> |
+                <a asp-action="Delete" asp-route-id="@item.Id">Delete</a>
+            </td>
+        </tr>
+}
+    </tbody>
+</table>
+}
+else
+{
+    <div class="alert alert-info" role="alert">
+        No apps found.
+    </div>
+}
+
+ @section Scripts {
+
+    <style>
+
+        a#SignOut {
+            position: absolute;
+            top: 19px;
+            right: 40px;
+            font-size: large;
+        }
+
+        a {
+            text-decoration: none;
+        }
+
+        th, td {
+            text-align: center;
+        }
+
+        h3 {
+            font-size: 20px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+    </style>
+ 
+}
+
+

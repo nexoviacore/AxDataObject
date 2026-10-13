@@ -1,0 +1,60 @@
+@baseUrl = http://localhost:5116
+
+# Before running these requests:
+# 1. Apply src/AxData.Infrastructure/Sql/Migrations/Postgres/001_AxDataObjectInstance.sql.
+# 2. Start the worker in PowerShell after setting:
+#    $env:AXDATA_REDIS_CONNECTION = "localhost:6385"
+#    $env:AXDATA_POSTGRES_CONNECTION = "<axdata-snapshot-connection-string>"
+#    $env:AXDATA_TENANT_ID = "sample-tenant"
+#    dotnet run --no-restore --project src/AxData.Workers
+# 3. Start the API in another PowerShell after setting:
+#    $env:ASPNETCORE_ENVIRONMENT = "Development"
+#    $env:AxData__M1__Enabled = "true"
+#    $env:AxData__Postgres__ConnectionString = $env:AXDATA_POSTGRES_CONNECTION
+#    dotnet run --no-restore --project src/AxData.Api
+
+### Init
+# @name init
+POST {{baseUrl}}/api/v1/axdata
+Content-Type: application/json
+
+{
+  "transId": "sample-order",
+  "key": null
+}
+
+### Set: creates a line and calculates amount = qty x rate
+@objectId = {{init.response.body.$.objectId}}
+POST {{baseUrl}}/api/v1/axdata/{{objectId}}/set
+Content-Type: application/json
+If-Match: "1"
+
+{
+  "getDeps": true,
+  "data": {
+    "lines": {
+      "rows": [
+        {
+          "rowId": "tmp:1",
+          "action": "n",
+          "fields": {
+            "item": "widget",
+            "rate": 12.5,
+            "qty": 2
+          }
+        }
+      ]
+    }
+  }
+}
+
+### Get from Redis; expect version 2 and amount 25.0
+GET {{baseUrl}}/api/v1/axdata/{{objectId}}
+
+### Pause here until the worker reports acknowledged=1.
+# Evict only this active-state key in Memurai CLI. Replace OBJECT_ID with the Init response value in uppercase:
+# memurai-cli -p 6385 DEL "AXD:{SAMPLE-TENANT}:OBJECT_ID"
+
+### Get after eviction; expect the same version/data, recovered from Postgres
+GET {{baseUrl}}/api/v1/axdata/{{objectId}}
+

@@ -1,0 +1,28 @@
+{
+  "emailGateway": {
+    "From": "AgileConnect",
+    "SmtpServer": "smtp.gmail.com",
+    "Port": null,
+    "Username": "diptimahara8@gmail.com",
+    "Password": "fqvppytpcxvwapxj",
+    "Server": "Gmail"
+  },
+  "SMSGateway": {
+    "userto": "diptimahara8@gmail.com",
+    "userfrom": "deeptisingh-@agile-labs.com",
+    "message": "Hi wahtssup"
+  },
+  "WhatsappLogin": {
+    "Mobile": "7876787887",
+    "AuthCode": "788658"
+  },
+  "AdminInstance": {
+    "admin": "admin",
+    "Password": "agile",
+    "AdminEmailId": "deeptisingh@agile-labs.com"
+  },
+  "KeyData": {
+    "KeyInterval": 10,
+    "PrivateKey": "Lo6LKOhAsoRZWYKl"
+  }
+}

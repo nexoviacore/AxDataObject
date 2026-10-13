@@ -1,0 +1,21 @@
+.page-header {
+    width: 100%;
+    margin: 0;
+    border: 0;
+    padding: 0;
+    min-height: 40px;
+    filter: none;
+    background-color: #fff;
+    box-shadow: 0 2px 5px 0 rgb(0 0 0 / 16%), 0 2px 10px 0 rgb(0 0 0 / 12%);
+}
+.align-middle i{font-size: 19px;  line-height: 40px;}
+.align-middle img{ margin-top:6px; width:100%;}
+.namect strong{font-size: 13px;}
+.namect span{ font-size:12px; line-height: 13px; display: block;}
+.icctrlpa span i{ font-size: 21px;  letter-spacing: 13px; line-height: 38px; display: block;}
+.headbg-kau{ background-color: #8B3365;   color: #fff;}
+.page-header-fixed{width: 100%; display: block; position: fixed;}
+.lablectrl-mo label{ font-size:14px; font-weight: 700; border-bottom: 1px dotted #c7bdbd;}
+fieldset:not(:first-of-type), #plotTable {
+    display: none;
+ }

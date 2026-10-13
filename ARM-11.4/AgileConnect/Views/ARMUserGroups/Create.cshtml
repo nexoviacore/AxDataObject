@@ -1,0 +1,276 @@
+﻿@model ARMCommon.Model.ARMUserGroup
+
+@{
+    ViewData["Title"] = "CreateUserGroup";
+}
+
+
+<h4>Create User Group</h4>
+@* <a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a> *@
+<hr />
+
+<div id="create-box" class="col-md-12">
+    <form asp-action="Create">
+        <div class="create-User d-flex justify-content-between mt-3 mb-3">
+            <div class="back-list">
+                <a id="redirectApp" class="redirectButton btn btn-primary" title="redirectButton" asp-controller="ARMUsers" asp-action="ListByApp" asp-route-Appname="@Html.ValueFor(model => model.AppName)">
+                    <span class="btn-label"> <i class="fa-solid fa-arrow-left"></i></span> Back To List
+                </a>
+            </div>
+            <div class="submit-app">
+                <input type="submit" value="Create" class="btn btn-primary" />
+            </div>
+        </div>
+        <hr />
+        <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+        <div class="input-group row g-5">
+            <div class="form-group col-md-6">
+                <label asp-for="AppName" class="control-label"></label>
+                <div class="col-md-8">
+                    <input asp-for="AppName" ReadOnly="true" id="txtkey" class="form-control" />
+                    @*
+                    <select asp-for="AppName"
+                    asp-items="@(new SelectList(Model.app1,"ID","Name"))" class="form-control">
+                    <option disabled>Please select one</option>
+                    </select>*@
+
+                </div>
+            </div>
+
+            <div class="form-group col-md-6">
+                <label asp-for="Name" class="control-label"></label>
+                <div class="col-md-8">
+                    <input asp-for="Name" class="form-control" required="The Name field is required." />
+                    <span asp-validation-for="Name" class="text-danger"></span>
+                </div>
+            </div>
+
+             <div class="form-group col-md-6">
+                <label class="control-label">Roles</label>
+                <div class="col-md-8">
+                    @Html.ListBoxFor(m => m.Roles, new SelectList(Model.Role, "ID", "Name"), new { @id = "simpleSelect2", @class = "form-control select-multiple", multiple = "multiple" ,required = "Enter Role name"})
+                </div>
+            </div> 
+
+            @* <div class="form-group col-md-6">
+                <div class="form-group">
+                    <label class="control-label">Group Type</label>
+                    <select asp-for="GroupType" id="ddlGroupType" class="form-control">
+                        <option>Select User Group Type</option>
+                        <option value="External">External</option>
+                        <option value="Internal">Internal</option>
+                        <option value="Power">Power</option>
+                    </select>
+                    <span asp-validation-for="GroupType" class="text-danger"></span>
+                </div>
+            </div>
+            <div id="showInternal" style="display:none;">
+                <div class="row mb-3">
+                    <!-- Internal Group Type Details -->
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label class="control-label">Internal Auth Method</label>
+                            <select asp-for="InternalAuthMethod" id="dropdowntipo" class="form-control">
+                                <option>Select Request Method</option>
+                                <option value="HttpGet">GET</option>
+                                <option value="HttpPost">Post</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label asp-for="InternalAuthUrl" class="control-label">Internal Request URL</label>
+                            <input asp-for="InternalAuthUrl" class="form-control" />
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label asp-for="InternalAuthRequest" class="control-label">Internal Request Format (Input JSON)</label>
+                            <input asp-for="InternalAuthRequest" class="form-control" />
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label asp-for="InternalAuthResponse" class="control-label">Internal Response Format (On Success)</label>
+                            <input asp-for="InternalAuthResponse" class="form-control" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="myDiv col-md-10" id="showInternal" style="display:none; margin-left:-16px;">
+
+                <div class="form-group col-md-6">
+                    <label class="control-label"> Internal Auth Method</label>
+                    <div class="col-md-8">
+                        <select asp-for="InternalAuthMethod" id="dropdowntipo">
+                            <option>Select Request Method</option>
+                            <option value="HttpGet"> GET </option>
+                            <option value="HttpPost">Post</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group col-md-10">
+                    <label asp-for="InternalAuthUrl" class="control-label"> Internal Request URL</label>
+                    <div class="col-md-10">
+                        <input asp-for="InternalAuthUrl" class="form-control" />
+                    </div>
+                </div>
+
+                <div class="form-group col-md-10">
+                    <label asp-for="InternalAuthRequest" class="control-label"> Internal Request Format (Input JSON)</label>
+                    <div class="col-md-10">
+                        <input asp-for="InternalAuthRequest" class="form-control" />
+                    </div>
+                </div>
+                <div class="form-group col-md-10">
+                    <label asp-for="InternalAuthResponse" class="control-label"> Internal Response Format (On Success)</label>
+                    <div class="col-md-10">
+                        <input asp-for="InternalAuthResponse" class="form-control" />
+                    </div>
+                </div>
+            </div> *@
+
+
+            <div class="form-group col-md-6">
+                <label class="control-label"> Group Type</label>
+                <div class="col-md-8">
+                    <select asp-for="GroupType" id="ddlGroupType" class="form-control">
+                        <option>Select User Group Type</option>
+                        <option value="External"> External </option>
+                        <option value="Internal">Internal</option>
+                        <option value="Power">Power</option>
+                    </select>
+                    <span asp-validation-for="GroupType" class="text-danger"></span>
+                </div>
+            </div>
+
+           
+            <div class="myDiv col-md-10" id="showInternal" style="display:none; margin-left:-16px;">
+
+                <div class="form-group col-md-6">
+                    <label class="control-label"> Internal Auth Method</label>
+                    <div class="col-md-8">
+                        <select asp-for="InternalAuthMethod" id="dropdowntipo">
+                            <option>Select Request Method</option>
+                            <option value="HttpGet"> GET </option>
+                            <option value="HttpPost">Post</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group col-md-10">
+                    <label asp-for="InternalAuthUrl" class="control-label"> Internal Request URL</label>
+                    <div class="col-md-10">
+                        <input asp-for="InternalAuthUrl" class="form-control" />
+                    </div>
+                </div>
+
+                <div class="form-group col-md-10">
+                    <label asp-for="InternalAuthRequest" class="control-label"> Internal Request Format (Input JSON)</label>
+                    <div class="col-md-10">
+                        <input asp-for="InternalAuthRequest" class="form-control" />
+                    </div>
+                </div>
+                <div class="form-group col-md-10">
+                    <label asp-for="InternalAuthResponse" class="control-label"> Internal Response Format (On Success)</label>
+                    <div class="col-md-10">
+                        <input asp-for="InternalAuthResponse" class="form-control" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group col-md-12">
+                <div class="form-group col-md-6 form-check" id="isactive">
+                    <label class="form-check-label">
+                        <input class="form-check-input" asp-for="IsActive" /> @Html.DisplayNameFor(model => model.IsActive)
+                    </label>
+                </div>
+            </div>
+  
+    </form>
+</div>
+
+@section Scripts {
+    <style>
+        div#create-box {
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 6px 0 #ddd;
+        }
+
+        label {
+            font-weight: 500;
+            margin: 0 0 8px 0;
+            text-transform: capitalize;
+        }
+
+        a {
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+            a#SignOut {
+                position: absolute;
+                top: 25px;
+                right: 40px;
+                font-size: large;
+            }
+
+        h2#create-user {
+            font-size: 20px;
+            letter-spacing: 2px;
+        }
+
+
+        label {
+            margin-left: 16px;
+            font-weight: 500;
+        }
+
+        a {
+            margin-left: 44px;
+            font-weight: 500;
+        }
+
+            a#SignOut {
+                position: absolute;
+                top: 19px;
+                right: 40px;
+                font-size: large;
+            }
+
+        select#ApprovalType {
+            padding-left: 25px;
+            padding-right: 25px;
+        }
+    </style>
+
+    <script src="~/lib/select2/js/select2.full.min.js"></script>
+    <script src="~/js/select2.js"></script>
+
+    <script type="text/javascript">
+        $(document).ready(function () {
+
+            $('#ddlGroupType').on('change', function () {
+                var demovalue = $(this).val();
+                $("div.myDiv").hide();
+                $("#show" + demovalue).show();
+
+            });
+
+            $("#simpleSelect2").select2({
+                multiple: true,
+                closeOnSelect: false,
+                placeholder: "Please select the user groups...",
+                allowHtml: true,
+                allowClear: true,
+                tags: true
+            });
+
+        });
+    </script>
+
+}

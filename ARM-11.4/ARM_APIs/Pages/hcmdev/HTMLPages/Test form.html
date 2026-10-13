@@ -1,0 +1,93 @@
+<html xmlns="http://www.w3.org/1999/xhtml"><head runat="server">
+
+    <title>Process Flow</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="../../UI/axpertUI/style.bundle.css">
+    <link rel="stylesheet" href="../../UI/axpertUI/plugins.bundle.css">
+    <link rel="stylesheet" href="../../ThirdParty/jquery-confirm-master/jquery-confirm.min.css">
+    <link rel="stylesheet" href="../HTMLPages/css/AxProcessFlow.css?v=1" type="text/css">
+</head>
+
+<body id="Process_Flow" class="header-fixed header-tablet-and-mobile-fixed aside-fixed">
+    <div class="content d-flex flex-column flex-column-fluid ">
+        <!--begin::Container-->
+        <div class="" id="pf_content_container">
+            <!--begin::Row-->
+            <div class="row g-xl-8" id="PROFLOW-overalldiv">
+                <h1 class="PROFLOW-page-Title text-dark fw-bolder  fs-4">Process Flow</h1>
+                <!--begin:::Col-->
+                <div class="col-xl-3 col-md-3 d-flex flex-column flex-column-fluid vh-100 min-vh-100" id="PROFLOW_Left">
+
+                    <div class="card card-xl-stretch shadow-sm flex-root h-1px  ">
+                        <div class="card-header " id="ProcessTitle">
+                            <!--begin::Title-->
+                            <h3 class="card-title align-items-start flex-column">
+                                <span class="card-label fw-bold text-dark" id="process-name"></span>
+                                <span class="text-gray-700 mt-1 fw-semibold fs-6" id="process-ref"></span>
+                                <span class="badge badge-light-info Process-status" id="process-status">In Progress</span>
+                            </h3>
+                            <!--end::Title-->
+                            <!--begin::Toolbar-->
+                            <div class="card-toolbar d-flex Processflow-Icons">
+                                <div class="d-flex ms-auto">
+                                    <div data-popper-placement="bottom-end" data-kt-menu="true" class="w-250px menu menu-sub menu-sub-dropdown menu-column   show searchBoxChildContainer search initialized d-none">
+                                        <div class="icon">
+
+                                            <select class="keyvalues-select form-control" id="keyvalues-select" placeholder="Search..."><option></option></select>
+
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <a href="#" class="btn btn-sm btn-light"><span class="material-icons material-icons-style material-icons-2" onclick="axProcessObj.openSearch()">search</span></a>
+
+                                <a href="#" class="btn btn-sm btn-light " id="Create_process" onclick="axProcessObj.refreshProcess('');"><span class="material-icons material-icons-style material-icons-2">add</span></a>
+                            </div>
+                            <!--end::Toolbar-->
+                        </div>
+                        <!--begin::Body-->
+                        <div class="card-body h-300px ">
+
+                            <div id="PROFLOW-profile-container">
+                                <div class="PROFLOW-Info-Steps ax-data accordion arrows" id="procflow-steps">
+                                </div>
+
+                            </div>
+                            <!--end::Body-->
+                        </div>
+                    </div>
+
+                </div>
+                <!--end:::Col-->
+                <!--begin:::Col-->
+                <div class="col-xl-9  col-md-9 d-flex flex-column flex-column-fluid vh-100 min-vh-100" id="PROFLOW_Right">
+                    <div class="card card-xl-stretch shadow-sm flex-root h-1px">
+                        <iframe class="" style="height: calc(100% - 0px);width: calc(100% - 0px);" id="rightIframe"></iframe>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+    <div id="waitDiv" class="page-loader rounded-2 bg-radial-gradient">
+        <div class="loader-box-wrapper d-flex bg-white p-20 shadow rounded">
+            <span class="loader"></span>
+        </div>
+    </div>
+    <script src="../../UI/axpertUI/plugins.bundle.js"></script>
+    <script src="../../UI/axpertUI/scripts.bundle.js"></script>
+    <script type="text/javascript" src="../../ThirdParty/jquery-confirm-master/jquery-confirm.min.js"></script>
+    <script type="text/javascript" src="../../Js/alerts.min.js"></script>
+    <script src="../../js/handlebars.js"></script>
+
+    <script src="../../js/common.js"></script>
+    <script src="../../CustomPages/js/custom_common.js"></script>
+    <script src="../HTMLPages/js/AxProcessFlow.js?v=1"></script>
+
+
+	<script type="text/javascript">
+        var _processName = 'POP';
+    </script>
+
+</body></html>
+

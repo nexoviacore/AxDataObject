@@ -1,0 +1,154 @@
+﻿@model ARMCommon.Model.ARMHtml
+@{
+    ViewData["Title"] = "Edit";
+
+}
+
+<a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a>
+
+<h2>HTML Pages</h2>
+
+<div class="connect-app d-flex justify-content-between mt-3 mb-3">
+    <div class="back-list">
+        <a asp-controller="ARMHtml" asp-action="ListByApp" asp-route-Appname="@Html.ValueFor(model => model.AppName)" id="redirectApp" class="redirectButton btn btn-primary" title="redirectButton"><span class="btn-label"> <i class="fa-solid fa-arrow-left"></i></span> Back To List </a>
+    </div>
+    <div class="configure-app">
+        <input type="submit" value="Save" class="btn btn-primary" />
+    </div>
+</div>
+
+<hr />
+
+<div id="arm-edit" class="arm-edit">
+    <div class="col-md-12">
+        <form asp-action="Edit">
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+            <input type="hidden" asp-for="ID" />
+            <div class="row">
+                <div class="form-group col-md-6">
+                    <label asp-for="AppName" class="control-label"></label>
+                    <input asp-for="AppName" ReadOnly="true" id="txtkey" class="form-control" />
+                </div>
+                <div class="form-group col-md-6">
+                    <label asp-for="DefinitionID" class="control-label">HTML Page</label>
+                    <input asp-for="DefinitionID" class="form-control" />
+                    <span asp-validation-for="DefinitionID" class="text-danger"></span>
+                </div>
+
+                <div class="form-group col-md-3">
+                    <div class="form-group form-check ">
+                        <label class="form-check-label">
+                            <input class="form-check-input" asp-for="AllowAnonymousAccess" /> Allow Anonymous Access?
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group col-md-12">
+                    <label asp-for="DefinitionHTML" class="control-label">HTML Text</label>
+                    <textarea id="DefinitionHTML" asp-for="DefinitionHTML" class="form-control"></textarea>
+                    <span asp-validation-for="DefinitionHTML" class="text-danger"></span>
+                </div>
+
+
+                <div class="form-group col-md-12">
+                    <label class="control-label">User group permissions</label>
+                    @Html.ListBoxFor(m => m.selectedUserGroups, new SelectList(Model.UserGroups, "ID", "Name"), new { @id = "ddlUserGroups", @class = "form-control select-multiple", multiple = "multiple" })
+                </div>
+
+                <div class="form-group col-md-2 mt-2 mb-2">
+                    <input id="chkAllUserGroups" type="checkbox"> Select All
+                </div>
+
+
+            </div>
+
+            @*<div class="form-group col-md-6">
+                <div class="">
+                    <input type="submit" value="Save" class="btn btn-primary" />
+                </div>
+            <a asp-controller="ARMHtml" asp-action="ListByApp" asp-route-Appname="@Html.ValueFor(model => model.AppName)">Back to List</a>*@
+        </form>
+    </div>
+</div>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.63.3/codemirror.min.css" integrity="sha512-6sALqOPMrNSc+1p5xOhPwGIzs6kIlST+9oGWlI4Wwcbj1saaX9J3uzO3Vub016dmHV7hM+bMi/rfXLiF5DNIZg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.63.3/theme/material.min.css" integrity="sha512-jA21084nir3cN96YuzJ1DbtDn30kxhxqQToAzCEGZcuRAswWfYirpUu8HVm8wRNoWDCYtA4iavd2Rb1bQSLv7g==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.63.3/codemirror.min.js" integrity="sha512-XMlgZzPyVXf1I/wbGnofk1Hfdx+zAWyZjh6c21yGo/k1zNC4Ve6xcQnTDTCHrjFGsOrVicJsBURLYktVEu/8vQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.63.3/mode/xml/xml.min.js" integrity="sha512-UWfBe6aiZInvbBlm91IURVHHTwigTPtM3M4B73a8AykmxhDWq4EC/V2rgUNiLgmd/i0y0KWHolqmVQyJ35JsNA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.63.3/mode/css/css.min.js" integrity="sha512-UB/NeigW3LreuA/sHVVcykCf2FzhzHlk0BpsanfK8VmvvLFLUof1ysy1hCOYhyqlfCY8HW7w8qh/rsUJZLMpIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.63.3/mode/javascript/javascript.min.js" integrity="sha512-DJ/Flq7rxJDDhgkO49H/rmidX44jmxWot/ku3c+XXEF9XFal78KIpu7w6jEaQhK4jli1U3/yOH+Rp3cIIEYFPQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.63.3/mode/htmlmixed/htmlmixed.min.js" integrity="sha512-IC+qg9ITjo2CLFOTQcO6fBbvisTeJmiT5D5FnXsCptqY8t7/UxWhOorn2X+GHkoD1FNkyfnMJujt5PcB7qutyA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+@section Scripts {
+    <style>
+
+        a#SignOut {
+            position: absolute;
+            top: 19px;
+            right: 40px;
+            font-size: large;
+        }
+
+        div#arm-edit{
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 6px 0 #ddd;
+        }
+        a{
+            text-decoration:none;
+        }
+        h2{
+            font-size:20px;
+            text-transform:uppercase;
+            letter-spacing:0.6px;
+        }
+
+        label.control-label {
+            margin-top: 10px;
+            margin-bottom: 5px;
+        }
+
+        .select2-container {
+            display: contents;
+        }
+    </style>
+
+    <script src="~/lib/select2/js/select2.full.min.js"></script>
+    <script type="text/javascript">
+        $(document).ready(function () {
+
+            var defHtmlEditor = CodeMirror.fromTextArea(document.getElementById('DefinitionHTML'), {
+                height: "350px",
+                lineNumbers: true,
+                mode: "htmlmixed",
+                theme: "material"
+            });
+
+            defHtmlEditor.on('change', function (cMirror) {
+                // get value right from instance
+                document.getElementById('DefinitionHTML').value = cMirror.getValue();
+            });
+
+            $("#ddlUserGroups").select2({
+                multiple: true,
+                closeOnSelect: false,
+                placeholder: "Please select the user groups...",
+                allowHtml: true,
+                allowClear: true,
+                tags: true
+            });
+
+            $("#chkAllUserGroups").click(function () {
+                if ($("#chkAllUserGroups").is(':checked')) {
+                    $("#ddlUserGroups > option").prop("selected", "selected");
+                    $("#ddlUserGroups").trigger("change");
+                } else {
+                    $("#ddlUserGroups").val('').trigger("change");
+                }
+            });
+        });
+
+    </script>
+}

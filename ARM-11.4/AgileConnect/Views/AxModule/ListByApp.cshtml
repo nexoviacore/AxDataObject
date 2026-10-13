@@ -1,0 +1,61 @@
+﻿@model IEnumerable<ARMCommon.Model.AxModule>
+
+@{
+    ViewData["Title"] = "AxModule";
+}
+
+<h4>Module Lists</h4>
+   <a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a>
+<p>
+    <a asp-action="Create" asp-route-Appname=@ViewBag.result>Create New</a>
+</p>
+<table class="table">
+    <thead>
+        <tr>
+            <th>
+                @Html.DisplayNameFor(model => model.ModuleName)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.ModuleDescription)
+            </th>
+ 
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+@foreach (var item in Model) {
+        <tr>
+            <td>
+                @Html.DisplayFor(modelItem => item.ModuleName)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.ModuleDescription)
+            </td>
+ 
+ 
+            <td>
+                <a asp-action="Edit" asp-route-id="@item.Id">Edit</a> |
+                <a asp-action="Delete" asp-route-id="@item.Id">Delete</a>
+            </td>
+        </tr>
+}
+    </tbody>
+</table>
+
+                    <div class="col-sm-6"> 
+     <a asp-controller="ARMApps" asp-action="List"  id="redirectApp" class="redirectButton" title="redirectButton"> View Connected Apps </a>
+   </div>
+    @section Scripts {
+
+    <style>
+ 
+        a#SignOut {
+    position: absolute;
+    top: 19px;
+    right: 40px;
+    font-size: large;
+}
+    </style>
+ 
+}
+

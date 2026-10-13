@@ -1,0 +1,83 @@
+﻿@model IEnumerable<ARMCommon.Model.ARMUser>
+
+@{
+    ViewData["Title"] = "UserList";
+}
+
+<h1>UserList</h1>
+   <a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a>
+<p>
+    <a asp-action="Create">Create User</a>
+</p>
+<table class="table">
+    <thead>
+        <tr>
+            <th>
+                @Html.DisplayNameFor(model => model.appname)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.username)
+            </th>
+ 
+            <th>
+                @Html.DisplayNameFor(model => model.email)
+            </th>
+ 
+            <th>
+                @Html.DisplayNameFor(model => model.usergroup)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.isactive)
+            </th>
+   
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+@foreach (var item in Model) {
+        <tr>
+            <td>
+                @Html.DisplayFor(modelItem => item.appname)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.username)
+            </td>
+ 
+            <td>
+                @Html.DisplayFor(modelItem => item.email)
+            </td>
+ 
+            <td>
+                @Html.DisplayFor(modelItem => item.usergroup)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.isactive)
+            </td>
+ 
+            <td>
+                <a asp-action="Edit" asp-route-id="@item.ID">Edit</a> |
+                <a asp-action="Delete" asp-route-id="@item.ID">Delete</a>
+            </td>
+        </tr>
+}
+    </tbody>
+</table>
+
+       
+    <div class="col-sm-6"> 
+     <a asp-controller="ARMApps" asp-action="List"  id="redirectApp" class="redirectButton" title="redirectButton"> View Connected Apps </a>
+   </div>
+   @section Scripts {
+
+    <style>
+ 
+        a#SignOut {
+    position: absolute;
+    top: 19px;
+    right: 40px;
+    font-size: large;
+}
+    </style>
+ 
+}
+

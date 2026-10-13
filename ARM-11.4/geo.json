@@ -1,0 +1,34 @@
+[
+  {
+    "Interval": 5400,
+    "Radius": 1000,
+    "Source_Location": "HSR Layout",
+    "Source_Latitude": "12.9138° N",
+    "Source_Longitude": "77.6293° E",
+    "Identifier": "Client Meeting"
+  },
+  {
+    "Interval": 3600,
+    "Radius": 500,
+    "Source_Location": "Bellandur",
+    "Source_Latitude": "12.9304° N",
+    "Source_Longitude": "77.6784° E",
+    "Identifier": "Presentation"
+  },
+  {
+    "Interval": 2700,
+    "Radius": 750,
+    "Source_Location": "Marathahalli",
+    "Source_Latitude": "12.9569° N",
+    "Source_Longitude": "77.7011° E",
+    "Identifier": "Demo"
+  },
+  {
+    "Interval": 1800,
+    "Radius": 500,
+    "Source_Location": "kr puram",
+    "Source_Latitude": "13.0170° N",
+    "Source_Longitude": "77.7044° E",
+    "Identifier": "Client Meeting"
+  }
+]

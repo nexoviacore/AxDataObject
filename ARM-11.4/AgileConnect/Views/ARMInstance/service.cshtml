@@ -1,0 +1,147 @@
+﻿@model IEnumerable<ARMCommon.Model.ARMServiceLogs>
+
+@{
+    ViewData["Title"] = "ServiceList";
+}
+
+@* <a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a>
+ *@
+<h3> ARM Service Log</h3>
+
+<div class="connect-app d-flex justify-content-between mt-3 mb-3">
+    <div class="arm-back-list">
+        <a asp-controller="ARMInstance" asp-action="dashboard" id="redirectApp" class="redirectButton btn btn-primary"
+           title="redirectButton">
+            <span class="btn-label"> <i class="fa-solid fa-arrow-left"></i></span> Back To Dashboard
+        </a>
+    </div>
+</div>
+
+@if (Model != null && Model.Any())
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th> Service Name</th>
+                <th> Status</th>
+                <th> Last Online </th>
+                <th> Server </th>
+                <th> Folder </th>
+                <th> Other Information </th>
+                <th> StartOn Time</th>
+                <th> Instance ID</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in Model)
+            {
+                <tr>
+                    <td>@Html.DisplayFor(ServiceName => item.ServiceName)</td>
+                        <td>
+                        @Html.DisplayFor(Status => item.Status)
+                        @if (item.Status?.ToLower() == "running")
+                        {
+                            <i id="icon" class="fas fa-check-circle text-success"></i>
+                        }
+                        </td>
+                    <td>
+                        @if (item.LastOnline > DateTime.Now.AddMinutes(-2))
+                        {
+                            <span>@item.LastOnline?.ToString("yyyy-MM-dd HH:mm:ss")</span>
+                        }
+                        else
+                        {
+                            <span class="text-danger">@item.LastOnline?.ToString("yyyy-MM-dd HH:mm:ss")</span>
+                            <i id="icon" class="fa-solid fa-exclamation-circle text-danger"></i>
+                        }
+                    </td>
+                    <td>@Html.DisplayFor(Server => item.Server)</td>
+                    <td>@Html.DisplayFor(Folder => item.Folder)</td>
+                    <td>
+                        @if (item.OtherInfo != null)
+                        {
+                            var jsonDict = Newtonsoft.Json.JsonConvert.DeserializeObject<Dictionary<string, object>>(item.OtherInfo);
+                            string tooltipText = string.Join(", ", jsonDict.Select(kvp => $"{kvp.Key}: {kvp.Value}"));
+                            <input type="text" class="btn btn-primary" data-toggle="popover" title="@tooltipText" data-content="@tooltipText" value="Other Info"></input>
+                        }
+                    </td>
+                    <td>@Html.DisplayFor(StartOnTime => item.StartOnTime)</td>
+                    <td>@Html.DisplayFor(InstanceID => item.InstanceID)</td>
+                    <td>
+                        <button type="button" class="btn btn-primary deleteRecordBtn" data-instanceid="@item.InstanceID">
+                            <i class="fa-regular fa-trash-can"></i>
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+else
+{
+    <div class="alert alert-info" role="alert">
+        No apps found.
+    </div>
+}
+
+@section Scripts {
+    <style>
+         th {
+            padding: 5px;
+        }
+
+        #icon {
+            content: "\f058";
+            margin-left: 61px;
+            position: relative;
+            top: -20px;
+        }
+
+      /*   .btn{
+            width:110%;
+        } */
+
+        .last-online-cell {
+            min-width: 180px; 
+        }
+    </style>
+    <!-- Include Bootstrap CSS -->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+
+    <!-- Include Popper.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/2.9.3/umd/popper.min.js"></script>
+
+    <!-- Include Bootstrap JS -->
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+
+    <script>
+        $(document).ready(function () {
+            $('[data-toggle="popover"]').popover();
+
+            $('.deleteRecordBtn').click(function () {
+                var instanceId = $(this).data('instanceid');
+                if (confirm("Are you sure you want to delete this record?")) {
+                    $.ajax({
+                        url: '@Url.Action("Delete", "ARMInstance")',
+                        type: 'POST',
+                        data: { instanceId: instanceId },
+                        success: function (response) {
+                            if (response.success) {
+                                alert(response.message);
+                                location.reload();
+                            } else {
+                                alert(response.message);
+                            }
+                        },
+                        error: function () {
+                            alert("Error during the AJAX call.");
+                        }
+                    });
+                }
+            });
+        });
+    </script>
+}
+
+

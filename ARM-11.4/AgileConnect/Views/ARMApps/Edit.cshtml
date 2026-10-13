@@ -1,0 +1,624 @@
+﻿@model ARMCommon.Model.ARMApp;
+
+@{
+    ViewData["Title"] = " Edit ARM Apps";
+}
+@* <a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a>
+ *@
+
+
+<div class="container p-5">
+    <h2>EDIT APP</h2>
+    <div class="accordion" id="agile-connect-app">
+        <form asp-action="Edit" id="armForm" enctype="multipart/form-data">
+            <div class="connect-app d-flex justify-content-between mt-3 mb-3">
+                <div class="back-list">
+                    <a asp-controller="ARMApps" asp-action="List" id="redirectApp" class="redirectButton btn btn-primary" title="redirectButton"><span class="btn-label"> <i class="fa-solid fa-arrow-left"></i></span> Connect apps </a>
+                </div>
+                <div class="configure-app">
+                    <input type="submit" value="Save" class="btn btn-primary" />
+                </div>
+            </div>
+
+            <hr />
+
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+
+            <div class="accordion-item rounded-3 border-0 shadow mb-2">
+                <h3 class="accordion-header">
+                    <button class="accordion-button border-bottom collapsed fw-semibold" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#app-form" aria-expanded="false"
+                            aria-controls="app-form">
+                        &#11162 Form
+                    </button>
+                </h3>
+                <div id="app-form" class="accordion-collapse collapse show" data-bs-parent="#agile-connect-app">
+                    <div class="accordion-body">
+                        <div class="input-group">
+                            <div class="form-group col-md-6">
+                                <label asp-for="AppName" class="control-label"> Name</label>
+                                <div class="col-md-8">
+                                    <input asp-for="AppName" id="appName" ReadOnly="true" class="form-control" />
+                                    <span asp-validation-for="AppName" class="text-danger"></span>
+                                </div>
+                            </div>
+
+
+                            <div class="form-group">
+                                <label asp-for="AppTitle" class="control-label"> Title</label>
+                                <div class="col-md-6">
+                                    <input asp-for="AppTitle" id="appTitle" class="form-control" />
+                                    <span asp-validation-for="AppTitle" class="text-danger"></span>
+                                </div>
+                            </div>
+                            <div class="form-group col-md-6">
+                                <label asp-for="AppLogoBase64" class="control-label"> Logo</label>
+                                <div class="col-md-8">
+                                    <input type="file" asp-for="AppLogoBase64" id="displayImg" class="form-control" />
+                                    <span asp-validation-for="AppLogoBase64" class="text-danger"></span>
+                                </div>
+                            </div>
+
+
+                            <div class="form-group col-md-6">
+                                <img id="form-image" src="data:image/png;base64,@Model.AppLogo" />
+                            </div>
+
+                            <div class="form-group col-md-12">
+                                <label asp-for="AppColor" class="control-label"> Color</label>
+                                <div class="col-md-2">
+                                    @* <input asp-for="AppColor" id="appColor" class="form-control" />*@
+                                    <input asp-for="AppColor" id="appColor" class="form-control" type="color" />
+                                    <span asp-validation-for="AppColor" class="text-danger"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="accordion-item rounded-3 border-0 shadow mb-2">
+                <h3 class="accordion-header">
+                    <button class="accordion-button border-bottom collapsed fw-semibold" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#axpert-db" aria-expanded="false"
+                            aria-controls="axpert-db">
+                        &#11162 Axpert DB Details
+                    </button>
+                </h3>
+                <div id="axpert-db" class="accordion-collapse collapse show" data-bs-parent="#agile-connect-app">
+                    <div class="accordion-body">
+                        <div class="input-group">
+                            <div class="form-group col-md-6">
+                                <label asp-for="AxpertAppName" class="control-label">Axpert AppName</label>
+                                <div class="col-md-8">
+                                    <input asp-for="AxpertAppName" id="AxpertAppName" class="form-control" />
+
+                                </div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label asp-for="DataBase" class="control-label">Database Type</label><br />
+                                <select asp-for="DataBase" id="DataBase">
+                                    <option value="">Select Database Type</option>
+                                    <option value="postgre">PostgreSQL</option>
+                                    <option value="oracle">Oracle</option>
+                                    <option value="mssql">MS SQL</option>
+                                </select>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label asp-for="Sqlversion" class="control-label">DB Version</label><br />
+                                <select asp-for="Sqlversion" id="DBVersionmysql" disabled>
+                                    <option value="">Select DB Version</option>
+                                    <option value="2008">2008</option>
+                                    <option value="2012">2012</option>
+                                    <option value="Above 2012">Above 2012</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group col-md-6">
+                                <label asp-for="DBVersion" class="control-label">Connection/server Name</label>
+                                <div class="col-md-8">
+                                    <input asp-for="DBVersion" id="DBVersion" class="form-control" />
+
+                                </div>
+                            </div>
+
+                            <div class="form-group col-md-6">
+                                <label asp-for="ConnectionName" class="control-label"> DataBase Name</label>
+                                <div class="col-md-8">
+                                    <input asp-for="ConnectionName" id="ConnectionName" class="form-control" />
+
+                                </div>
+                            </div>
+                            <div class="form-group col-md-6">
+                                <label asp-for="UserName" class="control-label"> User Name</label>
+                                <div class="col-md-8">
+                                    <input asp-for="UserName" id="UserName" class="form-control" />
+
+                                </div>
+                            </div>
+
+                            <div class="form-group col-md-6">
+                                <label asp-for="Password" class="control-label"> Password </label>
+                                <div class="col-md-8">
+                                    <input asp-for="Password" id="Password" class="form-control" />
+
+                                </div>
+                            </div>
+
+                            <div class="input-group">
+                                <div class="form-group col-md-8">
+                                    <label asp-for="AxpertScriptsUrl" class="control-label">Axpert Script Url</label>
+                                    <div class="col-md-8">
+                                        <textarea asp-for="AxpertScriptsUrl" class="form-control"
+                                                  maxlength=1000></textarea>
+                                        <span asp-validation-for="AxpertScriptsUrl" class="text-danger"></span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="input-group">
+                                <div class="form-group col-md-8">
+                                    <label asp-for="AxpertWebUrl" class="control-label">Axpert Web Url</label>
+                                    <div class="col-md-8">
+                                        <textarea asp-for="AxpertWebUrl" class="form-control" maxlength=1000></textarea>
+                                        <span asp-validation-for="AxpertWebUrl" class="text-danger"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <button type="button" id="testConnectionBtn" class="btn btn-primary mt-3">
+                                Test DB
+                                Connection
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="accordion-item rounded-3 border-0 mb-2 shadow">
+                <h3 class="accordion-header">
+                    <button class="accordion-button border-bottom collapsed fw-semibold" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#axpert-redis" aria-expanded="false"
+                            aria-controls="axpert-redis">
+                        &#11162 Axpert Redis Details
+                    </button>
+                </h3>
+                <div id="axpert-redis" class="accordion-collapse collapse" data-bs-parent="#agile-connect-app">
+                    <div class="accordion-body">
+                        <div class="input-group">
+                            <div class="form-group col-md-6">
+                                <label asp-for="RedisIP" class="control-label"> Host</label>
+                                <div class="col-md-8">
+                                    <input asp-for="RedisIP" id="RedisIP" class="form-control" />
+
+                                </div>
+                            </div>
+
+                            <div class="form-group col-md-6">
+                                <label asp-for="RedisPassword" class="control-label"> Password</label>
+                                <div class="col-md-8">
+                                    <input asp-for="RedisPassword" id="RedisPassword" class="form-control" />
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <button type="button" id="testRedisConnectionBtn" onclick="testRedisConnection()"
+                                    class="btn btn-primary mt-3">
+                                Test Redis Connection
+                            </button>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="accordion-item rounded-3 border-0 mb-2 shadow">
+                <h3 class="accordion-header">
+                    <button class="accordion-button border-bottom collapsed fw-semibold" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#switched-flags" aria-expanded="false"
+                            aria-controls="switched-flags">
+                        &#11162 Switched On/Off Flags
+                    </button>
+                </h3>
+                <div id="switched-flags" class="accordion-collapse collapse" data-bs-parent="#agile-connect-app">
+                    <div class="accordion-body">
+                        <div class="form-group row g-4">
+                            <div id="switch-box" class="col-md-6">
+                                <div class="form-group form-check">
+                                    <span> Enable Citizen Users</span>
+                                </div>
+                                <div class=" toggleswitch">
+                                    <label class="switch">
+                                        <input class="form-check-input" type="checkbox" data-val="true"
+                                               data-val-required="The IsCitizenUsers field is required."
+                                               id="IsCitizenUsers" name="IsCitizenUsers" value="true">
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="switch-box" class="col-md-6">
+                                <div class="form-group form-check">
+                                    <span> Enable Geo Fencing </span>
+                                </div>
+                                <div class=" toggleswitch">
+                                    <label class="switch">
+                                        <input class="form-check-input" type="checkbox" asp-for="IsGeoFencing" />
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="switch-box" class="col-md-6">
+                                <div class="form-group form-check">
+                                    <span> Enable Geo Tagging </span>
+                                </div>
+                                <div class=" toggleswitch">
+                                    <label class="switch">
+                                        <input class="form-check-input" type="checkbox" asp-for="IsGeoTagging" />
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="switch-box" class="col-md-6">
+                                <div class="form-group form-check ">
+                                    <span> Enable Fingerprint login</span>
+                                </div>
+                                <div class=" toggleswitch">
+                                    <label class="switch">
+                                        <input class="form-check-input" type="checkbox" asp-for="EnableFingerPrint" />
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="switch-box" class="col-md-6">
+                                <div class="form-group form-check">
+                                    <span> Enable Face Recognization</span>
+                                </div>
+
+                                <div class=" toggleswitch">
+                                    <label class="switch">
+                                        <input class="form-check-input" type="checkbox"
+                                               asp-for="EnablefacialRecognition" />
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="switch-box" class="col-md-6">
+                                <div class="form-group form-check">
+                                    <span> Enable Force Login</span>
+                                </div>
+
+                                <div class=" toggleswitch ">
+                                    <label class="switch">
+                                        <input class="form-check-input" id=rdForceLogin type="checkbox"
+                                               onclick="EnableDisableTextBox(this)" asp-for="ForceLogin" />
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                            </div>
+                            <div class="col-md-6">
+                                <input asp-for="ForceLoginDays" id="txtDays" class="form-control" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <br />
+            @*<div class="form-group">
+            <input type="submit" value="Save" class="btn btn-primary" />
+            </div>*@
+        </form>
+    </div>
+</div>
+
+
+@*<div>
+    <a asp-controller="ARMApps" asp-action="List" class="armButtons">Back to List</a>
+
+</div>*@
+
+@section Scripts {
+    <style>
+        a#SignOut {
+            position: absolute;
+            top: 19px;
+            right: 40px;
+            font-size: large;
+        }
+
+        input.btn.btn-primary {
+            margin-left: 27px;
+        }
+
+        input#txtDays {
+            margin: 6px;
+        }
+
+        a.armButtons {
+            margin-left: 37px;
+        }
+
+        .toggleswitch.col-md-3 {
+            margin-left: 149px;
+            margin-top: -60px;
+        }
+
+        div#switch-box {
+            display: flex;
+            justify-content: space-between;
+            align-items:center;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 58PX;
+            height: 33px;
+        }
+
+            .switch input {
+                opacity: 0;
+                width: 0;
+                height: 0;
+            }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            -webkit-transition: .4s;
+            transition: .4s;
+        }
+
+            .slider:before {
+                position: absolute;
+                content: "";
+                height: 26px;
+                width: 26px;
+                left: 4px;
+                bottom: 4px;
+                background-color: white;
+                -webkit-transition: .4s;
+                transition: .4s;
+            }
+
+        input:checked + .slider {
+            background-color: #2196F3;
+        }
+
+        input:focus + .slider {
+            box-shadow: 0 0 1px #2196F3;
+        }
+
+        input:checked + .slider:before {
+            -webkit-transform: translateX(26px);
+            -ms-transform: translateX(26px);
+            transform: translateX(26px);
+        }
+
+        .slider.round {
+            border-radius: 17px;
+        }
+
+            .slider.round:before {
+                border-radius: 50%;
+            }
+
+        form#armForm {
+            font-weight: 500;
+        }
+
+        div#enableSwitches {
+            margin-top: 20px;
+            margin-left: -15px;
+        }
+
+        input#days {
+            margin: 5px;
+        }
+
+        button#testRedisConnectionBtn {
+            margin: 0px;
+        }
+
+        select#DataBase {
+            outline: none;
+            font-size: 14px;
+            font-weight: 400;
+            color: #333;
+            border-radius: 5px;
+            border: 1px solid #aaa;
+            padding: 0 15px;
+            height: 36px;
+        }
+
+        select#DBVersionmysql {
+            outline: none;
+            font-size: 14px;
+            font-weight: 400;
+            color: #333;
+            border-radius: 5px;
+            border: 1px solid #aaa;
+            padding: 0 15px;
+            height: 36px;
+        }
+
+        label {
+            display: inline-block;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+
+
+        .p-5 {
+            padding: 1rem !important;
+         }
+        
+         h2 {
+            font-size: 20px;
+            letter-spacing: 2px;
+        }
+    </style>
+
+    <script type="text/javascript">
+
+        $(document).ready(function() {
+            var txtPassportNumber = document.getElementById("txtDays");
+            txtPassportNumber.disabled = rdForceLogin.checked ? false : true;
+            if (!txtDays.disabled) {
+                txtDays.focus();
+            }
+
+
+        });
+
+
+               $(function () {
+            $('#testConnectionBtn').click(function () {
+                var axpertAppName = $('#AxpertAppName').val();
+                var dataBase = $('#DataBase').val().toLowerCase();
+                var dbVersion = $('#DBVersion').val();
+                var dbver = $('#DBVersionmysql').val();
+                var connectionName = $('#ConnectionName').val();
+                var userName = $('#UserName').val();
+                var password = $('#Password').val();
+                var DataBaseName = $('#AxpertAppName').val();
+                var database = userName;
+                var connectionString = "";
+                var Server = connectionName;
+
+                if (dataBase === 'postgre') {
+                    if (connectionName.includes(':')) {
+                        var serverPort = connectionName.substring(connectionName.indexOf(':') + 1);
+                        connectionString = 'Server=' + connectionName.substring(0, connectionName.indexOf(':')) +
+                                            '; Port=' + serverPort +
+                                            '; Database=' + database +
+                                            '; Username=' + userName +
+                                            '; Pwd=' + password + '; Pooling=false;';
+                    } else {
+                        connectionString = 'Server=' + dbVersion +
+                                            '; Database=' + connectionName +
+                                            '; Username=' + userName +
+                                            '; Password=' + password + ';';
+                    }
+                }
+                else if (dataBase === 'oracle') {
+                    connectionString = 'Data Source=' + dbVersion +
+                                        '; User Id=' + userName +
+                                        '; Password=' + password + ';';
+                }
+                else if (dataBase === "ms sql" || dataBase === "mssql") {
+                    if (dbver.toUpperCase() === "ABOVE 2012") {
+                $.ajax({
+                            url: '@Url.Action("GetServerIpAndPort", "ARMApps")',
+                            type: 'POST',
+                            data: {
+                                dbVersion: dbVersion,
+                                uid: userName,
+                                pwd: password,
+                                database : database,
+                            },
+                            success: function (result) {
+                                if (result.success) {
+                                    connectionString = result.connectionString;
+                                    testConnection(connectionString);
+                                } else {
+                                    alert("Connection Failed: " + result.message);
+                                }
+                            },
+                            error: function (xhr, status, error) {
+                                alert('Connection Failed: ' + error);
+                            }
+                        });
+                        return;
+                    } else {
+                        connectionString = "Server=" + dbVersion + "; Database=" + connectionName + "; User Id=" + userName + "; Password=" + password + ";";
+                        testConnection(connectionString);
+                    }
+                }
+                else {
+                    alert('Please select a database type.');
+                    return;
+                }
+
+                function testConnection(connectionString) {
+                    $.ajax({
+                        url: '@Url.Action("TestConnection", "ARMApps")', 
+                        type: 'POST',
+                        data: {
+                            dbType: dataBase,
+                            connectionString: connectionString,
+                            uid: userName,
+                            pwd: password,
+                            dbVersion: dbVersion
+                        },
+                        success: function (result) {
+                            if (result.success) {
+                                alert("Connection successful.");
+                            } else {
+                                alert("Connection Failed: " + result.message);
+                            }
+                        },
+                        error: function (xhr, status, error) {
+                            alert('Connection Failed: ' + error);
+                        }
+                    });
+                }
+            });
+
+            $('#DataBase').change(function () {
+                var selectedDb = $(this).val().toLowerCase();
+                if (selectedDb === 'mssql') {
+                    $('#DBVersionmysql').prop('disabled', false);
+                } else {
+                    $('#DBVersionmysql').prop('disabled', true).val('');
+                }
+            });
+        });
+
+
+        
+        function testRedisConnection() {
+            var redisIP = $("#RedisIP").val();
+            var redisPassword = $("#RedisPassword").val();
+
+            $.ajax({
+                url: '@Url.Action("TestRedisConnection", "ARMApps")',
+                type: 'POST',
+                data: { redisIP: redisIP, redisPassword: redisPassword },
+                success: function(result) {
+                    if (result.success) {
+                        alert("Connection successful.");
+                    } else {
+                        alert("Connection failed: " + result.message);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    alert('Connection failed: : ' + error);
+                }
+            });
+        }
+    </script>
+    <script type="text/javascript">
+
+
+        function EnableDisableTextBox(rdForceLogin) {
+            var txtPassportNumber = document.getElementById("txtDays");
+            txtPassportNumber.disabled = rdForceLogin.checked ? false : true;
+            if (!txtDays.disabled) {
+                txtDays.focus();
+            }
+        }
+    </script>
+
+
+}
+
+
+

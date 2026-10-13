@@ -1,0 +1,131 @@
+﻿@model IEnumerable<ARMCommon.Model.APIDefinitions>
+@{
+    ViewData["Title"] = "ARM DefinItions";
+}
+
+
+<h2>API Definations</h2>
+<a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a>
+
+<div class="api-by-app d-flex justify-content-between mt-3 mb-3">
+    <div class="back-list">
+        <a asp-controller="ARMApps" asp-action="List" id="redirectApp" class="redirectButton btn btn-primary" title="redirectButton">
+            <span class="btn-label"> <i class="fa-solid fa-arrow-left"></i></span> Back To List
+        </a>
+    </div>
+    <div class="configure-app">
+        <a asp-controller="ARMDataSources" asp-action="CreateAPIDefinitions" asp-route-Appname=@ViewBag.result id="redirectApp" class="redirectButton btn btn-primary" title="Create_Templates">
+            <span class="btn-label"><i class="fa-regular fa-square-plus"></i></span> Create New
+        </a>
+    </div>
+</div>
+
+<hr />
+
+@*<p>
+    <a asp-controller="ARMDataSources" asp-action="CreateAPIDefinations" asp-route-Appname=@ViewBag.result> Create New</a>
+</p>*@
+
+@if (Model != null && Model.Any())
+{
+<table class="table">
+    <thead>
+        <tr>
+            <th>
+                ID
+            </th>
+            <th>
+                Description
+            </th>
+            <th>
+                App
+            </th>
+            <th>
+                Active?
+            </th>
+            <th>
+                DataSync Active?
+            </th>
+            <th>
+                DataSync Interval (In Seconds)
+            </th>
+            <th>
+                @Html.DisplayName("Allow Anonymous Access?")
+            </th>
+            <th>
+                Updated On
+            </th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var item in Model)
+        {
+            <tr>
+                <td>
+                    <a asp-action="EditAPIDefinitions" asp-route-id="@item.ID">@Html.DisplayFor(modelItem => item.DataSourceID)</a>
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.DataSourceDesc)
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.AppName)
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.IsActive)
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.IsDataSyncActive)
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.DataSyncInterval)
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.AllowAnonymousAccess)
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.UpdatedOn)
+                </td>
+                <td>
+                    <a asp-action="DeleteAPIDefinitions" asp-route-id="@item.ID">Delete</a>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+}
+else
+{
+<div class="alert alert-info" role="alert">
+    API Definitions Not Found
+</div>
+}
+@*<div class="col-sm-6">
+    <a asp-controller="ARMApps" asp-action="List" class="redirectButton" title="redirectButton"> View Connected Apps </a>
+   </div>*@
+
+@section Scripts {
+
+    <style>
+
+        a#SignOut {
+            position: absolute;
+            top: 25px;
+            right: 40px;
+            font-size: large;
+        }
+
+        a {
+            text-decoration: none;
+        }
+
+        h2 {
+            font-size: 20px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+        }
+    </style>
+
+}
+

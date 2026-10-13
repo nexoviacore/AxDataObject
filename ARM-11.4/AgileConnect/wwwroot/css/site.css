@@ -1,0 +1,285 @@
+﻿/* Please see documentation at https://docs.microsoft.com/aspnet/core/client-side/bundling-and-minification
+for details on configuring this project to bundle and minify static web assets. */
+
+a.navbar-brand {
+  white-space: normal;
+  text-align: center;
+  word-break: break-all;
+  margin: 0;
+}
+
+/* Provide sufficient contrast against white background */
+a {
+  color: #0366d6;
+}
+
+.btn-primary {
+  color: #fff;
+  background-color: #1b6ec2;
+  border-color: #1861ac;
+}
+
+.nav-pills .nav-link.active, .nav-pills .show > .nav-link {
+  color: #fff;
+  background-color: #1b6ec2;
+  border-color: #1861ac;
+}
+
+/* Sticky footer styles
+-------------------------------------------------- */
+html {
+  font-size: 14px;
+}
+@media (min-width: 768px) {
+  html {
+    font-size: 16px;
+  }
+}
+
+.border-top {
+  border-top: 1px solid #e5e5e5;
+}
+.border-bottom {
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.box-shadow {
+  box-shadow: 0 .25rem .75rem rgba(0, 0, 0, .05);
+}
+
+button.accept-policy {
+  font-size: 1rem;
+  line-height: inherit;
+}
+
+/* Sticky footer styles
+-------------------------------------------------- */
+html {
+  position: relative;
+  min-height: 100%;
+}
+
+body {
+  /* Margin bottom by footer height */
+  margin-bottom: 60px;
+}
+.footer {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  white-space: nowrap;
+  line-height: 60px; /* Vertically center the text there */
+}
+
+/*signIn page Animation*/
+
+.ripple-background {
+    z-index: -999 !important;
+}
+
+    .ripple-background .circle {
+        position: absolute;
+        border-radius: 50%;
+        animation: ripple 15s infinite;
+    }
+
+    .ripple-background .small {
+        width: 200px;
+        height: 200px;
+        left: -100px;
+        top: -100px;
+        z-index: -999;
+    }
+
+    .ripple-background .medium {
+        width: 400px;
+        height: 400px;
+        left: -200px;
+        top: -200px;
+        z-index: -999;
+    }
+
+    .ripple-background .large {
+        width: 600px;
+        height: 600px;
+        left: -300px;
+        top: -300px;
+        z-index: -999;
+    }
+
+    .ripple-background .xlarge {
+        width: 800px;
+        height: 800px;
+        left: -400px;
+        top: -400px;
+        z-index: -999;
+    }
+
+    .ripple-background .xxlarge {
+        width: 1000px;
+        height: 1000px;
+        left: -500px;
+        top: -500px;
+        z-index: -999;
+    }
+
+    .ripple-background .shade1 {
+        background: #0000ff26;
+    }
+
+    .ripple-background .shade2 {
+        background: #b9b9ff;
+    }
+
+    .ripple-background .shade3 {
+        background: #0000ff26;
+    }
+
+    .ripple-background .shade4 {
+        background: #0a58ca;
+    }
+
+    .ripple-background .shade5 {
+        background: #0000ff26;
+    }
+
+@keyframes ripple {
+    0% {
+        transform: scale(0.8);
+    }
+
+    50% {
+        transform: scale(1.2);
+    }
+
+    100% {
+        transform: scale(0.8);
+    }
+}
+
+/* connect image */
+
+img#cardHead {
+    position: absolute;
+    bottom: 2px;
+    right: 15px;
+    width: 180px;
+}
+
+/* page scroll btn */
+
+#btn-back-to-top {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    display: none;
+}
+
+/* SignIn Page Css */
+
+.row.signIndiv {
+    border: 1px solid #ddd;
+    padding: 25px;
+    border-radius: 15px;
+    box-shadow: 2px 2px 10px #ddd;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+img#cardHead {
+    position: absolute;
+    bottom: 2px;
+    right: 15px;
+    width: 180px;
+}
+
+/*Connect Apps*/
+
+
+span#redirectTxt {
+    position: relative;
+    top: -5px;
+}
+
+.btn-primary {
+    margin: 10px 10px;
+}
+
+h2 {
+    text-transform: uppercase;
+    font-size: 20px;
+    letter-spacing: 1px
+}
+
+h3 {
+    font-size: 18px;
+}
+
+span.btn-label {
+    padding: 7.6px 12px;
+    background: rgba(0, 0, 0, 0.15);
+    position: relative;
+    left: -12px;
+    border-radius: 3px 0px 0px 3px;
+}
+
+
+/* Mobile Responsive css*/
+
+@media only screen and (min-width:350px) and (max-width:690px) {
+    a#SignOut {
+        display: none
+    }
+
+    img#cardHead {
+        display: none;
+    }
+
+    div#smsHide {
+        display: none;
+    }
+
+    a#AgileConnectSignout {
+        font-size: 14px;
+        margin: 10px 30px 10px 40px;
+    }
+}
+
+/* Tab responsive css*/
+
+@media only screen and (min-width:700px) and (max-width:900px) {
+    div#smsHide {
+        display: none;
+    }
+
+    a#AgileConnectSignout {
+        display: none;
+    }
+}
+
+/* Laptop and desktop responsive css*/
+
+
+@media only screen and (min-width:900px) and (max-width:1920px) {
+    div#smsHide {
+        display: none;
+    }
+
+    a#AgileConnectSignout {
+        display: none;
+    }
+}
+
+/* signout */
+
+a#SignOut {
+    position: absolute;
+    top: 25px;
+    right: 40px;
+    font-size: large;
+}
+
+img#form-image {
+    width: 195px!important;
+    height:auto!important ;
+}

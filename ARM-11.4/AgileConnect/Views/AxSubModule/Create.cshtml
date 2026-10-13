@@ -1,0 +1,68 @@
+﻿@model ARMCommon.Model.AxSubModule
+
+@{
+    ViewData["Title"] = "Create Module";
+}
+
+
+<h4>Create AxSubModule</h4>
+<a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a>
+<hr />
+
+<div class="col-md-12">
+    <form asp-action="Create">
+        <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+        <div class="input-group">
+                    <div class="form-group col-md-6">
+                <label asp-for="appName" class="control-label"></label>
+
+                  <div class = "col-md-8"> 
+                  <input asp-for="appName" ReadOnly="true" id="txtkey"  class="form-control" />
+@*
+                   <select asp-for="AppName"
+                            asp-items="@(new SelectList(Model.app1,"ID","Name"))" class="form-control">
+                        <option disabled>Please select one</option>
+                    </select>*@
+
+            </div>
+
+            </div>
+
+                            <div class="form-group col-md-10">
+                    <label asp-for="SubModuleName" class="control-label"> Module Name</label>
+                    <div class="col-md-10">
+                        <input asp-for="SubModuleName" class="form-control" />
+                    </div>
+                </div>
+                <div class="form-group col-md-10">
+                    <label asp-for="SubModuleDescription" class="control-label"> Module Description</label>
+                    <div class="col-md-10">
+                        <input asp-for="SubModuleDescription" class="form-control" />
+                    </div>
+                </div>
+   
+            <div class="form-group col-md-10">
+                <div class="form-grou col-md-4">
+                    <input type="submit" value="Create" class="btn btn-primary" />
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<div>
+     <a asp-controller="AxSubModule" asp-action="ListByApp" asp-route-Appname="@Html.ValueFor(model => model.appName)">  Back to List</a>
+</div>
+    @section Scripts {
+
+    <style>
+ 
+        a#SignOut {
+    position: absolute;
+    top: 19px;
+    right: 40px;
+    font-size: large;
+}
+    </style>
+ 
+}

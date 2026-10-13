@@ -1,0 +1,278 @@
+﻿@model  ARMCommon.Model.AxInlineForm
+
+@{
+    ViewData["Title"] = "Create";
+}
+
+<h3>Create</h3>
+   <a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a>
+<h4>Inline Form</h4>
+<hr />
+ 
+    <div class="col-md-12">
+        <form asp-action="Create">
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+           <div class="input-group">
+        <div class="form-group col-md-6">
+                <label asp-for="appName" class="control-label"> App Name</label>
+           <div class = "col-md-8"> 
+                  <input asp-for="appName" ReadOnly="true" id="txtkey"  class="form-control" />
+        </div>
+
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="Name" class="control-label"> Name</label> 
+                <div class = "col-md-8">
+                <input asp-for="Name" class="form-control" />
+                <span asp-validation-for="Name" class="text-danger"></span>  
+            </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="formIcon" class="control-label"> Form Icon</label> 
+                <div class = "col-md-8">
+                <input asp-for="formIcon" class="form-control" />
+                <span asp-validation-for="formIcon" class="text-danger"></span> 
+            </div>
+            </div>
+
+         
+             <div class="form-group col-md-6">
+                <label asp-for="Module" class="control-label">  Module  </label>
+                <div class="col-md-8">
+             @*       @Html.ListBoxFor(m => m.Module, new SelectList(Model.Modules, "ModuleName", "ModuleName"), new { @id = "ddlForm1"})*@
+                        <select asp-for="Module"
+                            asp-items="@(new SelectList(Model.Modules,"ModuleName","ModuleName"))" class="form-control">
+                        <option disabled>Please select one</option>
+                    </select>
+                    <span asp-validation-for="Module" class="text-danger"></span>
+                </div>
+            </div>
+
+            <div class="form-group col-md-6">
+                <label asp-for="SubModule" class="control-label"> Sub  Module  </label>
+                <div class="col-md-8">
+  @*                  @Html.ListBoxFor(m => m.SubModule, new SelectList(Model.SubModules, "SubModuleName", "SubModuleName"), new { @id = "ddlForm2" })*@
+    <select asp-for="SubModule"
+                            asp-items="@(new SelectList(Model.SubModules,"SubModuleName","SubModuleName"))" class="form-control">
+                        <option disabled>Please select one</option>
+                    </select>                
+   <span asp-validation-for="SubModule" class="text-danger"></span>
+                </div>
+            </div>
+        
+            <div class="form-group col-md-6">
+                <label asp-for="StatusValue" class="control-label"> Status Value</label> 
+                <div class = "col-md-8">
+                <input asp-for="StatusValue" class="form-control" />
+                <span asp-validation-for="StatusValue" class="text-danger"></span>
+            </div>
+            </div>
+            <div class="form-group col-md-12">
+                <label asp-for="FormText" class="control-label"> Form Text</label> 
+                <div class = "col-md-10">
+                <input asp-for="FormText" class="form-control" />
+                <span asp-validation-for="FormText" class="text-danger"> </span> 
+            </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="AcessControl" class="control-label"> Acess Control</label>  
+                <div class = "col-md-8">
+                  @Html.ListBoxFor(m => m.AcessControl, new SelectList(Model.UserGroups, "Name", "Name"), new { @id = "ddlAccessControl", @class = "form-control select-multiple", multiple = "multiple" })
+                <span asp-validation-for="AcessControl" class="text-danger"></span> 
+            </div>
+            
+                  <div class="form-group col-md-4">
+                    <input id="chkAllAccessControl" type="checkbox">Select All
+                   </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="HideInMyList" class="control-label"> Hide In MyList  </label> 
+                <div class = "col-md-8">
+                      @Html.ListBoxFor(m => m.HideInMyList, new SelectList(Model.UserGroups, "Name", "Name"), new { @id = "ddlHideInMyList", @class = "form-control select-multiple", multiple = "multiple" })
+                <span asp-validation-for="HideInMyList" class="text-danger"></span>
+            </div>
+             <div class="form-group col-md-4">
+                    <input id="chkAllUserGroups" type="checkbox">Select All
+                   </div>
+            </div>
+            <div class="form-group col-md-6">
+                
+                <div class = "col-md-8">
+                <input asp-for="FormCreator" class="form-control" />
+                <span asp-validation-for="FormCreator" class="text-danger"></span>
+            </div>
+            </div>
+            <div class="form-group col-md-6">
+              
+                <div class = "col-md-8">
+                <input asp-for="FormCreatedOn" class="form-control" />
+                <span asp-validation-for="FormCreatedOn" class="text-danger"></span> 
+            </div>
+            </div>
+            <div class="form-group col-md-6 form-check">
+                <label class="form-check-label">
+                    <input class="form-check-input" asp-for="AddQuickAccess" /> @Html.DisplayNameFor(model => model.AddQuickAccess)
+                </label> 
+                <div class = "col-md-8">
+                 </div>
+            </div>
+
+            <div class="form-group col-md-6 form-check">
+                <label class="form-check-label">
+                    <input class="form-check-input" asp-for="EnableSend" /> @Html.DisplayNameFor(model => model.EnableSend)
+                </label> 
+                <div class = "col-md-8">
+              </div>
+            </div>
+
+            <div class="form-group col-md-6">
+                <label asp-for="SelectedSendOnlyTo" class="control-label">Send Only To</label>  
+                <div class = "col-md-8">
+                    @Html.ListBoxFor(m => m.SelectedSendOnlyTo, new SelectList(Model.UserGroups, "Name", "Name"), new { @id = "ddlSendOnlyTo", @class = "form-control select-multiple", multiple = "multiple" })
+                <span asp-validation-for="SelectedSendOnlyTo" class="text-danger"></span> 
+            </div>
+            </div>
+
+              <div class="form-group col-md-6">
+                <label asp-for="AutoSend" class="control-label">Auto Send</label> 
+                <div class = "col-md-8">
+               
+                    <select asp-for="AutoSend"
+                            asp-items="@(new SelectList(Model.UserGroups,"Name","Name"))" class="form-control">
+                        <option disabled>Please select a UserGroup</option>
+                    </select>
+                    </div>
+            </div>
+
+            <div class="form-group col-md-6">
+                <label asp-for="AutoSendCondition" class="control-label"> Auto Send Condition</label>  <div class = "col-md-8">
+                <textarea asp-for="AutoSendCondition" class="form-control"  maxlength=1000 ></textarea>
+                <span asp-validation-for="AutoSendCondition" class="text-danger"></span>  </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="FormValidations" class="control-label"> Form Validations</label>   <div class = "col-md-8">
+                 <textarea asp-for="FormValidations" class="form-control"  maxlength=1000 ></textarea>
+                <span asp-validation-for="FormValidations" class="text-danger"></span>  </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="Compuations" class="control-label"> Compuations</label>  <div class = "col-md-8">
+                    <textarea asp-for="Compuations" class="form-control"  maxlength=1000 ></textarea>
+                <span asp-validation-for="Compuations" class="text-danger"></span>  </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="ButtonCaption" class="control-label"> Button Caption</label>  <div class = "col-md-8">
+                <input asp-for="ButtonCaption" class="form-control" />
+                <span asp-validation-for="ButtonCaption" class="text-danger"></span>  </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="ButtonIcon" class="control-label"> Button Icon</label>  <div class = "col-md-8">
+                <input asp-for="ButtonIcon" class="form-control" />
+                <span asp-validation-for="ButtonIcon" class="text-danger"></span>  </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="ButtonScript" class="control-label"> Button Script</label>  <div class = "col-md-8">
+                <input asp-for="ButtonScript" class="form-control" />
+                <span asp-validation-for="ButtonScript" class="text-danger"></span>  </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="QueueName" class="control-label"> Queue Name</label>  <div class = "col-md-8">
+                <input asp-for="QueueName" class="form-control" />
+                <span asp-validation-for="QueueName" class="text-danger"></span>  </div>
+            </div>
+            <div class="form-group col-md-8">
+                <input type="submit" value="Create" class="btn btn-primary" />
+            </div>
+            </div>
+        
+          
+        </form>
+    </div>
+ 
+
+<div>
+     <a asp-controller="InlineForm" asp-action="ListByApp" asp-route-Appname="@Html.ValueFor(model => model.appName)">  Back to List</a>
+</div>
+ @section Scripts {
+
+    <style>
+ 
+        a#SignOut {
+    position: absolute;
+    top: 19px;
+    right: 40px;
+    font-size: large;
+}
+label.control-label {
+    margin-left: 15px;
+}
+label.form-check-label {
+    margin-left: 30px;
+}
+    </style>
+
+           <script src="~/lib/select2/js/select2.full.min.js"></script>
+ 
+               <script type="text/javascript">
+ $(document).ready(function () {
+	 
+
+	$("#ddlAccessControl").select2({
+		multiple: true,
+		closeOnSelect: false,
+		placeholder: "Please select the user groups...",
+		allowHtml: true,
+		allowClear: true,
+		tags: true
+	});
+
+		$("#ddlHideInMyList").select2({
+		multiple: true,
+		closeOnSelect: false,
+		placeholder: "Please select the user groups...",
+		allowHtml: true,
+		allowClear: true,
+		tags: true
+	});
+     
+    	$("#ddlSendOnlyTo").select2({
+		multiple: true,
+		closeOnSelect: false,
+		placeholder: "Please select the user groups...",
+		allowHtml: true,
+		allowClear: true,
+		tags: true
+	});
+
+      		$("#ddlForm1").select2({
+		multiple: false
+	});
+ 
+        		$("#ddlForm2").select2({
+		multiple: false
+	});
+	
+ 
+	
+	$("#chkAllUserGroups").click(function(){
+        if($("#chkAllUserGroups").is(':checked')){
+            $("#ddlHideInMyList > option").prop("selected", "selected");
+            $("#ddlHideInMyList").trigger("change");
+        } else {
+            $("#ddlHideInMyList").val('').trigger("change");
+        }
+    });
+
+    $("#chkAllAccessControl").click(function(){
+        if($("#chkAllAccessControl").is(':checked')){
+            $("#ddlAccessControl > option").prop("selected", "selected");
+            $("#ddlAccessControl").trigger("change");
+        } else {
+            $("#ddlAccessControl").val('').trigger("change");
+        }
+    });
+});
+ 
+
+</script>
+ 
+}

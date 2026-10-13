@@ -1,0 +1,12 @@
+{
+  "ARM_APIs": "11.4.0.0_release12",
+  "ARMNotificationHub": "11.4.0.0_release9",  
+  "AxAuth": "11.4.0.0_release12",
+  "AxList": "11.4.0.0_release12",
+  "AxExtend": "11.4.0.0_release9",
+  "AxPlugins": "11.4.0.0_release7",
+  "AxStructUtils": "11.4.0.0_release10",
+  "AxTstructData": "11.4.0.0_release13",
+  "AxUtils": "11.4.0.0_release9"
+}
+

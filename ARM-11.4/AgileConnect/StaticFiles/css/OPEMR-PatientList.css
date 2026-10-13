@@ -1,0 +1,986 @@
+/* Praveen Change */
+:root {
+    --primary: #8b3365;
+    --white: #ffffff;
+    --lightGray: #f1f1f1;
+    --gray: #f7f8f5;
+    --grayBorder: #707070;
+    --btnGray: #00000029;
+    --waitColor: #b50000;
+    --holdColor: #f16b06;
+    --completedColor: #1aa400;
+}
+
+*,
+*::before,
+*::after {
+    padding: 0;
+    margin: 0;
+    box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+    width: 5px;
+}
+
+::-webkit-scrollbar-track {
+    width: 5px;
+    background: var(--white);
+}
+
+::-webkit-scrollbar-thumb {
+    width: 1em;
+    background-color: #adb5bd;
+    background-image: -webkit-linear-gradient(45deg, rgba(255, 255, 255, 0.2) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.2) 50%, rgba(255, 255, 255, 0.2) 75%, transparent 75%, transparent);
+    border-radius: 1rem;
+}
+
+body {
+    background-color: var(--white);
+    font-family: Poppins, sans-serif;
+    font-size: 15px;
+    font-weight: 400;
+    line-height: 1.7;
+    color: rgba(0, 0, 0, 0.87);
+    overflow-x: hidden;
+}
+
+.btn:focus {
+    box-shadow: none !important;
+}
+
+.opCalender .card {
+    width: 100%;
+}
+
+.opCalender .calender {
+    height: 50px;
+    width: 60px;
+    cursor: pointer;
+}
+
+.opCalender .functionSum {
+    width: 20px;
+}
+
+.opCalender .buttonImages {
+    height: 25px;
+    width: 25px;
+}
+
+#opCounts label {
+    height: 100%;
+}
+
+.logoutImg {
+    height: 24px;
+    width: 24px;
+}
+
+.primaryColor {
+    color: var(--primary) !important;
+}
+
+.primaryBgColor {
+    background-color: var(--primary) !important;
+}
+
+.primaryLightBgColor {
+    background-color: #eee1e8 !important;
+}
+
+.btn-grayModal {
+    color: var(--bs-dark);
+    background-color: var(--btnGray);
+    font-weight: bold;
+    border-color: var(--btnGray);
+}
+
+.btn-gray:hover {
+    background-color: var(--btnGray);
+    border: 1px solid var(--grayBorder);
+}
+
+.btn-font-size {
+    font-size: 0.8rem;
+}
+
+.gray-border {
+    border: 1px solid var(--grayBorder);
+}
+
+.checkOnline {
+    border-radius: 10px !important;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075) !important;
+}
+
+    .checkOnline button.btn.dropdown-toggle.btn-light {
+        border-radius: 10px !important;
+        /* overflow: hidden; */
+        padding: 0 6px !important;
+    }
+
+        .checkOnline button.btn.dropdown-toggle.btn-light:focus {
+            outline: unset !important;
+            outline-offset: unset;
+        }
+
+.btnSwitch {
+    color: var(--primary);
+    border-color: var(--primary);
+}
+
+.btn-check:focus + .btn {
+    box-shadow: none !important;
+}
+
+.btn-check:checked + .btnSwitch {
+    background-color: var(--primary);
+    /* border-color: var(--primary); */
+    color: var(--bs-white);
+}
+
+    .btn-check:checked + .btnSwitch.yes {
+        background-color: #01ff1b3d !important;
+        /* border-color: #01FF1B3D !important; */
+        color: var(--bs-black) !important;
+    }
+
+    .btn-check:checked + .btnSwitch.no {
+        background-color: #ff01013d !important;
+        /* border-color: #FF01013D !important; */
+        color: var(--bs-black) !important;
+    }
+
+    .btn-check:checked + .btnSwitch.divorced {
+        background-color: #ffd0ac !important;
+        /* border-color: #FFD0AC !important; */
+        color: var(--bs-black) !important;
+    }
+
+.rounded-button {
+    border-radius: 10px;
+}
+
+.modal-header {
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+}
+
+.opCalenderHeader .nav-link {
+    position: relative;
+}
+
+    .opCalenderHeader .nav-link.active::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        bottom: 0px;
+        transform: translate(-30px, 0px);
+        width: 60px;
+        border-bottom: 2px solid var(--primary);
+    }
+
+.datepicker.dropdown-menu {
+    color: var(--primary);
+    font-weight: 600;
+}
+
+.datepicker .today {
+    background-image: none !important;
+    border-radius: 50%;
+}
+
+.datepicker .active.day {
+    background-color: var(--primary) !important;
+    color: var(--white) !important;
+    background-image: none !important;
+    border-radius: 100%;
+}
+
+.icons {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.font-size {
+    font-size: 18px;
+}
+
+.fa-inverse {
+    color: var(--primary) !important;
+    font-size: 20px;
+}
+
+.badge {
+    color: var(--white);
+    position: absolute;
+    padding: 3px;
+    font-size: 10px;
+    margin-left: 60%;
+    margin-top: -5px;
+    background-color: red;
+    border-radius: 50%;
+    border: 1px solid red;
+}
+
+.msg {
+    color: var(--white);
+}
+
+.online {
+    color: var(--completedColor);
+}
+
+.offline {
+    color: #5e6789;
+}
+
+.waitingColor {
+    color: var(--waitColor);
+}
+
+.onHoldColor {
+    color: var(--holdColor);
+}
+
+.completedColor {
+    color: var(--completedColor);
+}
+
+.waitingBox {
+    height: 15px;
+    width: 15px;
+    background-color: var(--waitColor);
+}
+
+.onHoldBox {
+    height: 15px;
+    width: 15px;
+    background-color: var(--holdColor);
+}
+
+.completedBox {
+    height: 15px;
+    width: 15px;
+    background-color: var(--completedColor);
+}
+
+.canceledImg {
+    display: none;
+}
+
+    .canceledImg.T {
+        display: inline;
+        height: 25px;
+        width: 25px;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+    }
+
+.vipImg {
+    height: 25px;
+    width: 25px;
+}
+
+    .vipImg.F {
+        display: none;
+    }
+
+.videocamera,
+.walkin {
+    display: none;
+}
+
+    .videocamera.TC,
+    .walkin.AP,
+    .walkin.WI {
+        display: inline;
+    }
+
+tr.collapse.in {
+    display: table-row;
+}
+
+.avatar {
+    border-radius: 50%;
+    height: 80px;
+    width: 80px;
+}
+
+.opDataTable th {
+    color: var(--bs-gray-600);
+    text-align: center;
+}
+
+.bg-gray {
+    background-color: var(--lightGray) !important;
+}
+
+.bg-white {
+    background-color: var(--white) !important;
+}
+
+.table > :not(:first-child) {
+    border-top: unset;
+}
+
+.viewDocument .nav-link {
+    color: #fff;
+    color: #000;
+    border: 1px solid var(--grayBorder);
+    border-radius: unset;
+}
+
+    .viewDocument .nav-link.active {
+        background-color: #b2b2b23d;
+        color: #000;
+        font-weight: bold;
+    }
+
+.ancher {
+    text-decoration: underline;
+    text-decoration-color: #1900ff;
+    color: #1900ff;
+    cursor: pointer;
+}
+
+.form-control:focus {
+    border-color: unset;
+    box-shadow: none;
+}
+
+.docTypeSelect {
+    border-bottom: 1px solid var(--grayBorder);
+}
+
+    .docTypeSelect button.btn.dropdown-toggle.btn-light:focus {
+        outline: unset !important;
+        outline-offset: unset;
+    }
+
+.medicationTable {
+    width: 150px;
+}
+
+.cancelBorder {
+    border-radius: 50%;
+    /* background-color: transparent; */
+}
+
+.visitHistorySelect {
+    border-bottom: 1px solid var(--grayBorder) !important;
+}
+
+    .visitHistorySelect button.btn.dropdown-toggle.btn-light {
+        background-color: transparent !important;
+        border-color: transparent !important;
+    }
+
+        .visitHistorySelect button.btn.dropdown-toggle.btn-light:focus {
+            outline: unset !important;
+            outline-offset: unset;
+        }
+
+.selectFamily {
+    border-bottom: 1px solid var(--grayBorder) !important;
+}
+
+    .selectFamily button.btn.dropdown-toggle.btn-light {
+        background-color: transparent !important;
+        border-color: transparent !important;
+    }
+
+        .selectFamily button.btn.dropdown-toggle.btn-light:focus {
+            outline: unset !important;
+            outline-offset: unset;
+        }
+
+.selectCss {
+    border-bottom: 1px solid var(--grayBorder) !important;
+}
+
+    .selectCss button.btn.dropdown-toggle.btn-light {
+        background-color: transparent !important;
+        border-color: transparent !important;
+    }
+
+        .selectCss button.btn.dropdown-toggle.btn-light:focus {
+            outline: unset !important;
+            outline-offset: unset;
+        }
+
+.form-check-input {
+    border-color: var(--grayBorder);
+}
+
+    .form-check-input:focus {
+        box-shadow: none;
+        border-color: var(--grayBorder);
+    }
+
+.sendDocument .form-check {
+    min-height: 1.5rem;
+}
+
+.sendDocument .form-check-input {
+    width: 1.5em;
+    height: 1.5em;
+}
+
+.button-label {
+    display: inline-block;
+    cursor: pointer;
+    color: var(--white);
+    background: var(--primary);
+    transition: 0.3s;
+    user-select: none;
+    min-width: 100px;
+    border: 3px solid var(--primary);
+}
+
+    .button-label:hover {
+        background: var(--lightGray);
+        color: #101010;
+    }
+
+    .button-label:active {
+        transform: translateY(2px);
+    }
+
+input[type="radio"]:checked + .button-label {
+    background: var(--btnGray);
+    color: var(--primary);
+    border: 3px solid var(--primary);
+}
+
+    input[type="radio"]:checked + .button-label:hover {
+        background: var(--primary);
+        color: var(--white);
+    }
+
+.rescheduleAppointment .datepicker table {
+    margin: auto;
+    width: 300px;
+}
+
+.rescheduleAppointment .dow {
+    padding: 8px;
+}
+
+.rescheduleAppointment .day {
+    padding: 6px;
+}
+
+.rescheduleAppointment .datepicker-inline {
+    width: 100%;
+    color: var(--primary);
+    font-weight: 600;
+}
+
+.textAreaColor {
+    background-color: #F9F9F9;
+}
+
+.bootstrap-select > .dropdown-toggle {
+    background-color: var(--white) !important;
+    border: var(--white) !important;
+}
+
+.slots .button-label {
+    display: inline-block;
+    cursor: pointer;
+    color: var(--primary) !important;
+    background: var(--white) !important;
+    transition: 0.3s;
+    user-select: none;
+    min-width: 100px;
+}
+
+.slots input[type="radio"]:checked + .button-label {
+    background: var(--primary) !important;
+    color: var(--white) !important;
+    border: 2px solid var(--primary) !important;
+}
+
+    .slots input[type="radio"]:checked + .button-label:hover {
+        background: var(--gray) !important;
+        color: var(--primary) !important;
+    }
+
+.whatsApp:focus {
+    border-color: unset;
+    box-shadow: none;
+}
+
+.initialAssessment .form-check {
+    min-height: 1.5rem;
+}
+
+.initialAssessment .form-check-input {
+    width: 1.5em;
+    height: 1.5em;
+}
+
+.smartWizard .sw-theme-dots > .nav .nav-link.active::after {
+    background-color: var(--primary) !important;
+}
+
+.smartWizard .sw-theme-dots > .nav .nav-link.active {
+    color: var(--primary) !important;
+}
+
+.smartWizard .tab-content {
+    height: 400px !important;
+    overflow: auto;
+    overflow-x: hidden;
+}
+
+.smartWizard .form-check-input:checked {
+    background-color: var(--primary);
+    border-color: var(--primary);
+}
+
+.smartWizard .form-check-input:focus {
+    box-shadow: none;
+}
+
+/* Multi Select */
+.select2-container {
+    min-width: 100%;
+}
+
+    .select2-container .select2-search--inline .select2-search__field {
+        margin: 5px;
+    }
+
+.select2-container--default .select2-selection--multiple {
+    padding: 0px;
+}
+
+.select2-selection--multiple:before {
+    content: "";
+    position: absolute;
+    right: 7px;
+    top: 42%;
+    border-top: 5px solid var(--grayBorder);
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+}
+
+.select2-container .select2-search--inline .select2-search__field {
+    height: 25px;
+}
+
+.select2-container--default .select2-selection--multiple .select2-selection__choice {
+    padding-right: 35px;
+    padding-left: 5px;
+    border-radius: 30px;
+    font-weight: bold;
+    margin: 5px;
+}
+
+.select2-container--default .select2-selection--multiple .select2-selection__choice__remove {
+    left: unset;
+    right: 0;
+    border-left: 1px solid var(--grayBorder);
+    padding: 0 5px;
+    margin: 3px;
+    border-radius: 100%;
+    background-color: var(--white);
+    font-size: 0.9em;
+    height: 20px;
+}
+
+    .select2-container--default .select2-selection--multiple .select2-selection__choice__remove:hover {
+        background-color: var(--waitColor);
+        color: var(--white);
+    }
+
+.select2-results__option {
+    padding-right: 20px;
+    vertical-align: middle;
+}
+
+    .select2-results__option:before {
+        content: "";
+        display: inline-block;
+        position: relative;
+        height: 20px;
+        width: 20px;
+        border: 2px solid var(--grayBorder);
+        border-radius: 4px;
+        background-color: var(--white);
+        margin-right: 20px;
+        vertical-align: middle;
+    }
+
+    .select2-results__option.select2-results__option--selectable.select2-results__option--selected:before {
+        content: "\f00c";
+        font-family: "Font Awesome\ 5 Free";
+        color: var(--white);
+        font-weight: 600;
+        background-color: var(--primary);
+        border: 0;
+        display: inline-block;
+        padding-left: 3px;
+    }
+
+.select2-container--default .select2-results__option[aria-selected="true"] {
+    background-color: var(--white);
+}
+
+.select2-container--default .select2-results__option--highlighted[aria-selected] {
+    background-color: #eaeaeb;
+    color: #272727;
+}
+
+.select2-container--default .select2-selection--multiple {
+    margin-bottom: 10px;
+}
+
+.select2-container--default.select2-container--open.select2-container--below .select2-selection--multiple {
+    border-radius: 4px;
+}
+
+.select2-container--default.select2-container--focus .select2-selection--multiple {
+    border: 2px solid var(--grayBorder);
+}
+
+.select2-container--default .select2-selection--multiple {
+    border-width: 2px;
+}
+
+.select2-container--open .select2-dropdown--below {
+    border-radius: 6px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.select2-selection .select2-selection--multiple:after {
+    content: "hhghgh";
+}
+
+.select-icon .select2-selection__placeholder .badge {
+    display: none;
+}
+
+.select-icon .placeholder {
+    display: none;
+}
+
+.select-icon .select2-results__option:before,
+.select-icon .select2-results__option[aria-selected="true"]:before {
+    display: none !important;
+}
+
+.select-icon .select2-search--dropdown {
+    display: none;
+}
+
+.addButton {
+    border-radius: 15px;
+}
+
+icon-shape {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    vertical-align: middle;
+}
+
+.icon-sm {
+    width: 2rem;
+    height: 2rem;
+}
+
+/* .btn-file {
+    position: relative;
+    overflow: hidden;
+}
+.btn-file input[type=file] {
+    position: absolute;
+    top: 0;
+    right: 0;
+    min-width: 100%;
+    min-height: 100%;
+    font-size: 100px;
+    text-align: right;
+    filter: alpha(opacity=0);
+    opacity: 0;
+    outline: none;
+    background: white;
+    cursor: inherit;
+    display: block;
+} */
+#files-area {
+    width: 30%;
+    /* margin: 0 auto; */
+}
+
+.file-block {
+    border-radius: 10px;
+    background-color: rgba(144, 163, 203, 0.2);
+    margin: 5px;
+    color: initial;
+    display: inline-flex;
+}
+
+    .file-block > span.name {
+        padding-right: 10px;
+        width: max-content;
+        display: inline-flex;
+    }
+
+.file-delete {
+    display: flex;
+    width: 24px;
+    color: initial;
+    background-color: #6eb4ff00;
+    font-size: large;
+    justify-content: center;
+    margin-right: 3px;
+    cursor: pointer;
+}
+
+    .file-delete:hover {
+        background-color: rgba(144, 163, 203, 0.2);
+        border-radius: 10px;
+    }
+
+    .file-delete > span {
+        transform: rotate(45deg);
+    }
+
+span.icon {
+    width: 35px;
+    height: 35px;
+    line-height: 33px;
+    font-size: 12px;
+    text-align: center;
+    border-radius: 6 px;
+}
+
+.opipround {
+    border: 1px solid #c7c4c4;
+    border-radius: 17px !important;
+    color: #8b3365 !important;
+    font-weight: 600;
+    padding: 1px 5px !important;
+    background-color: #fff;
+}
+
+.sw-theme-dots > .nav::before {
+    top: 60px !important;
+    left: 15%;
+    width: 70%;
+}
+
+.sw-theme-dots > .nav .nav-link::before {
+    top: 6px !important;
+}
+
+.sw-theme-dots > .nav .nav-link::after {
+    top: 14px !important;
+}
+
+.sw-theme-dots > .nav {
+    margin-bottom: 50px;
+}
+
+.wizardTitle {
+    position: absolute;
+    margin: -38px !important;
+}
+
+.sw-theme-dots .toolbar > .btn {
+    color: #fff;
+    background-color: #6c757d;
+    border-color: #6c757d;
+}
+
+th.thTitle {
+    color: var(--primary) !important;
+}
+
+#rescheduleTimeContainer {
+    max-height: 300px;
+    overflow: auto;
+}
+
+#opPatientListTable tbody tr.trPatient {
+    display: none;
+}
+
+#opPatientListTable tbody[data-tablefilter="total"] tr.trPatient,
+#opPatientListTable tbody[data-tablefilter="teleconsultation"] tr.trPatient.TC,
+#opPatientListTable tbody[data-tablefilter="walkin"] tr.trPatient.WI,
+#opPatientListTable tbody[data-tablefilter="appointment"] tr.trPatient.AP,
+#opPatientListTable tbody[data-tablefilter="completed"] tr.trPatient.Completed:not(.cancelT),
+#opPatientListTable tbody[data-tablefilter="waiting"] tr.trPatient.Waiting:not(.cancelT),
+#opPatientListTable tbody[data-tablefilter="yetToVisit"] tr.trPatient.YetToVisit:not(.cancelT),
+#opPatientListTable tbody[data-tablefilter="onHold"] tr.trPatient.Onhold:not(.cancelT),
+#opPatientListTable tbody[data-tablefilter="cancelled"] tr.trPatient.cancelT {
+    display: table-row;
+}
+
+#opPatientList tbody td.Waiting, #opPatientList tbody td.waiting {
+    color: var(--waitColor);
+}
+
+#opPatientList tbody td.Onhold, #opPatientList tbody td.OnHold, #opPatientList tbody td.onhold, #opPatientList tbody td.onHold {
+    color: var(--holdColor);
+}
+
+#opPatientList tbody td.Completed, #opPatientList tbody td.completed {
+    color: var(--completedColor);
+}
+
+.gotoPatientDashboard:not(.O,.D.TC) {
+    pointer-events: none;
+}
+
+.openUpload:not(.Completed), .openIA:not(.O,.D.TC), .openCons:not(.O.WI,.O.AP), .openTC:not(.D.TC), .openRS:not(.D), .openCancel:not(.D), .openRS.WI, .openCancel.WI, .openRS.Completed, .openCancel.Completed, .trPatient.cancelT {
+    pointer-events: none;
+    cursor: not-allowed;
+    opacity: 0.65;
+    filter: alpha(opacity=65);
+    -webkit-box-shadow: none;
+    box-shadow: none;
+}
+
+.trPatient.cancelT {
+    opacity: 1;
+}
+
+.tdPatientDetails.T i {
+    display: none;
+}
+
+.mobileStatus .me-5:not(.TC) {
+    display: none;
+}
+
+#rescheduleTimeContainer div.slots {
+    overflow-y: auto
+}
+
+.navbar-form-search .btn:active,
+.navbar-form-search .btn:hover,
+.navbar-form-search .btn:focus {
+    color: #000;
+    outline: none;
+    box-shadow: none;
+}
+
+.navbar-form-search .search-form-container {
+    text-align: right;
+    position: absolute;
+    width: 72%;
+    overflow: hidden;
+    background: #f8f9fa;
+    left: 0px;
+    top: 0;
+    z-index: 9;
+    transition: all 0.3s ease-in-out;
+}
+
+.navbar-form-search .search-form-container .search-input-group {
+    width: 100%;
+}
+
+.glosearch .form-control {
+    height: 78px;
+    background-color: #f8f9fa;
+    display: block;
+    position: relative;
+    border: none;
+    font-size: 21px;
+}
+
+.glosearch .input-group-text {
+    color: #8b3365;
+    font-size: 23px;
+    background-color: #f8f9fa;
+}
+
+.frame-ctrl {
+    width: 100%;
+    min-height: calc(119vh - 210px) !important;
+    max-height: calc(119vh - 210px);
+    overflow-y: auto;
+}
+
+.frame-ctrl-min {
+    width: 100%;
+    min-height: calc(84vh - 210px) !important;
+    max-height: calc(84vh - 210px);
+    overflow-y: auto;
+}
+
+.toastmaker {
+    min-width: 450px !important;
+}
+
+.frame-ctrl-desk {
+    max-width: 80%;
+}
+
+.modal-body {
+    padding: 0.5rem;
+}
+
+.navbar-light .navbar-brand {
+    line-height: 17px;
+    font-size: 17px;
+}
+
+.glosearch .form-control {
+    height: auto;
+}
+
+.glosearch .form-control,
+.glosearch .input-group-text {
+    background-color: #ffffff;
+}
+
+.button-label {
+    min-width: 80px;
+    line-height: 21px;
+}
+
+.li-height {
+    line-height: 21px;
+}
+
+.opCalender .calender {
+    height: 40px;
+    width: 50px;
+}
+
+.opDataTable th {
+    padding: 0.3rem 0.5rem;
+    color: #a9a6a6;
+}
+
+.table > :not(caption) > * > * {
+    padding: 0.2rem 0.5rem;
+    border-bottom-width: 4px;
+    border-color: #fff;
+}
+
+tr td:first-child {
+    border-top-left-radius: 10px;
+    border-bottom-left-radius: 10px;
+}
+
+tr td:last-child {
+    border-top-right-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+
+.reviewDelay.delay0 {
+    display:none;
+}

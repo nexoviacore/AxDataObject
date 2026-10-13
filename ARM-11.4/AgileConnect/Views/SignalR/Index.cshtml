@@ -1,0 +1,152 @@
+﻿
+<!DOCTYPE html>
+<html lang="en">
+    <style>
+ 
+    </style>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SignalR - AgileConnect</title>
+    
+    <link rel="stylesheet" href="/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="/css/site.css" />
+    <link href="/lib/select2/css/select2.min.css" rel="stylesheet" />
+<!-- select2-bootstrap4-theme -->
+<link href="https://raw.githack.com/ttskch/select2-bootstrap4-theme/master/dist/select2-bootstrap4.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+
+</head>
+<body>
+    <header>
+        <nav class="navbar navbar-expand-sm navbar-toggleable-sm navbar-light bg-white border-bottom box-shadow mb-3">
+            <div class="container">
+                <a class="navbar-brand" href="/ARMInstance/Configure"><b>AgileConnect</b></a>
+  
+                <button class="navbar-toggler" type="button" data-toggle="collapse" data-target=".navbar-collapse" aria-controls="navbarSupportedContent"
+                        aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="navbar-collapse collapse d-sm-inline-flex flex-sm-row-reverse">
+                    <ul class="navbar-nav flex-grow-1">
+                    </ul>
+                </div>
+            </div>
+        </nav>
+ 
+    </header>
+    <div class="container">
+        <main role="main" class="pb-3">
+            
+
+<div class="form-group">
+    <label class="control-label" for="UserId">Username</label>
+    <input id="textuserId" class="form-control" type="text" data-val="true" data-val-required="The UserId field is required." name="UserId" value="" />
+    <span class="text-danger field-validation-valid" data-valmsg-for="UserId" data-valmsg-replace="true"></span>
+</div>
+
+<div class="form-group">
+    <label class="control-label" for="token">Token</label>
+    <input id="txttoken" class="form-control" type="text" name="token" value="" />
+    <span class="text-danger field-validation-valid" data-valmsg-for="token" data-valmsg-replace="true"></span>
+</div>
+<div class="form-group">
+    <input type="submit" id="btnSubmit" value="Submit" class="btn btn-primary" />
+</div>
+
+<h4> Received messaged </h4>
+<div id="received-message"></div>
+
+        </main>
+    </div>
+ 
+    <script src="/lib/jquery/dist/jquery.min.js"></script>
+    <script src="/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/js/site.js?v=4q1jwFhaPaZgr8WAUSrux6hAuh0XDg9kPS3xIVq36I0"></script>
+    
+    <style>
+        div#received-message {
+            border-style: solid;
+            padding: 12px;
+        }
+    </style>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.3/signalr.min.js" integrity="sha512-/rQxup+foY5qwZmEmvBhb0PHxx/Fd+ESH7Xw+pozdSKhygl+ZSQm1X6LWDQrxz+NoRAZwR03X78UinlY1C4RrQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.3/signalr.js" integrity="sha512-UZ0NYw8JTuHnKNE3Zs5ypLPqnTjroy9BNcaTKar/idvEeB/ySxA3xnFoT6e6OULDY2pK8cvgsPzgvOFfq3+yhQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script>
+     var abc = null;
+      var loginToken = null;
+       // $("#btnSubmit").click(function() {
+            $(document).ready(function () {
+            // abc = $("#textuserId").val();
+            abc = "admin";
+            loginToken = "eyJhbGciOiJodHRwOi8vd3d3LnczLm9yZy8yMDAxLzA0L3htbGRzaWctbW9yZSNobWFjLXNoYTI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoibW9oYW4iLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJwb3dlciIsIkdyb3VwSWQiOiI0YmIwM2M0NS1lZjc5LTQ2NTUtOWE1NS0wMzYzMWE2MmEzNDEiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjFkNGIxY2QzLTgzNmYtNGY2Ny1hZjcwLTdhZWI0NGRjOTE2ZCIsImV4cCI6MTY4MDY4MTgwMywiaXNzIjoiS01TLU9QLUVNUiIsImF1ZCI6IktNUy1PUC1FTVIifQ.zemDfDAprGRRQ6j12HjYpbkitzj6WeoMLHgEvXO7eI8";
+             //loginToken =  $("#txttoken").val();
+            const signalrService = new SignalrService();
+            signalrService.startConnection();
+  });
+          
+  class SignalrService {
+                constructor() {
+                    this.data = null;
+                    this.connectionId = null;
+                    this.hubConnection = new signalR.HubConnectionBuilder()
+                        .withUrl("https://localhost:44363/notificationHub", { accessTokenFactory: () => loginToken })
+                        .build();
+                }
+                startConnection() {
+                    this.hubConnection
+                        .start()
+                        .then(() => console.log('Connection started'))
+                         .then(() => alert('Connection Established'))
+                        .then(() => this.getConnectionId())
+                        .catch(err => console.log('Error while starting connection: ' + err))
+                }
+                getConnectionId() {
+                    this.hubConnection.invoke('getconnectionid')
+                        .then((data) => {
+                            console.log("Got Id");
+                            console.log(data);
+                            this.connectionId = data;
+                            this.passConnectionId(abc, data);
+                            this.getMessage();
+                        });
+                }
+                passConnectionId(userId, connectionId) {
+                    console.log(userId);
+                    this.hubConnection.invoke("PassConnectionId", userId, connectionId)
+                        .catch(err => console.error(err));
+                }
+                getMessage() {
+                    this.hubConnection.on("ReceiveNotification", (message) => {
+                        console.log("Got message");
+                        console.log(message);
+                        $("#received-message").append(message + "<br>");
+                    });
+                }
+                stopConnection() {
+                       debugger;
+                    this.hubConnection.stop()
+                        .then(() => {
+                          
+                            console.log('Connection stopped');
+                            this.hubConnection = null;
+                        })
+                        .catch(err => console.log('Error while stopping connection: ' + err));
+                }
+                //sendNotification(connectionId, message) {
+                //    this.hubConnection.invoke("SendNotificationToUser", connectionId, message)
+                //        .catch (err => console.error(err));
+                //}
+            }
+         
+            // Handle the connection stop when the page unloads
+    </script>
+
+
+<!-- Visual Studio Browser Link -->
+<script type="text/javascript" src="/_vs/browserLink" async="async" id="__browserLink_initializationData" data-requestId="5d261d793b9c4eefa9fcedf43df52dbc"data-requestMappingFromServer="false" data-connectUrl="http://localhost:55758/7887d82787654065ab868d4fee952e25/browserLink"></script>
+<!-- End Browser Link -->
+
+<script src="/_framework/aspnetcore-browser-refresh.js"></script></body>
+</html>

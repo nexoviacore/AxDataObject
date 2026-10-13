@@ -1,0 +1,215 @@
+﻿@model ARMCommon.Model.AxModulePages
+
+@{
+    ViewData["Title"] = "Edit";
+}
+
+<h1>Edit</h1>
+
+   <a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a>
+<h4>AxModulePages</h4>
+<hr />
+    <div class="col-md-12">
+        <form asp-action="Edit">
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+           <div class="input-group">
+                   <div class="form-group col-md-12">
+                <label asp-for="appName" class="control-label"> App Name</label>
+                 <input asp-for="appName" ReadOnly="true" id="txtkey"  class="form-control" />
+            </div>
+
+            <div class="form-group col-md-6">
+                <label asp-for="PageTitle" class="control-label"> Page Title</label> 
+                <div class = "col-md-8">
+                <input asp-for="PageTitle" class="form-control" />
+                <span asp-validation-for="PageTitle" class="text-danger"></span>  
+            </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="PageName" class="control-label"> Page Name</label> 
+                <div class = "col-md-8">
+                <input asp-for="PageName" class="form-control" />
+                <span asp-validation-for="PageName" class="text-danger"></span> 
+            </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="PageIcon" class="control-label"> Page Icon</label> 
+                <div class = "col-md-8">
+                <input asp-for="PageIcon" class="form-control" />
+                <span asp-validation-for="PageIcon" class="text-danger"></span>
+            </div>
+            </div>
+
+             <div class="form-group col-md-6">
+                <label asp-for="Module" class="control-label">  Module  </label>
+                <div class="col-md-8">
+             @*       @Html.ListBoxFor(m => m.Module, new SelectList(Model.Modules, "ModuleName", "ModuleName"), new { @id = "ddlForm1"})*@
+                        <select asp-for="Module"
+                            asp-items="@(new SelectList(Model.Modules,"ModuleName","ModuleName"))" class="form-control">
+                        <option disabled>Please select one</option>
+                    </select>
+                    <span asp-validation-for="Module" class="text-danger"></span>
+                </div>
+            </div>
+
+            <div class="form-group col-md-6">
+                <label asp-for="SubModule" class="control-label"> Sub  Module  </label>
+                <div class="col-md-8">
+  @*                  @Html.ListBoxFor(m => m.SubModule, new SelectList(Model.SubModules, "SubModuleName", "SubModuleName"), new { @id = "ddlForm2" })*@
+    <select asp-for="SubModule"
+                            asp-items="@(new SelectList(Model.SubModules,"SubModuleName","SubModuleName"))" class="form-control">
+                        <option disabled>Please select one</option>
+                    </select>                
+   <span asp-validation-for="SubModule" class="text-danger"></span>
+                </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="PageDataTable" class="control-label"> Page DataTable Name</label> 
+                <div class = "col-md-8">
+                <input asp-for="PageDataTable" class="form-control" />
+                <span asp-validation-for="PageDataTable" class="text-danger"> </span> 
+            </div>
+            </div>
+                   <div class="form-group col-md-6">
+                <label asp-for="PageOwner" class="control-label"> Page Owner</label> 
+                <div class = "col-md-8">
+                <input asp-for="PageOwner" class="form-control" />
+                <span asp-validation-for="PageOwner" class="text-danger"></span>  </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="AcessControl" class="control-label"> Acess Control</label>  
+                <div class = "col-md-8">
+                  @Html.ListBoxFor(m => m.AcessControl, new SelectList(Model.UserGroups, "Name", "Name"), new { @id = "ddlAccessControl", @class = "form-control select-multiple", multiple = "multiple" })
+                <span asp-validation-for="AcessControl" class="text-danger"></span> 
+            </div>
+            
+                  <div class="form-group col-md-4">
+                    <input id="chkAllAccessControl" type="checkbox">Select All
+                   </div>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="Forms" class="control-label"> Forms  </label> 
+                <div class = "col-md-8">
+                      @Html.ListBoxFor(m => m.Forms, new SelectList(Model.AxInlineForm, "Name", "Name"), new { @id = "ddlForm", @class = "form-control select-multiple", multiple = "multiple" })
+                <span asp-validation-for="Forms" class="text-danger"></span>
+            </div>
+             <div class="form-group col-md-4">
+                    <input id="chkAllForms" type="checkbox">Select All
+                   </div>
+            </div>
+  
+                  <div class="form-group col-md-6">
+                <label asp-for="KeyField" class="control-label"> Key Field</label>
+                <div class = "col-md-8">
+                <input asp-for="KeyField" class="form-control" />
+                <span asp-validation-for="KeyField" class="text-danger"></span>  </div>
+            </div>
+            <div class="form-group col-md-6 form-check">
+                <label class="form-check-label">
+                    <input class="form-check-input" asp-for="AddQuickAccess" /> @Html.DisplayNameFor(model => model.AddQuickAccess)
+                </label> 
+                <div class = "col-md-8">
+                    </div>
+            </div>
+ 
+          
+            <div class="form-group col-md-8">
+                <input type="submit" value="Save" class="btn btn-primary" />
+            </div>
+            </div>
+        
+          
+        </form>
+    </div>
+ 
+
+<div>
+     <a asp-controller="AxModulePage" asp-action="ListByApp" asp-route-Appname="@Html.ValueFor(model => model.appName)">  Back to List</a>
+</div>
+
+ @section Scripts {
+
+    <style>
+ 
+        a#SignOut {
+    position: absolute;
+    top: 19px;
+    right: 40px;
+    font-size: large;
+}
+label.control-label {
+    margin-left: 15px;
+}
+label.form-check-label {
+    margin-left: 30px;
+}
+    </style>
+
+           <script src="~/lib/select2/js/select2.full.min.js"></script>
+ 
+               <script type="text/javascript">
+ $(document).ready(function () {
+	 
+ 
+
+	$("#ddlAccessControl").select2({
+		multiple: true,
+		closeOnSelect: false,
+		placeholder: "Please select the user groups...",
+		allowHtml: true,
+		allowClear: true,
+		tags: true
+	});
+		$("#ddlForm").select2({
+		multiple: true,
+		closeOnSelect: false,
+		placeholder: "Please select the Form ...",
+		allowHtml: true,
+		allowClear: true,
+		tags: true
+	});
+
+        		$("#ddlForm1").select2({
+		multiple: false,
+		closeOnSelect: false,
+		placeholder: "Please select the Module ...",
+		allowHtml: true,
+		allowClear: true,
+		tags: true
+	});
+ 
+        		$("#ddlForm2").select2({
+		multiple: false,
+		closeOnSelect: false,
+		placeholder: "Please select the SubModule ...",
+		allowHtml: true,
+		allowClear: true,
+		tags: true
+	});
+	
+ 
+	
+   $("#chkAllAccessControl").click(function(){
+        if($("#chkAllAccessControl").is(':checked')){
+            $("#ddlAccessControl > option").prop("selected", "selected");
+            $("#ddlAccessControl").trigger("change");
+        } else {
+            $("#ddlAccessControl").val('').trigger("change");
+        }
+    });
+
+    $("#chkAllForms").click(function(){
+        if($("#chkAllForms").is(':checked')){
+            $("#ddlForm > option").prop("selected", "selected");
+            $("#ddlForm").trigger("change");
+        } else {
+            $("#ddlForm").val('').trigger("change");
+        }
+    });
+});
+ 
+
+</script>
+ 
+}
+

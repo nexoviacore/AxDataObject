@@ -1,0 +1,124 @@
+﻿@model ARMCommon.Model.ARMUser
+
+@{
+    ViewData["Title"] = "Create ARM Users";
+
+}
+
+<h2 id="create-user"> Create User</h2>
+<a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a>
+
+<div id="create-box" class="col-md-12">
+    <form asp-action="Create">
+        <div class="create-User d-flex justify-content-between mt-3 mb-3">
+            <div class="back-list">
+                <a id="redirectApp" class="redirectButton btn btn-primary" title="redirectButton" asp-controller="ARMUsers" asp-action="ListByApp" asp-route-Appname="@Html.ValueFor(model => model.appname)">
+                    <span class="btn-label"> <i class="fa-solid fa-arrow-left"></i></span> Back To List
+                </a>
+            </div>
+            <div class="submit-app">
+                <input type="submit" value="Create" class="btn btn-primary" />
+            </div>
+        </div>
+        <hr/>
+        <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+        <div class="input-group row g-5">
+            <div class="form-group col-md-6">
+                <label asp-for="appname" class="control-label"></label>
+                <input asp-for="appname" ReadOnly="true" id="txtkey" class="form-control" />
+                @*
+                <select asp-for="AppName"
+                asp-items="@(new SelectList(Model.app1,"ID","Name"))" class="form-control">
+                <option disabled>Please select one</option>
+                </select>*@
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="username" class="control-label"></label>
+                <input asp-for="username" class="form-control" />
+                <span asp-validation-for="username" class="text-danger"></span>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="usergroup" class="control-label"></label>
+                <select asp-for="usergroup"
+                        asp-items="@(new SelectList(Model.UserGroupName1,"ID","Name"))" class="form-control">
+                    <option disabled>Please select one</option>
+                </select>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="password" class="control-label"></label>
+                <input asp-for="password" type="password" class="form-control" />
+                <span asp-validation-for="password" class="text-danger"></span>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="email" class="control-label"></label>
+                <input asp-for="email" class="form-control" />
+                <span asp-validation-for="email" class="text-danger"></span>
+            </div>
+            <div class="form-group col-md-6">
+                <label asp-for="mobileno" class="control-label"></label>
+                <input asp-for="mobileno" class="form-control" />
+                <span asp-validation-for="mobileno" class="text-danger"></span>
+            </div>
+            <div class="form-group col-md-12">
+                <div class="form-group col-md-6 form-check" id="isactive">
+                    <label class="form-check-label">
+                        <input class="form-check-input" asp-for="isactive" /> @Html.DisplayNameFor(model => model.isactive)
+                    </label>
+                </div>
+            </div>
+
+           @*  <div class="form-group col-md-10">
+            <div class="form-group col-md-4">
+            <input type="submit" value="Create" class="btn btn-primary" />
+            </div>
+            </div> *@
+        </div>
+    </form>
+</div>
+
+
+<div>
+    @*<a asp-controller="ARMUsers" asp-action="ListByApp" asp-route-Appname="@Html.ValueFor(model => model.appname)"> Back to List</a>*@
+
+
+</div>
+
+@section Scripts {
+
+    <style>
+
+        div#create-box {
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 6px 0 #ddd;
+        }
+
+        label {
+            font-weight: 500;
+            margin: 0 0 8px 0;
+            text-transform: capitalize;
+        }
+
+        a {
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+            a#SignOut {
+                position: absolute;
+                top: 25px;
+                right: 40px;
+                font-size: large;
+            }
+
+        h2#create-user {
+            font-size: 20px;
+            letter-spacing: 2px;
+        }
+
+    </style>
+    @{
+        await Html.RenderPartialAsync("_ValidationScriptsPartial");
+    }
+}

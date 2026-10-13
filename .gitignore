@@ -1,0 +1,69 @@
+# Nested legacy Git history is retained locally for future fetch/review operations.
+/.legacy-git-metadata/
+
+# .NET build output
+**/[Bb]in/
+**/[Oo]bj/
+**/[Dd]ebug/
+**/[Rr]elease/
+**/[Aa]rtifacts/
+**/[Tt]est[Rr]esults/
+**/[Cc]overage/
+*.coverage
+*.coveragexml
+*.trx
+*.nupkg
+*.snupkg
+/packages/
+**/packages/
+
+# IDE and user state
+**/.vs/
+**/.idea/
+**/.vscode/
+**/.codex/
+**/.agents/
+**/.claude/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.pubxml.user
+
+# Logs, temporary files, database files, and archives
+**/[Ll]og/
+**/[Ll]ogs/
+*.log
+*.tmp
+*.temp
+*.bak
+*.sqlite
+*.db
+*.zip
+*.7z
+*.rar
+*Backup.sql
+
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+*.local.*
+**/[Aa]ppsettings*.json
+**/[Aa]pp[Cc]onfig.[Jj]son
+**/service_key.json
+**/[Aa]pp[Ss]ettings.ini
+**/Properties/launchSettings.json
+*.pfx
+*.p12
+*.pem
+*.key
+
+# Local P1C-04 configuration
+/AxData/config/local/
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+

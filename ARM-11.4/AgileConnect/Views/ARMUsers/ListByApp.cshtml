@@ -1,0 +1,182 @@
+﻿@model IEnumerable<ARMCommon.Model.ARMUser>
+
+@{
+    ViewData["Title"] = "UserList";
+    var appname = @ViewBag.result;
+    var importedCount = @ViewBag.importedCount;
+    var skippedCount = @ViewBag.skippedCount;
+}
+
+<h1 id="user-list">User List</h1>
+<a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a>
+@*<p>
+    <a asp-controller="ARMUsers" asp-action="Create" asp-route-Appname=@ViewBag.result> Create User</a>
+
+     <a asp-action="ImportUsers" asp-route-Appname=@ViewBag.result id="importlink"> Import User</a>
+</p>*@
+
+<div class="user-list d-flex justify-content-between mt-3 mb-3">
+    <div class="view-connect">
+        <a asp-controller="ARMApps" asp-action="List" id="redirectApp" class="redirectButton btn btn-primary"
+           title="redirectButton">
+            <span class="btn-label"> <i class="fa-solid fa-arrow-left"></i></span> Back
+            To List
+        </a>
+    </div>
+    <div class="create-user">
+        <a id="redirectApp" class="redirectButton btn btn-primary" title="Create_user" asp-controller="ARMUsers"
+           asp-action="Create" asp-route-Appname=@ViewBag.result>
+            <span class="btn-label">
+                <i class="fa-solid fa-user-plus"></i>
+            </span> Create User
+        </a>
+
+        <a id="redirectApp" class="redirectButton btn btn-primary" title="Import_user" asp-action="ImportUsers"
+           asp-route-Appname=@ViewBag.result id="importlink">
+            <span class="btn-label"><i class="fa-solid fa-user-gear"></i></span> Import User
+        </a>
+    </div>
+</div>
+
+<hr />
+
+<div class="row">
+    <div class="col-md-12 text-end">
+        <a class="btn btn-primary" id="UserRegistration" title="Import_Details"><i class="fa-solid fa-database"></i></a>
+
+    </div>
+    <div class="modal fade" id="Registration" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-dialog-sm" role="document" style="">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <h4 class="modal-title" style="text-align:center;">Import Detail</h4>
+                    <br />
+                    @Html.Partial("_Registration")
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+@if (Model != null && Model.Any())
+{
+<table class="table">
+    <thead>
+        <tr>
+            <th>
+                @Html.DisplayNameFor(model => model.appname)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.username)
+            </th>
+
+            <th>
+                @Html.DisplayNameFor(model => model.email)
+            </th>
+
+            <th>
+                @Html.DisplayNameFor(model => model.usergroup)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.isactive)
+            </th>
+
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var item in Model)
+        {
+            <tr>
+                <td>
+                    <a asp-action="Edit" asp-route-id="@item.ID">@Html.DisplayFor(modelItem => item.appname)</a>
+                </td>
+
+                <td>
+                    @Html.DisplayFor(modelItem => item.username)
+                </td>
+
+                <td>
+                    @Html.DisplayFor(modelItem => item.email)
+                </td>
+
+                <td>
+                    @Html.DisplayFor(modelItem => item.usergroup)
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.isactive)
+                </td>
+
+                <td>
+
+                    <a asp-action="Delete" asp-route-id="@item.ID">Delete</a>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+}
+else
+{
+    <div class="alert alert-info" role="alert">
+        User Not Found
+    </div>
+}
+
+@*<div class="col-sm-6">
+     <a asp-controller="ARMApps" asp-action="List"  id="redirectApp" class="redirectButton" title="redirectButton"> View Connected Apps </a>
+   </div>*@
+
+@section Scripts {
+
+    <style>
+        a#importlink {
+            margin-left: 20px;
+        }
+
+        a#SignOut {
+            position: absolute;
+            top: 25px;
+            right: 40px;
+            font-size: large;
+        }
+
+        a#UserRegistration {
+            background-color: #F08528;
+            border: 0px;
+            margin-bottom: 15px;
+        }
+
+        h1#user-list {
+            text-transform: uppercase;
+            font-size: 20px;
+            letter-spacing: 2px;
+        }
+
+        a {
+            color: #0d6efd;
+            text-decoration: none;
+        }
+
+        th{
+            text-transform:capitalize;
+        }
+        td{
+            left:20px;
+        }
+    </style>
+    <script type="text/javascript">
+        $(document).on("click", "#UserRegistration", function () {
+            var a = '@TempData["Message"]'
+            $("#Registration").modal("show");
+            $("#importedUser").val('@TempData["importedCount"]');
+            $("#exportedUser").val('@TempData["skippedCount"]');
+        });
+    </script>
+
+}

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\AxData.Application\AxData.Application.csproj" />
+    <ProjectReference Include="..\AxData.Infrastructure\AxData.Infrastructure.csproj" />
+    <ProjectReference Include="..\AxData.Integration.Axpert\AxData.Integration.Axpert.csproj" />
+    <ProjectReference Include="..\AxData.Peg\AxData.Peg.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>

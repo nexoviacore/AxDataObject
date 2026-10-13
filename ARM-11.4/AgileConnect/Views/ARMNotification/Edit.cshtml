@@ -1,0 +1,65 @@
+﻿@model ARMCommon.Model.ARMNotificationTemplate
+
+@{
+    ViewData["Title"] = "Edit Template";
+}
+
+<h1>Create</h1>
+
+<h4>Notification Template</h4>
+   @* <a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a> *@
+<hr />
+<div class="create-container">
+   <form asp-action="Edit">
+            <div class="create-User d-flex justify-content-between mt-3 mb-3">
+                <div class="back-list">
+                    <a id="redirectApp" class="redirectButton btn btn-primary" title="redirectButton" asp-controller="ARMUsers" asp-action="ListByApp" asp-route-Appname="@Html.ValueFor(model => model.AppName)">
+                        <span class="btn-label"> <i class="fa-solid fa-arrow-left"></i></span> Back To List
+                    </a>
+                </div>
+                <div class="submit-app">
+                    <input type="submit" value="Save" class="btn btn-primary" />
+                </div>
+            </div>
+            <hr />
+        <div id="Create-template" class="input-group row g-4">
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+            <div class="col-md-6">
+                <label asp-for="AppName" class="control-label"></label>
+                 <input asp-for="AppName" ReadOnly="true" id="txtkey"  class="form-control" />
+            </div>
+            <div class="col-md-6">
+                <label asp-for="TemplateId" class="control-label"></label>
+                <input asp-for="TemplateId" class="form-control" />
+                <span asp-validation-for="TemplateId" class="text-danger"></span>
+            </div>
+            <div class="col-md-6">
+                <label asp-for="TemplateString" class="control-label"></label>
+                <input asp-for="TemplateString" class="form-control" />
+                <span asp-validation-for="TemplateString" class="text-danger"></span>
+            </div>
+         </div>
+        </form>
+  
+</div>
+
+
+
+    @section Scripts {
+
+    <style>
+ 
+        a#SignOut {
+    position: absolute;
+    top: 19px;
+    right: 40px;
+    font-size: large;
+}
+input#txtkey {
+    margin-left: -18px;
+}
+    </style>
+ 
+}
+
+

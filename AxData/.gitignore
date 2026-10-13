@@ -1,0 +1,38 @@
+# Build and test output
+**/[Bb]in/
+**/[Oo]bj/
+**/[Aa]rtifacts/
+**/[Tt]est[Rr]esults/
+**/[Cc]overage/
+*.coverage
+*.coveragexml
+*.trx
+
+# IDE and user state
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Runtime output
+**/[Ll]og/
+**/[Ll]ogs/
+*.log
+*.tmp
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.local.*
+config/local/
+**/[Aa]ppsettings*.json
+**/[Aa]pp[Ss]ettings.ini
+**/Properties/launchSettings.json
+*.pfx
+*.p12
+*.pem
+*.key

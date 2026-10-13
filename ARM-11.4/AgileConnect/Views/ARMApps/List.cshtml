@@ -1,0 +1,146 @@
+﻿@model IEnumerable<ARMCommon.Model.ARMApp>
+
+@{
+    ViewData["Title"] = "ARM Apps List";
+}
+
+<h3>Connected Apps</h3>
+<div class="connect-app d-flex justify-content-between mt-3 mb-3">
+    <div class="arm-back-list">
+        <a asp-controller="ARMInstance" asp-action="Dashboard" id="redirectApp" class="redirectButton btn btn-primary" title="redirectButton">
+            <span class="btn-label"><i class="fa-solid fa-arrow-left"></i></span> Back To Dashboard
+        </a>
+    </div>
+    <div class="create-app">
+        <a asp-action="Create" id="redirectApp" class="redirectButton btn btn-primary" title="redirectButton">
+            <span class="btn-label"><i class="fa-solid fa-pen-to-square"></i></span> Create App
+        </a>
+    </div>
+</div>
+
+<hr />
+
+@if (Model != null && Model.Any())
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>App Name</th>
+                <th>Users</th>
+                <th>UserGroups</th>
+                <th>Notification Templates</th>
+                <th>API Definitions</th>
+                <th>SQL DataSources</th>
+                @* <th>HTML Pages</th> *@
+                <th>Logs</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in Model)
+            {
+                <tr id="app-@item.AppName">
+                    <td>
+                        <a asp-action="Edit" asp-route-Appname="@item.AppName">@Html.DisplayFor(modelItem => item.AppName)</a>
+                    </td>
+                    <td>
+                        <a asp-controller="ARMUsers" asp-action="ListByApp" asp-route-Appname="@item.AppName">
+                            <i class="material-icons text-primary">person</i>
+                        </a>
+                    </td>
+                    <td>
+                        <a asp-controller="ARMUserGroups" asp-action="ListByApp" asp-route-Appname="@item.AppName">
+                            <i class="material-icons">group</i>
+                        </a>
+                    </td>
+                    <td>
+                        <a asp-controller="ARMNotification" asp-action="ListByApp" asp-route-Appname="@item.AppName">
+                            <i class="material-icons">notifications</i>
+                        </a>
+                    </td>
+                    <td>
+                        <a asp-controller="ARMDataSources" asp-action="APIDefinitionsList" asp-route-Appname="@item.AppName">
+                            <i class="material-icons">assignment</i>
+                        </a>
+                    </td>
+                    <td>
+                        <a asp-controller="ARMDataSources" asp-action="SQLDataSourceList" asp-route-Appname="@item.AppName">
+                            <i class="material-icons">storage</i>
+                        </a>
+                    </td>
+                    @*  <td>
+                    <a asp-controller="ARMHtml" asp-action="ListByApp" asp-route-Appname="@item.AppName">
+                        <i class="material-icons" style="font-size: 32px;">html</i>
+                    </a>
+                </td> *@
+                    <td>
+                        <a asp-controller="Logs" asp-action="logs" asp-route-Appname="@item.AppName">
+                            <i class="material-icons" style="font-size: 32px;">html</i>
+                        </a>
+                    </td>
+                    <td>
+                        <button type="button" class="btn btn-primary deleteRecordBtn" data-appname="@item.AppName">
+                            <i class="fa-regular fa-trash-can"></i>
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+else
+{
+    <div class="alert alert-info" role="alert">
+        No apps found.
+    </div>
+}
+
+@section Scripts {
+    <style>
+        a#SignOut {
+            position: absolute;
+            top: 19px;
+            right: 40px;
+            font-size: large;
+        }
+
+        a {
+            text-decoration: none;
+        }
+
+        th, td {
+            text-align: center;
+        }
+
+        h3 {
+            font-size: 20px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+    </style>
+    <script>
+        $(document).ready(function () {
+            $('.deleteRecordBtn').click(function () {
+                var appName = $(this).data('appname');
+                if (confirm("Are you sure you want to delete this record?")) {
+                    $.ajax({
+                        url: '@Url.Action("Delete", "ARMApps")',
+                        type: 'POST',
+                        data: { appName: appName },
+                        success: function (result) {
+                            if (result.success) {
+                                alert(result.message);
+                                window.location.href = '@Url.Action("List", "ARMApps")';
+                            } else {
+                                alert("Failed to delete record: " + result.message);
+                            }
+                        },
+                        error: function (xhr, status, error) {
+                            alert("Error during delete operation: " + error);
+                        }
+                    });
+                }
+            });
+        });
+    </script>
+}

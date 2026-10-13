@@ -1,0 +1,136 @@
+.cirpatop button i {
+    font-size: 19px;
+    line-height: 22px;
+}
+
+.cirpatop .bg-light {
+    border-radius: 10px;
+}
+
+.modal-xl .modal-body {
+    padding: 0rem;
+}
+
+.commonctrl {
+    min-height: calc(100vh - 159px) !important;
+    max-height: calc(100vh - 159px);
+    overflow-y: auto;
+}
+
+.sw-toolbar {
+    display: none !important;
+}
+
+.sw-container {
+    min-height: none !important;
+    max-height: none;
+    overflow-y: auto;
+}
+
+.sw-theme-dots>ul.step-anchor>li.active>a {
+    color: #6c757d !important;
+}
+
+.sw-theme-dots>ul.step-anchor>li.active>a:after {
+    background: #5cb85c !important;
+    border: 0px solid;
+}
+
+.sw-theme-dots>ul.step-anchor>li.done>a {
+    color: #6c757d;
+}
+
+.sw-theme-dots>ul.step-anchor>li.done>a:after {
+    border: 0px solid;
+}
+
+.primaryBgColor {
+    background-color: #8b3365;
+}
+
+.btn-grayModal {
+    background-color: #c1c1c1;
+}
+
+.control-label:after {
+    color: #d00;
+    content: "*";
+    position: relative;
+    margin-left: -1px;
+    top: -1px;
+}
+
+input::-webkit-calendar-picker-indicator {
+    opacity: 100;
+}
+
+.frame-ctrl {
+    width: 100%;
+    min-height: calc(119vh - 210px) !important;
+    max-height: calc(119vh - 210px);
+    overflow-y: auto;
+}
+
+.frame-ctrl-min {
+    width: 100%;
+    min-height: calc(84vh - 210px) !important;
+    max-height: calc(84vh - 210px);
+    overflow-y: auto;
+}
+
+.frame-ctrl-desk {
+    max-width: 80%;
+}
+
+.toolbar {
+    text-align: center;
+    position: sticky;
+    display: block;
+    bottom: 0px;
+    background-color: #fff;
+}
+
+.smartWizard .tab-content {
+    height: auto !important;
+}
+
+.modal-width-full {
+    max-width: 100%;
+}
+
+
+.sw-theme-dots>.nav::before {
+    top: 64px !important;
+    left: 0%;
+}
+
+.info-box-icon-video {
+    float: left;
+    height: 103px;
+    width: 32%;
+    text-align: center;
+    font-size: 46px;
+    line-height: 104px;
+    border-radius: 100%;
+}
+
+.pname-initial {
+    background-color: #16058e;
+    color: #fff;
+}
+
+#videoBox {
+    background: #ffffff;
+    display: none;
+}
+
+.tele-innerctrlvideo {
+    min-height: calc(100vh - 200px) !important;
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+    width: 100%;
+}
+
+.modal-body {
+    padding: 0rem;
+}

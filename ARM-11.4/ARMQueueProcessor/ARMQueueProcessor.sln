@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.2.32616.157
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ARMQueueProcessor", "ARMQueueProcessor.csproj", "{75EB6FB8-6EE2-40AD-9CEF-81B751FB6C0A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{75EB6FB8-6EE2-40AD-9CEF-81B751FB6C0A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{75EB6FB8-6EE2-40AD-9CEF-81B751FB6C0A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{75EB6FB8-6EE2-40AD-9CEF-81B751FB6C0A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{75EB6FB8-6EE2-40AD-9CEF-81B751FB6C0A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A0790E09-8697-431A-9EE3-6BF82C0A8986}
+	EndGlobalSection
+EndGlobal

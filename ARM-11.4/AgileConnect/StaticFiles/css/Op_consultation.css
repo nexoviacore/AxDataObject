@@ -1,0 +1,118 @@
+.cirpatop button i {
+    font-size: 19px;
+    line-height: 22px;
+}
+
+.cirpatop .bg-light {
+    border-radius: 10px;
+}
+
+.modal-xl .modal-body {
+    padding: 0rem;
+}
+
+.commonctrl {
+    min-height: calc(100vh - 159px) !important;
+    max-height: calc(100vh - 159px);
+    overflow-y: auto;
+}
+
+
+
+.sw-container {
+    min-height: none !important;
+    max-height: none;
+    overflow-y: auto;
+}
+
+.sw-theme-dots>ul.step-anchor>li.active>a {
+    color: #6c757d !important;
+}
+
+.sw-theme-dots>ul.step-anchor>li.active>a:after {
+    background: #5cb85c !important;
+    border: 0px solid;
+}
+
+.sw-theme-dots>ul.step-anchor>li.done>a {
+    color: #6c757d;
+}
+
+.sw-theme-dots>ul.step-anchor>li.done>a:after {
+    border: 0px solid;
+}
+
+.primaryBgColor {
+    background-color: #8b3365;
+}
+
+.btn-grayModal {
+    background-color: #c1c1c1;
+}
+
+.control-label:after {
+    color: #d00;
+    content: "*";
+    position: relative;
+    margin-left: -1px;
+    top: -1px;
+    font-size: 20px;
+    font-weight: bold;
+}
+
+input::-webkit-calendar-picker-indicator {
+    opacity: 100;
+}
+
+
+.frame-ctrl-desk {
+    max-width: 80%;
+}
+
+.toolbar {
+    text-align: center;
+    position: sticky;
+    display: block;
+    bottom: 0px;
+    background-color: #fff;
+}
+
+.smartWizard .tab-content {
+    height: auto !important;
+}
+
+.modal-width-full {
+    max-width: 100%;
+}
+
+.toastmaker {
+    min-width: 450px !important;
+}
+
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+input[type=number] {
+    -moz-appearance: textfield;
+}
+
+.modal-pop-onhold,
+.modal-pop-review {
+    position: absolute;
+    z-index: 66666;
+}
+
+.magicsearch-wrapper input.dropdown {
+    width: 100% !important;
+}
+
+.magicsearch-wrapper {
+    width: 100% !important;
+}
+
+.magicsearch-wrapper .multi-item {
+    height: 20px !important;
+}

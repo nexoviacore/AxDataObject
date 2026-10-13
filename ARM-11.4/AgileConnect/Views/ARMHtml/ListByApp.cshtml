@@ -1,0 +1,93 @@
+﻿@model IEnumerable<ARMCommon.Model.ARMHtml>
+@{
+    ViewData["Title"] = "HTML Pages";
+}
+
+<h1 id="html-data">HTML Definitions</h1>
+
+@*<a asp-action="Create" asp-route-Appname=@ViewBag.result>Create New</a>*@
+
+<a asp-controller="ARMSignIn" asp-action="SignOut" id="SignOut" class="redirectButton" title="redirectButton"> Sign Out </a>
+
+<div class="htmlDefinition d-flex justify-content-between mt-3 mb-3">
+    <div class="back-list">
+        <a asp-controller="ARMApps" asp-action="List" id="redirectApp" class="redirectButton btn btn-primary" title="redirectButton">
+            <span class="btn-label"> <i class="fa-solid fa-arrow-left"></i></span> Back To
+            List
+        </a>
+    </div>
+    <div class="create-app">
+        <a asp-action="Create" asp-route-Appname=@ViewBag.result id="redirectApp" class="redirectButton btn btn-primary" title="redirectButton">
+            <span class="btn-label"><i class="fa-solid fa-plus"></i></span> Create New
+        </a>
+    </div>
+</div>
+
+<hr />
+<table class="table">
+    <thead>
+        <tr>
+            <th>
+                @Html.DisplayName("Page Name")
+            </th>
+
+            <th>
+                @Html.DisplayName("Anonymous Access?")
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.UpdatedOn)
+            </th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var item in Model)
+        {
+            <tr>
+                <td>
+                    <a asp-action="Edit" asp-route-id="@item.ID">@Html.DisplayFor(modelItem => item.DefinitionID)</a>
+                </td>
+
+                <td>
+                    @Html.DisplayFor(modelItem => item.AllowAnonymousAccess)
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.UpdatedOn)
+                </td>
+                <td>
+                    <a asp-action="Delete" asp-route-id="@item.ID">Delete</a>
+
+
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@*<div class="col-sm-6">
+     <a asp-controller="ARMApps" asp-action="List"  id="redirectApp" class="redirectButton" title="redirectButton"> View Connected Apps </a>
+   </div>*@
+
+@section Scripts {
+
+    <style>
+
+        a#SignOut {
+            position: absolute;
+            top: 19px;
+            right: 40px;
+            font-size: large;
+        }
+
+        h1#html-data {
+            font-size: 20px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        a {
+            text-decoration: none
+        }
+    </style>
+
+}
