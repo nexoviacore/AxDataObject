@@ -61,7 +61,8 @@ If the slice changes or adds an HTTP endpoint or response shape, update tools/po
 | P1D-02 | Deterministic build, dependency/secret audit             | Standard |                    | phase-1d-readiness-gate.md       |
 | P1D-03 | E2E automation and Redis 6.2+ verification               | Standard | D31                | phase-1d-readiness-gate.md       |
 | P1D-04 | DB provider matrix                                       | Standard |                    | phase-1d-readiness-gate.md       |
-| P1D-05 | Field-engine performance                                 | Standard |                    | phase-1d-readiness-gate.md       |
+| P1D-05A | Field-engine parity, state, and performance design       | Standard |                    | phase-1d-readiness-gate.md       |
+| P1D-05B | Operation-scoped field runtime and snapshot v3          | Deep     | P1D-05A            | phase-1d-readiness-gate.md       |
 | P1D-06 | ARM change regression                                    | Light    |                    | phase-1d-readiness-gate.md       |
 | P2-01  | Idempotency store                                        | Deep     | D11                | phase-2-durable-save.md          |
 | P2-02  | Outbox table and transactional writer                    | Standard | D2                 | phase-2-durable-save.md          |

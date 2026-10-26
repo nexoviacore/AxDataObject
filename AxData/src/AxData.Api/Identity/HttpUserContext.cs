@@ -9,11 +9,16 @@ public static class HttpUserContextClaims
 {
     public const string TenantId = "tenant_id";
     public const string AdministratorRole = "admin";
+    public const string ArmSessionId = "sid";
 }
 
-public sealed class HttpUserContext(IHttpContextAccessor accessor) : IUserContext
+public sealed class HttpUserContext(
+    IHttpContextAccessor accessor,
+    IAxpertSessionResolver sessionResolver) : IUserContext
 {
-    public Task<AxUserContext> GetCurrentAsync(CancellationToken cancellationToken)
+    private const string DevelopmentAuthenticationType = "ConfiguredDevelopment";
+
+    public async Task<AxUserContext> GetCurrentAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -23,6 +28,43 @@ public sealed class HttpUserContext(IHttpContextAccessor accessor) : IUserContex
             throw new AxDataApiException(AxDataErrors.AuthenticationRequired);
         }
 
+        if (string.Equals(
+                principal.Identity.AuthenticationType,
+                DevelopmentAuthenticationType,
+                StringComparison.Ordinal))
+        {
+            return DevelopmentContext(principal);
+        }
+
+        var tokenUserName = principal.FindFirstValue(ClaimTypes.Name);
+        var sessionId = principal.FindFirstValue(HttpUserContextClaims.ArmSessionId);
+        var nameIdentifier = principal.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrWhiteSpace(tokenUserName) ||
+            string.IsNullOrWhiteSpace(sessionId) ||
+            !string.Equals(sessionId, nameIdentifier, StringComparison.Ordinal))
+        {
+            throw new AxDataApiException(AxDataErrors.AuthenticationRequired);
+        }
+
+        var session = await sessionResolver.ResolveAsync(
+            new AxpertSessionRequest(sessionId, tokenUserName),
+            cancellationToken).ConfigureAwait(false);
+        if (session is null ||
+            !string.Equals(session.SessionId, sessionId, StringComparison.Ordinal) ||
+            !string.Equals(session.UserName, tokenUserName, StringComparison.Ordinal))
+        {
+            throw new AxDataApiException(AxDataErrors.AuthenticationRequired);
+        }
+
+        return new AxUserContext(
+            session.TenantId,
+            session.UserName,
+            session.Roles,
+            IsAdministrator: false);
+    }
+
+    private static AxUserContext DevelopmentContext(ClaimsPrincipal principal)
+    {
         var tenantId = principal.FindFirstValue(HttpUserContextClaims.TenantId);
         var userName = principal.FindFirstValue(ClaimTypes.NameIdentifier) ??
                        principal.FindFirstValue("sub") ??
@@ -45,6 +87,17 @@ public sealed class HttpUserContext(IHttpContextAccessor accessor) : IUserContex
             roles,
             roles.Contains(HttpUserContextClaims.AdministratorRole));
 
-        return Task.FromResult(user);
+        return user;
+    }
+}
+
+public sealed class UnavailableAxpertSessionResolver : IAxpertSessionResolver
+{
+    public Task<AxpertSessionContext?> ResolveAsync(
+        AxpertSessionRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult<AxpertSessionContext?>(null);
     }
 }

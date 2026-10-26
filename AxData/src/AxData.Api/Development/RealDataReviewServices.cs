@@ -79,10 +79,13 @@ public static class RealDataReviewServices
         {
             MaximumSerializedBytes = configuration.GetValue(
                 "AxData:Snapshots:MaximumSerializedBytes",
-                1_048_576),
+                AxDataSnapshotOptions.DefaultMaximumSerializedBytes),
             MaximumGridRows = configuration.GetValue(
                 "AxData:Snapshots:MaximumGridRows",
-                10_000)
+                AxDataSnapshotOptions.DefaultMaximumGridRows),
+            MaximumFieldInstances = configuration.GetValue(
+                "AxData:Snapshots:MaximumFieldInstances",
+                AxDataSnapshotOptions.DefaultMaximumFieldInstances)
         };
         var fillGridOptions = new AxpertFillGridQueryOptions
         {

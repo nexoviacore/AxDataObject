@@ -108,7 +108,7 @@ public sealed class AxpertDataSource(
         }
     }
 
-    private static IReadOnlyList<AxpertDataContainerResult> ProjectContainers(object payload)
+    internal static IReadOnlyList<AxpertDataContainerResult> ProjectContainers(object payload)
     {
         var normalized = JsonConvert.DeserializeObject<Dictionary<string, Dictionary<string, Dictionary<string, object?>>>>(
             JsonConvert.SerializeObject(payload))
@@ -119,6 +119,7 @@ public sealed class AxpertDataSource(
             container.Value.Select(row =>
             {
                 var values = new Dictionary<string, object?>(row.Value, StringComparer.OrdinalIgnoreCase);
+                var sourceIds = new Dictionary<string, long?>(StringComparer.OrdinalIgnoreCase);
                 long? recordId = null;
                 if (values.Remove("axp_recid", out var rawRecordId) &&
                     long.TryParse(Convert.ToString(rawRecordId, CultureInfo.InvariantCulture), out var parsed))
@@ -128,13 +129,39 @@ public sealed class AxpertDataSource(
 
                 foreach (var companion in values.Keys
                     .Where(name => name.EndsWith("_sourceid", StringComparison.OrdinalIgnoreCase))
-                    .Where(name => values.ContainsKey(name[..^"_sourceid".Length]))
                     .ToArray())
                 {
+                    var fieldName = companion[..^"_sourceid".Length];
+                    var actualFieldName = values.Keys.SingleOrDefault(name =>
+                        string.Equals(name, fieldName, StringComparison.OrdinalIgnoreCase));
+                    if (actualFieldName is null || sourceIds.ContainsKey(actualFieldName))
+                    {
+                        throw new InvalidOperationException("AxGet returned a conflicting source-ID companion.");
+                    }
+
+                    var rawSourceId = values[companion];
+                    long? sourceId = null;
+                    if (rawSourceId is not null &&
+                        !string.IsNullOrWhiteSpace(Convert.ToString(rawSourceId, CultureInfo.InvariantCulture)))
+                    {
+                        if (!long.TryParse(
+                                Convert.ToString(rawSourceId, CultureInfo.InvariantCulture),
+                                NumberStyles.Integer,
+                                CultureInfo.InvariantCulture,
+                                out var parsedSourceId) ||
+                            parsedSourceId <= 0)
+                        {
+                            throw new InvalidOperationException("AxGet returned an invalid source-ID companion.");
+                        }
+
+                        sourceId = parsedSourceId;
+                    }
+
+                    sourceIds.Add(actualFieldName, sourceId);
                     values.Remove(companion);
                 }
 
-                return new AxpertDataRowResult(recordId, values);
+                return new AxpertDataRowResult(recordId, values, sourceIds);
             }).ToArray())).ToArray();
     }
 

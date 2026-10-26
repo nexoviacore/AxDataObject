@@ -8,6 +8,7 @@ using AxData.Application.Recovery;
 using AxData.Application.Set;
 using AxData.Api.Development;
 using AxData.Api.Observability;
+using AxData.Api.Production;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -31,16 +32,35 @@ if (m1DevelopmentMode && realDataReviewMode)
     throw new InvalidOperationException("AxData M1 and RealDataReview modes cannot both be enabled.");
 }
 
-var app = builder.Build();
-
-if (m1DevelopmentMode || realDataReviewMode)
+var developmentIdentityMode = m1DevelopmentMode || realDataReviewMode;
+if (developmentIdentityMode)
 {
-    app.UseMiddleware<DevelopmentIdentityMiddleware>();
+    builder.Services.AddSingleton<IAxpertSessionResolver, UnavailableAxpertSessionResolver>();
+    builder.Services.AddAuthorization();
 }
+else
+{
+    builder.Services.AddAxAuthAuthentication(builder.Configuration);
+    builder.Services.AddProductionServices(builder.Configuration);
+}
+
+var app = builder.Build();
 
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<RequestCompletionLoggingMiddleware>();
 app.UseMiddleware<ApiExceptionMiddleware>();
+
+if (developmentIdentityMode)
+{
+    app.UseMiddleware<DevelopmentIdentityMiddleware>();
+}
+else
+{
+    app.UseAuthentication();
+    app.UseMiddleware<ArmSessionConsistencyMiddleware>();
+}
+
+app.UseAuthorization();
 
 app.MapGet("/health", () => Results.Ok());
 app.MapGroup(ApiRoutes.BasePath).MapAxDataEndpoints();

@@ -151,6 +151,60 @@ public sealed class SetAxDataTests
     }
 
     [Fact]
+    public async Task Multiple_fields_use_one_operation_and_one_completion()
+    {
+        var fixture = await CreateFixtureAsync();
+        var command = new SetAxDataCommand("object-1", 1, true,
+        [
+            new SetDataContainerValue("dc2",
+            [
+                new SetRowValue("row_existing", "e",
+                [
+                    new SetFieldValue("qty", 3m),
+                    new SetFieldValue("rate", 6m)
+                ])
+            ])
+        ]);
+
+        var result = await fixture.Handler.HandleAsync(command, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, fixture.FieldEngine.OperationCount);
+        Assert.Equal(1, fixture.FieldEngine.CompleteCount);
+        Assert.Equal(0, fixture.FieldEngine.RebuildCount);
+        Assert.Equal(
+            [new FieldAddress("dc2", "row_existing", "rate"), new FieldAddress("dc2", "row_existing", "qty")],
+            fixture.FieldEngine.EvaluatedFields);
+    }
+
+    [Fact]
+    public async Task Rejected_field_rebuilds_before_later_independent_field()
+    {
+        var fixture = await CreateFixtureAsync();
+        var command = new SetAxDataCommand("object-1", 1, false,
+        [
+            new SetDataContainerValue("dc2",
+            [
+                new SetRowValue("row_existing", "e",
+                [
+                    new SetFieldValue("rate", "invalid"),
+                    new SetFieldValue("qty", 3m)
+                ])
+            ])
+        ]);
+
+        var result = await fixture.Handler.HandleAsync(command, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Single(result.Response!.Errors);
+        Assert.Equal(1, fixture.FieldEngine.OperationCount);
+        Assert.Equal(1, fixture.FieldEngine.RebuildCount);
+        Assert.Equal(1, fixture.FieldEngine.CompleteCount);
+        Assert.Equal(3m, fixture.State.DataContainers["dc2"].Rows
+            .Single(row => row.RowId == "row_existing").Fields["qty"].Value);
+    }
+
+    [Fact]
     public async Task All_validation_errors_are_collected_without_writing_or_advancing_version()
     {
         var fixture = await CreateFixtureAsync();

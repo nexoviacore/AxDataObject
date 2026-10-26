@@ -48,12 +48,49 @@ public interface IAxpertDataLoader
 
 public interface IAxpertFieldEngine
 {
-    Task<FieldEvaluationResult> SetValidateAndRefreshAsync(
+    Task<FieldOperationStartResult> CreateOperationAsync(
+        AxDataState state,
+        AxUserContext user,
+        CancellationToken cancellationToken);
+}
+
+public interface IAxpertFieldOperation : IAsyncDisposable
+{
+    Task<FieldEvaluationResult> EvaluateAsync(
+        FieldAddress field,
+        object? value,
+        CancellationToken cancellationToken);
+
+    Task<FieldOperationStatus> RebuildAsync(CancellationToken cancellationToken);
+
+    Task<FieldEvaluationResult> CompleteAsync(CancellationToken cancellationToken);
+}
+
+public static class AxpertFieldEngineExtensions
+{
+    public static async Task<FieldEvaluationResult> SetValidateAndRefreshAsync(
+        this IAxpertFieldEngine engine,
         AxDataState state,
         FieldAddress field,
         object? value,
         AxUserContext user,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        var started = await engine.CreateOperationAsync(state, user, cancellationToken).ConfigureAwait(false);
+        if (!started.Succeeded || started.Operation is null)
+        {
+            return FieldEvaluationResult.Failure(new FieldEvaluationError(
+                field,
+                "AXD-VAL-001",
+                started.Error ?? "The Axpert field operation could not be created."));
+        }
+
+        await using var operation = started.Operation;
+        var evaluated = await operation.EvaluateAsync(field, value, cancellationToken).ConfigureAwait(false);
+        return evaluated.Succeeded
+            ? await operation.CompleteAsync(cancellationToken).ConfigureAwait(false)
+            : evaluated;
+    }
 }
 
 public interface IAxpertFillGridEngine

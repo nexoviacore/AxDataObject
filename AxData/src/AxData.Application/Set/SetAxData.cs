@@ -187,6 +187,7 @@ public sealed class SetAxDataHandler(
         var changedParents = new List<FieldAddress>();
         var hasMutations = false;
         var fieldEvaluationStarted = Stopwatch.GetTimestamp();
+        var preparedRows = new List<PreparedRow>();
         foreach (var containerDefinition in definition.DataContainers.Where(definition =>
                      command.DataContainers.Any(candidate =>
                          string.Equals(candidate.Name, definition.Name, StringComparison.OrdinalIgnoreCase))))
@@ -207,50 +208,126 @@ public sealed class SetAxDataHandler(
                     continue;
                 }
 
-                var hasValidField = false;
-                foreach (var submittedField in OrderFields(submittedRow, containerDefinition))
+                preparedRows.Add(new PreparedRow(
+                    container,
+                    row,
+                    submittedRow,
+                    submittedRowIndex,
+                    submittedRow.Action == AxRowAction.New,
+                    OrderFields(submittedRow, containerDefinition).ToArray()));
+            }
+        }
+
+        var submissions = preparedRows
+            .SelectMany(prepared => prepared.Fields.Select(field => new PreparedField(
+                prepared,
+                new FieldAddress(prepared.Container.Name, prepared.Row.RowId, field.Name),
+                field.Value)))
+            .ToArray();
+        if (submissions.Length > 0)
+        {
+            var started = await fieldEngine.CreateOperationAsync(state, actor, cancellationToken).ConfigureAwait(false);
+            if (!started.Succeeded || started.Operation is null)
+            {
+                if (started.FailureKind == FieldOperationFailureKind.DefinitionChanged)
                 {
-                    var address = new FieldAddress(container.Name, row.RowId, submittedField.Name);
-                    var evaluation = await fieldEngine.SetValidateAndRefreshAsync(
-                        state,
-                        address,
-                        submittedField.Value,
-                        actor,
+                    return SetAxDataResult.Failure(AxDataErrors.StructDefChanged);
+                }
+
+                errors.Add(new FieldEvaluationError(
+                    submissions[0].Address,
+                    AxDataErrors.ValidationFailed.Code,
+                    started.Error ?? AxDataErrors.ValidationFailed.Message));
+            }
+            else
+            {
+                await using var operation = started.Operation;
+                var rejectedSources = new List<FieldAddress>();
+                for (var submissionIndex = 0; submissionIndex < submissions.Length; submissionIndex++)
+                {
+                    var submission = submissions[submissionIndex];
+                    if (IsBlockedByRejectedSource(submission.Address, rejectedSources, definition))
+                    {
+                        continue;
+                    }
+
+                    var evaluation = await operation.EvaluateAsync(
+                        submission.Address,
+                        submission.Value,
                         cancellationToken).ConfigureAwait(false);
                     if (!evaluation.Succeeded)
                     {
                         errors.AddRange(evaluation.Errors.Count == 0
-                            ? [new FieldEvaluationError(address, AxDataErrors.ValidationFailed.Code, AxDataErrors.ValidationFailed.Message)]
+                            ? [new FieldEvaluationError(submission.Address, AxDataErrors.ValidationFailed.Code, AxDataErrors.ValidationFailed.Message)]
                             : evaluation.Errors);
+                        rejectedSources.Add(submission.Address);
+                        var hasEligibleContinuation = submissions
+                            .Skip(submissionIndex + 1)
+                            .Any(candidate => !IsBlockedByRejectedSource(
+                                candidate.Address,
+                                rejectedSources,
+                                definition));
+                        if (hasEligibleContinuation)
+                        {
+                            var rebuilt = await operation.RebuildAsync(cancellationToken).ConfigureAwait(false);
+                            if (!rebuilt.Succeeded)
+                            {
+                                return SetAxDataResult.Failure(
+                                    rebuilt.FailureKind == FieldOperationFailureKind.DefinitionChanged
+                                        ? AxDataErrors.StructDefChanged
+                                        : AxDataErrors.DependencyUnavailable);
+                            }
+                        }
+
                         continue;
                     }
 
-                    hasValidField = true;
-                    changedParents.AddRange(evaluation.Changes.Select(change => change.Address));
+                    submission.PreparedRow.HasValidField = true;
+                }
+
+                if (preparedRows.Any(row => row.HasValidField))
+                {
+                    var completed = await operation.CompleteAsync(cancellationToken).ConfigureAwait(false);
+                    if (!completed.Succeeded)
+                    {
+                        return SetAxDataResult.Failure(completed.Errors.Any(error =>
+                            string.Equals(error.Code, AxDataErrors.StructDefChanged.Code, StringComparison.Ordinal))
+                            ? AxDataErrors.StructDefChanged
+                            : AxDataErrors.DependencyUnavailable);
+                    }
+
+                    changedParents.AddRange(completed.Changes.Select(change => change.Address));
                     if (command.GetDeps)
                     {
-                        changes.AddRange(evaluation.Changes.Where(change => change.Source != FieldChangeSource.Submitted));
+                        changes.AddRange(completed.Changes.Where(change =>
+                            change.Source != FieldChangeSource.Submitted));
                     }
                 }
-
-                if (isNewRow && !hasValidField)
-                {
-                    container.Rows.Remove(row);
-                    continue;
-                }
-
-                if (isNewRow)
-                {
-                    createdRows.Add(new SetCreatedRow(container.Name, submittedRowIndex, row.RowId));
-                }
-
-                if (submittedRow.Action == AxRowAction.Edit && hasValidField)
-                {
-                    row.TransitionTo(AxRowState.Edited);
-                }
-
-                hasMutations |= hasValidField;
             }
+        }
+
+        foreach (var prepared in preparedRows)
+        {
+            if (prepared.IsNew && !prepared.HasValidField)
+            {
+                prepared.Container.Rows.Remove(prepared.Row);
+                continue;
+            }
+
+            if (prepared.IsNew)
+            {
+                createdRows.Add(new SetCreatedRow(
+                    prepared.Container.Name,
+                    prepared.RequestRowIndex,
+                    prepared.Row.RowId));
+            }
+
+            if (prepared.Submitted.Action == AxRowAction.Edit && prepared.HasValidField)
+            {
+                prepared.Row.TransitionTo(AxRowState.Edited);
+            }
+
+            hasMutations |= prepared.HasValidField;
         }
 
         var fieldEvaluationDuration = Stopwatch.GetElapsedTime(fieldEvaluationStarted).TotalMilliseconds;
@@ -468,6 +545,18 @@ public sealed class SetAxDataHandler(
                 string.Equals(field.Name, name, StringComparison.OrdinalIgnoreCase)));
     }
 
+    private static bool IsBlockedByRejectedSource(
+        FieldAddress candidate,
+        IReadOnlyCollection<FieldAddress> rejectedSources,
+        StructDefHandle definition) =>
+        rejectedSources.Any(rejected =>
+            string.Equals(rejected.RowId, candidate.RowId, StringComparison.OrdinalIgnoreCase) &&
+            definition.Dependencies.Any(dependency =>
+                string.Equals(dependency.SourceContainer, rejected.DataContainer, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(dependency.SourceField, rejected.FieldName, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(dependency.TargetContainer, candidate.DataContainer, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(dependency.TargetField, candidate.FieldName, StringComparison.OrdinalIgnoreCase)));
+
     private static bool TryApplyFillGrid(
         AxDataState state,
         StructDefHandle definition,
@@ -592,4 +681,23 @@ public sealed class SetAxDataHandler(
 
     private static bool IsReadOnlyField(string container, string field, AxQueryPermission permission) =>
         permission.ReadOnlyFields.TryGetValue(container, out var fields) && fields.Contains(field);
+
+    private sealed class PreparedRow(
+        AxDataContainer container,
+        AxDataRow row,
+        SetRowValue submitted,
+        int requestRowIndex,
+        bool isNew,
+        IReadOnlyList<SetFieldValue> fields)
+    {
+        public AxDataContainer Container { get; } = container;
+        public AxDataRow Row { get; } = row;
+        public SetRowValue Submitted { get; } = submitted;
+        public int RequestRowIndex { get; } = requestRowIndex;
+        public bool IsNew { get; } = isNew;
+        public IReadOnlyList<SetFieldValue> Fields { get; } = fields;
+        public bool HasValidField { get; set; }
+    }
+
+    private sealed record PreparedField(PreparedRow PreparedRow, FieldAddress Address, object? Value);
 }

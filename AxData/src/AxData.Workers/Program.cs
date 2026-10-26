@@ -29,8 +29,9 @@ var redis = await ConnectionMultiplexer.ConnectAsync(redisConnection).ConfigureA
 await using var redisLifetime = redis.ConfigureAwait(false);
 var serializer = new AxDataSnapshotSerializer(new AxDataSnapshotOptions
 {
-    MaximumSerializedBytes = 1_048_576,
-    MaximumGridRows = 10_000
+    MaximumSerializedBytes = AxDataSnapshotOptions.DefaultMaximumSerializedBytes,
+    MaximumGridRows = AxDataSnapshotOptions.DefaultMaximumGridRows,
+    MaximumFieldInstances = AxDataSnapshotOptions.DefaultMaximumFieldInstances
 });
 var redisOptions = new AxDataRedisOptions
 {

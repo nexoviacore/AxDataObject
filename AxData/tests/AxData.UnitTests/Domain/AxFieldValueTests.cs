@@ -55,4 +55,28 @@ public sealed class AxFieldValueTests
         Assert.Equal("changed", field.OriginalValue);
         Assert.False(field.IsDirty);
     }
+
+    [Fact]
+    public void Source_id_participates_in_dirty_tracking_and_acceptance()
+    {
+        var field = new AxFieldValue("display", sourceId: 10);
+
+        Assert.True(field.SetValue("display", 11));
+        Assert.True(field.IsDirty);
+        Assert.Equal(10, field.OriginalSourceId);
+
+        field.AcceptChanges();
+
+        Assert.False(field.IsDirty);
+        Assert.Equal(11, field.SourceId);
+        Assert.Equal(11, field.OriginalSourceId);
+    }
+
+    [Fact]
+    public void Rehydrate_rejects_inconsistent_or_non_positive_source_state()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            AxFieldValue.Rehydrate("same", "same", true, false, 10, 10));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AxFieldValue("value", sourceId: 0));
+    }
 }

@@ -1,376 +1,482 @@
 {
-  "info": {
-    "_postman_id": "6cd8f38d-c293-4fe6-92c9-3e4f55adbc15",
-    "name": "AxData M1.5 review pack",
-    "description": "M1.5 Init, Set, Get/recovery, Query, and negative review requests. Run the M1.5 folder in order and perform the documented Redis eviction between requests 04 and 05.",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-  },
-  "variable": [
-    { "key": "objectId", "value": "" },
-    { "key": "newObjectId", "value": "" },
-    { "key": "version", "value": "" },
-    { "key": "preUpdateVersion", "value": "" },
-    { "key": "beforeEvictionVersion", "value": "" },
-    { "key": "editableDcId", "value": "" },
-    { "key": "editableRowId", "value": "" }
-  ],
-  "item": [
-    {
-      "name": "M1.5",
-      "item": [
-        {
-          "name": "01 Init new",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"transId\": \"{{newTransId}}\",\n  \"key\": null\n}",
-              "options": { "raw": { "language": "json" } }
-            },
-            "url": "{{baseUrl}}/api/v1/axdata",
-            "description": "Creates new state using the contract-tested null key shape."
-          },
-          "event": [{
-            "listen": "test",
-            "script": {
-              "type": "text/javascript",
-              "exec": [
-                "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
-                "const body = pm.response.json();",
-                "pm.test('Init new returns success', () => pm.expect(body.status).to.eql('success'));",
-                "pm.test('Init new returns objectId and version', () => {",
-                "  pm.expect(body.objectId).to.be.a('string').and.not.empty;",
-                "  pm.expect(body.version).to.be.a('number');",
-                "});",
-                "pm.collectionVariables.set('newObjectId', body.objectId);"
-              ]
-            }
-          }]
-        },
-        {
-          "name": "02 Init existing",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"transId\": \"{{existingTransId}}\",\n  \"key\": {\n    \"field\": \"{{existingKeyField}}\",\n    \"value\": \"{{existingKeyValue}}\"\n  }\n}",
-              "options": { "raw": { "language": "json" } }
-            },
-            "url": "{{baseUrl}}/api/v1/axdata",
-            "description": "Loads existing state using the contract-tested keyField/keyValue shape."
-          },
-          "event": [{
-            "listen": "test",
-            "script": {
-              "type": "text/javascript",
-              "exec": [
-                "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
-                "const body = pm.response.json();",
-                "pm.test('Init existing returns success', () => pm.expect(body.status).to.eql('success'));",
-                "pm.test('Init existing returns objectId and version', () => {",
-                "  pm.expect(body.objectId).to.be.a('string').and.not.empty;",
-                "  pm.expect(body.version).to.be.a('number');",
-                "});",
-                "pm.collectionVariables.set('objectId', body.objectId);",
-                "pm.collectionVariables.set('version', body.version);",
-                "pm.collectionVariables.set('preUpdateVersion', body.version);"
-              ]
-            }
-          }]
-        },
-        {
-          "name": "02a Get addressing contract",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}",
-            "description": "Captures the server-owned dcId and rowId used by subsequent Set and Query requests."
-          },
-          "event": [{
-            "listen": "test",
-            "script": {
-              "type": "text/javascript",
-              "exec": [
-                "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
-                "const body = pm.response.json();",
-                "const dc = body.dataContainers.find(candidate => candidate.rows.some(row => row.fields.some(field => field.name === 'qty')));",
-                "const row = dc && dc.rows.find(candidate => candidate.fields.some(field => field.name === 'qty'));",
-                "pm.test('Get exposes stable dcId and opaque rowId', () => {",
-                "  pm.expect(dc.dcId).to.be.a('string').and.not.empty;",
-                "  pm.expect(row.rowId).to.be.a('string').and.not.empty;",
-                "  if (row.recordId !== null && row.recordId !== undefined) pm.expect(row.rowId).not.to.eql(String(row.recordId));",
-                "});",
-                "pm.collectionVariables.set('editableDcId', dc.dcId);",
-                "pm.collectionVariables.set('editableRowId', row.rowId);"
-              ]
-            }
-          }]
-        },
-        {
-          "name": "03 Set valid",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "If-Match", "value": "\"{{version}}\"", "description": "D4 quoted version." }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"getDeps\": false,\n  \"expectedVersion\": {{version}},\n  \"data\": {\n    \"{{editableDcId}}\": {\n      \"rows\": [\n        {\n          \"rowId\": \"{{editableRowId}}\",\n          \"action\": \"e\",\n          \"fields\": {\n            \"qty\": 2\n          }\n        }\n      ]\n    }\n  }\n}",
-              "options": { "raw": { "language": "json" } }
-            },
-            "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}/set",
-            "description": "Sends the D4 quoted If-Match header, advances the object to version 2, and publishes the durable snapshot for the worker."
-          },
-          "event": [{
-            "listen": "test",
-            "script": {
-              "type": "text/javascript",
-              "exec": [
-                "const prior = Number(pm.collectionVariables.get('version'));",
-                "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
-                "const body = pm.response.json();",
-                "pm.test('Set returns success', () => pm.expect(body.status).to.eql('success'));",
-                "pm.test('Set increments version', () => pm.expect(body.version).to.eql(prior + 1));",
-                "pm.test('Set returns changes and no validation errors', () => {",
-                "  pm.expect(body.createdRows).to.be.an('array');",
-                "  pm.expect(body.changed).to.be.an('array').that.is.not.empty;",
-                "  pm.expect(body.errors).to.be.an('array').that.is.empty;",
-                "});",
-                "pm.collectionVariables.set('preUpdateVersion', prior);",
-                "pm.collectionVariables.set('version', body.version);"
-              ]
-            }
-          }]
-        },
-        {
-          "name": "04 Get before eviction",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}",
-            "description": "Wait for the worker acknowledgement from request 03, run this request, and then perform the README Redis eviction before request 05. This is the Newman split boundary."
-          },
-          "event": [{
-            "listen": "test",
-            "script": {
-              "type": "text/javascript",
-              "exec": [
-                "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
-                "const body = pm.response.json();",
-                "pm.test('Get returns the persisted current version', () => pm.expect(body.version).to.eql(Number(pm.collectionVariables.get('version'))));",
-                "const dc = body.dataContainers.find(candidate => candidate.dcId === pm.collectionVariables.get('editableDcId'));",
-                "pm.test('Get preserves the addressed rowId', () => pm.expect(dc.rows.some(row => row.rowId === pm.collectionVariables.get('editableRowId'))).to.eql(true));",
-                "pm.collectionVariables.set('beforeEvictionVersion', body.version);"
-              ]
-            }
-          }]
-        },
-        {
-          "name": "05 Get after eviction (run after manual evict)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}",
-            "description": "Run only after deleting the exact tenant-scoped active-state key as documented in the README."
-          },
-          "event": [{
-            "listen": "test",
-            "script": {
-              "type": "text/javascript",
-              "exec": [
-                "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
-                "const body = pm.response.json();",
-                "const before = Number(pm.collectionVariables.get('beforeEvictionVersion'));",
-                "pm.test('Recovered Get preserves the pre-eviction version', () => pm.expect(body.version).to.eql(before));",
-                "const dc = body.dataContainers.find(candidate => candidate.dcId === pm.collectionVariables.get('editableDcId'));",
-                "pm.test('Recovery preserves dcId and rowId', () => pm.expect(dc.rows.some(row => row.rowId === pm.collectionVariables.get('editableRowId'))).to.eql(true));",
-                "pm.collectionVariables.set('version', body.version);"
-              ]
-            }
-          }]
-        },
-        {
-          "name": "06 Set invalid",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "If-Match", "value": "\"{{version}}\"", "description": "D4 quoted version." }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"getDeps\": true,\n  \"expectedVersion\": {{version}},\n  \"data\": {\n    \"{{editableDcId}}\": {\n      \"rows\": [\n        {\n          \"rowId\": \"{{editableRowId}}\",\n          \"action\": \"e\",\n          \"fields\": {\n            \"qty\": \"not-a-number\"\n          }\n        }\n      ]\n    }\n  }\n}",
-              "options": { "raw": { "language": "json" } }
-            },
-            "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}/set"
-          },
-          "event": [{
-            "listen": "test",
-            "script": {
-              "type": "text/javascript",
-              "exec": [
-                "const current = Number(pm.collectionVariables.get('version'));",
-                "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
-                "const body = pm.response.json();",
-                "pm.test('Set returns validation_error', () => pm.expect(body.status).to.eql('validation_error'));",
-                "pm.test('Validation code is INVALID_NUMBER', () => pm.expect(body.errors[0].code).to.eql('INVALID_NUMBER'));",
-                "pm.test('Invalid Set does not advance version', () => pm.expect(body.version).to.eql(current));"
-              ]
-            }
-          }]
-        },
-        {
-          "name": "07 Set stale If-Match",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "If-Match", "value": "\"{{preUpdateVersion}}\"", "description": "D4 quoted saved pre-update version." }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"getDeps\": false,\n  \"expectedVersion\": {{preUpdateVersion}},\n  \"data\": {\n    \"{{editableDcId}}\": {\n      \"rows\": [\n        {\n          \"rowId\": \"{{editableRowId}}\",\n          \"action\": \"e\",\n          \"fields\": {\n            \"qty\": 2\n          }\n        }\n      ]\n    }\n  }\n}",
-              "options": { "raw": { "language": "json" } }
-            },
-            "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}/set",
-            "description": "Reuses the quoted pre-update version saved by request 03."
-          },
-          "event": [{
-            "listen": "test",
-            "script": {
-              "type": "text/javascript",
-              "exec": [
-                "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
-                "const body = pm.response.json();",
-                "pm.test('Stale Set returns error status', () => pm.expect(body.status).to.eql('error'));",
-                "pm.test('Stale Set returns AXD-CONC-001', () => pm.expect(body.code).to.eql('AXD-CONC-001'));",
-                "pm.test('Current version is returned', () => pm.expect(body.currentVersion).to.eql(Number(pm.collectionVariables.get('version'))));"
-              ]
-            }
-          }]
-        },
-        {
-          "name": "08 Query",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"select\": [\n    {\n      \"dcId\": \"{{editableDcId}}\",\n      \"fields\": [\"qty\"]\n    }\n  ]\n}",
-              "options": { "raw": { "language": "json" } }
-            },
-            "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}/query",
-            "description": "Uses the contract-tested selective-query document shape."
-          },
-          "event": [{
-            "listen": "test",
-            "script": {
-              "type": "text/javascript",
-              "exec": [
-                "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
-                "const body = pm.response.json();",
-                "pm.test('Query preserves current version', () => pm.expect(body.version).to.eql(Number(pm.collectionVariables.get('version'))));",
-                "pm.test('Query uses dcId and preserves rowId', () => {",
-                "  pm.expect(body.dataContainers[0].dcId).to.eql(pm.collectionVariables.get('editableDcId'));",
-                "  pm.expect(body.dataContainers[0].rows.some(row => row.rowId === pm.collectionVariables.get('editableRowId'))).to.eql(true);",
-                "});"
-              ]
-            }
-          }]
-        },
-        {
-          "name": "09 Negatives",
-          "item": [
-            {
-              "name": "Client bypass flag cannot bypass stale version",
-              "request": {
-                "method": "POST",
-                "header": [
-                  { "key": "Content-Type", "value": "application/json" },
-                  { "key": "If-Match", "value": "\"{{preUpdateVersion}}\"", "description": "D4 quoted saved pre-update version." }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"getDeps\": false,\n  \"expectedVersion\": {{preUpdateVersion}},\n  \"bypassPermission\": true,\n  \"data\": {\n    \"{{editableDcId}}\": {\n      \"rows\": [\n        {\n          \"rowId\": \"{{editableRowId}}\",\n          \"action\": \"e\",\n          \"fields\": {\n            \"qty\": 2\n          }\n        }\n      ]\n    }\n  }\n}",
-                  "options": { "raw": { "language": "json" } }
-                },
-                "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}/set",
-                "description": "The unknown client bypass flag is ignored; it cannot bypass the stale-version guard."
-              },
-              "event": [{
-                "listen": "test",
-                "script": {
-                  "type": "text/javascript",
-                  "exec": [
-                    "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
-                    "const body = pm.response.json();",
-                    "pm.test('Client bypass attempt returns error status', () => pm.expect(body.status).to.eql('error'));",
-                    "pm.test('Client bypass attempt returns AXD-CONC-001', () => pm.expect(body.code).to.eql('AXD-CONC-001'));"
-                  ]
-                }
-              }]
-            },
-            {
-              "name": "recordId and rowNo cannot address an edit",
-              "request": {
-                "method": "POST",
-                "header": [
-                  { "key": "Content-Type", "value": "application/json" },
-                  { "key": "If-Match", "value": "\"{{version}}\"", "description": "Uses the current version so row addressing is the failing condition." }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"getDeps\": false,\n  \"expectedVersion\": {{version}},\n  \"data\": {\n    \"{{editableDcId}}\": {\n      \"rows\": [\n        {\n          \"recordId\": 10,\n          \"rowNo\": 1,\n          \"action\": \"e\",\n          \"fields\": {\n            \"qty\": 2\n          }\n        }\n      ]\n    }\n  }\n}",
-                  "options": { "raw": { "language": "json" } }
-                },
-                "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}/set",
-                "description": "Proves that persistence identity and positional row number cannot replace the server-issued rowId."
-              },
-              "event": [{
-                "listen": "test",
-                "script": {
-                  "type": "text/javascript",
-                  "exec": [
-                    "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
-                    "const body = pm.response.json();",
-                    "pm.test('Invalid row addressing returns AXD-REQ-001', () => pm.expect(body.code).to.eql('AXD-REQ-001'));"
-                  ]
-                }
-              }]
-            }
-          ]
-        }
-      ]
+    "info": {
+        "_postman_id": "6cd8f38d-c293-4fe6-92c9-3e4f55adbc15",
+        "name": "AxData M1.5 review pack",
+        "description": "M1.5 Init, Set, Get/recovery, Query, and negative review requests. Run the M1.5 folder in order and perform the documented Redis eviction between requests 04 and 05.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
     },
-    {
-      "name": "M1.5 / Manual identity",
-      "description": "Separate from the normal M1.5 run. Restart the API with an unrelated configured identity, then run these requests manually.",
-      "item": [
+    "auth": {
+        "type": "bearer",
+        "bearer": [
+            { "key": "token", "value": "{{ARMToken}}", "type": "string" }
+        ]
+    },
+    "variable": [
+        { "key": "objectId", "value": "" },
+        { "key": "newObjectId", "value": "" },
+        { "key": "version", "value": "" },
+        { "key": "preUpdateVersion", "value": "" },
+        { "key": "beforeEvictionVersion", "value": "" },
+        { "key": "editableDcId", "value": "" },
+        { "key": "editableRowId", "value": "" }
+    ],
+    "item": [
         {
-          "name": "Unauthorized Get",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}",
-            "description": "Requires the README identity-restart procedure."
-          },
-          "event": [{
-            "listen": "test",
-            "script": {
-              "type": "text/javascript",
-              "exec": [
-                "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
-                "const body = pm.response.json();",
-                "pm.test('Unauthorized Get returns error status', () => pm.expect(body.status).to.eql('error'));",
-                "pm.test('Unauthorized Get returns AXD-AUTH-002', () => pm.expect(body.code).to.eql('AXD-AUTH-002'));"
-              ]
-            }
-          }]
+            "name": "M1.5",
+            "item": [
+                {
+                    "name": "01 Init new",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"transId\": \"{{newTransId}}\",\n  \"key\": null\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{baseUrl}}/api/v1/axdata",
+                        "description": "Creates new state using the contract-tested null key shape."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                    "const body = pm.response.json();",
+                                    "pm.test('Init new returns success', () => pm.expect(body.status).to.eql('success'));",
+                                    "pm.test('Init new returns objectId and version', () => {",
+                                    "  pm.expect(body.objectId).to.be.a('string').and.not.empty;",
+                                    "  pm.expect(body.version).to.be.a('number');",
+                                    "});",
+                                    "pm.collectionVariables.set('newObjectId', body.objectId);"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "02 Init existing",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"transId\": \"{{existingTransId}}\",\n  \"key\": {\n    \"field\": \"{{existingKeyField}}\",\n    \"value\": \"{{existingKeyValue}}\"\n  }\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{baseUrl}}/api/v1/axdata",
+                        "description": "Loads existing state using the contract-tested keyField/keyValue shape."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                    "const body = pm.response.json();",
+                                    "pm.test('Init existing returns success', () => pm.expect(body.status).to.eql('success'));",
+                                    "pm.test('Init existing returns objectId and version', () => {",
+                                    "  pm.expect(body.objectId).to.be.a('string').and.not.empty;",
+                                    "  pm.expect(body.version).to.be.a('number');",
+                                    "});",
+                                    "pm.collectionVariables.set('objectId', body.objectId);",
+                                    "pm.collectionVariables.set('version', body.version);",
+                                    "pm.collectionVariables.set('preUpdateVersion', body.version);"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "02a Get addressing contract",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}",
+                        "description": "Captures the server-owned dcId and rowId used by subsequent Set and Query requests."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                    "const body = pm.response.json();",
+                                    "const dc = body.dataContainers.find(candidate => candidate.rows.some(row => row.fields.some(field => field.name === 'qty')));",
+                                    "const row = dc && dc.rows.find(candidate => candidate.fields.some(field => field.name === 'qty'));",
+                                    "pm.test('Get exposes stable dcId and opaque rowId', () => {",
+                                    "  pm.expect(dc.dcId).to.be.a('string').and.not.empty;",
+                                    "  pm.expect(row.rowId).to.be.a('string').and.not.empty;",
+                                    "  if (row.recordId !== null && row.recordId !== undefined) pm.expect(row.rowId).not.to.eql(String(row.recordId));",
+                                    "});",
+                                    "pm.collectionVariables.set('editableDcId', dc.dcId);",
+                                    "pm.collectionVariables.set('editableRowId', row.rowId);"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "03 Set valid",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "If-Match",
+                                "value": "\"{{version}}\"",
+                                "description": "D4 quoted version."
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"getDeps\": false,\n  \"expectedVersion\": {{version}},\n  \"data\": {\n    \"{{editableDcId}}\": {\n      \"rows\": [\n        {\n          \"rowId\": \"{{editableRowId}}\",\n          \"action\": \"e\",\n          \"fields\": {\n            \"qty\": 2\n          }\n        }\n      ]\n    }\n  }\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}/set",
+                        "description": "Sends the D4 quoted If-Match header, advances the object to version 2, and publishes the durable snapshot for the worker."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "const prior = Number(pm.collectionVariables.get('version'));",
+                                    "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                    "const body = pm.response.json();",
+                                    "pm.test('Set returns success', () => pm.expect(body.status).to.eql('success'));",
+                                    "pm.test('Set increments version', () => pm.expect(body.version).to.eql(prior + 1));",
+                                    "pm.test('Set returns changes and no validation errors', () => {",
+                                    "  pm.expect(body.createdRows).to.be.an('array');",
+                                    "  pm.expect(body.changed).to.be.an('array').that.is.not.empty;",
+                                    "  pm.expect(body.errors).to.be.an('array').that.is.empty;",
+                                    "});",
+                                    "pm.collectionVariables.set('preUpdateVersion', prior);",
+                                    "pm.collectionVariables.set('version', body.version);"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "04 Get before eviction",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}",
+                        "description": "Wait for the worker acknowledgement from request 03, run this request, and then perform the README Redis eviction before request 05. This is the Newman split boundary."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                    "const body = pm.response.json();",
+                                    "pm.test('Get returns the persisted current version', () => pm.expect(body.version).to.eql(Number(pm.collectionVariables.get('version'))));",
+                                    "const dc = body.dataContainers.find(candidate => candidate.dcId === pm.collectionVariables.get('editableDcId'));",
+                                    "pm.test('Get preserves the addressed rowId', () => pm.expect(dc.rows.some(row => row.rowId === pm.collectionVariables.get('editableRowId'))).to.eql(true));",
+                                    "pm.collectionVariables.set('beforeEvictionVersion', body.version);"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "05 Get after eviction (run after manual evict)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}",
+                        "description": "Run only after deleting the exact tenant-scoped active-state key as documented in the README."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                    "const body = pm.response.json();",
+                                    "const before = Number(pm.collectionVariables.get('beforeEvictionVersion'));",
+                                    "pm.test('Recovered Get preserves the pre-eviction version', () => pm.expect(body.version).to.eql(before));",
+                                    "const dc = body.dataContainers.find(candidate => candidate.dcId === pm.collectionVariables.get('editableDcId'));",
+                                    "pm.test('Recovery preserves dcId and rowId', () => pm.expect(dc.rows.some(row => row.rowId === pm.collectionVariables.get('editableRowId'))).to.eql(true));",
+                                    "pm.collectionVariables.set('version', body.version);"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "06 Set invalid",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "If-Match",
+                                "value": "\"{{version}}\"",
+                                "description": "D4 quoted version."
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"getDeps\": true,\n  \"expectedVersion\": {{version}},\n  \"data\": {\n    \"{{editableDcId}}\": {\n      \"rows\": [\n        {\n          \"rowId\": \"{{editableRowId}}\",\n          \"action\": \"e\",\n          \"fields\": {\n            \"qty\": \"not-a-number\"\n          }\n        }\n      ]\n    }\n  }\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}/set"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "const current = Number(pm.collectionVariables.get('version'));",
+                                    "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                    "const body = pm.response.json();",
+                                    "pm.test('Set returns validation_error', () => pm.expect(body.status).to.eql('validation_error'));",
+                                    "pm.test('Validation code is INVALID_NUMBER', () => pm.expect(body.errors[0].code).to.eql('INVALID_NUMBER'));",
+                                    "pm.test('Invalid Set does not advance version', () => pm.expect(body.version).to.eql(current));"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "07 Set stale If-Match",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "If-Match",
+                                "value": "\"{{preUpdateVersion}}\"",
+                                "description": "D4 quoted saved pre-update version."
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"getDeps\": false,\n  \"expectedVersion\": {{preUpdateVersion}},\n  \"data\": {\n    \"{{editableDcId}}\": {\n      \"rows\": [\n        {\n          \"rowId\": \"{{editableRowId}}\",\n          \"action\": \"e\",\n          \"fields\": {\n            \"qty\": 2\n          }\n        }\n      ]\n    }\n  }\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}/set",
+                        "description": "Reuses the quoted pre-update version saved by request 03."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                                    "const body = pm.response.json();",
+                                    "pm.test('Stale Set returns error status', () => pm.expect(body.status).to.eql('error'));",
+                                    "pm.test('Stale Set returns AXD-CONC-001', () => pm.expect(body.code).to.eql('AXD-CONC-001'));",
+                                    "pm.test('Current version is returned', () => pm.expect(body.currentVersion).to.eql(Number(pm.collectionVariables.get('version'))));"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "08 Query",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"select\": [\n    {\n      \"dcId\": \"{{editableDcId}}\",\n      \"fields\": [\"qty\"]\n    }\n  ]\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}/query",
+                        "description": "Uses the contract-tested selective-query document shape."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                    "const body = pm.response.json();",
+                                    "pm.test('Query preserves current version', () => pm.expect(body.version).to.eql(Number(pm.collectionVariables.get('version'))));",
+                                    "pm.test('Query uses dcId and preserves rowId', () => {",
+                                    "  pm.expect(body.dataContainers[0].dcId).to.eql(pm.collectionVariables.get('editableDcId'));",
+                                    "  pm.expect(body.dataContainers[0].rows.some(row => row.rowId === pm.collectionVariables.get('editableRowId'))).to.eql(true);",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "09 Negatives",
+                    "item": [
+                        {
+                            "name": "Client bypass flag cannot bypass stale version",
+                            "request": {
+                                "method": "POST",
+                                "header": [
+                                    {
+                                        "key": "Content-Type",
+                                        "value": "application/json"
+                                    },
+                                    {
+                                        "key": "If-Match",
+                                        "value": "\"{{preUpdateVersion}}\"",
+                                        "description": "D4 quoted saved pre-update version."
+                                    }
+                                ],
+                                "body": {
+                                    "mode": "raw",
+                                    "raw": "{\n  \"getDeps\": false,\n  \"expectedVersion\": {{preUpdateVersion}},\n  \"bypassPermission\": true,\n  \"data\": {\n    \"{{editableDcId}}\": {\n      \"rows\": [\n        {\n          \"rowId\": \"{{editableRowId}}\",\n          \"action\": \"e\",\n          \"fields\": {\n            \"qty\": 2\n          }\n        }\n      ]\n    }\n  }\n}",
+                                    "options": { "raw": { "language": "json" } }
+                                },
+                                "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}/set",
+                                "description": "The unknown client bypass flag is ignored; it cannot bypass the stale-version guard."
+                            },
+                            "event": [
+                                {
+                                    "listen": "test",
+                                    "script": {
+                                        "type": "text/javascript",
+                                        "exec": [
+                                            "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                                            "const body = pm.response.json();",
+                                            "pm.test('Client bypass attempt returns error status', () => pm.expect(body.status).to.eql('error'));",
+                                            "pm.test('Client bypass attempt returns AXD-CONC-001', () => pm.expect(body.code).to.eql('AXD-CONC-001'));"
+                                        ]
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "name": "recordId and rowNo cannot address an edit",
+                            "request": {
+                                "method": "POST",
+                                "header": [
+                                    {
+                                        "key": "Content-Type",
+                                        "value": "application/json"
+                                    },
+                                    {
+                                        "key": "If-Match",
+                                        "value": "\"{{version}}\"",
+                                        "description": "Uses the current version so row addressing is the failing condition."
+                                    }
+                                ],
+                                "body": {
+                                    "mode": "raw",
+                                    "raw": "{\n  \"getDeps\": false,\n  \"expectedVersion\": {{version}},\n  \"data\": {\n    \"{{editableDcId}}\": {\n      \"rows\": [\n        {\n          \"recordId\": 10,\n          \"rowNo\": 1,\n          \"action\": \"e\",\n          \"fields\": {\n            \"qty\": 2\n          }\n        }\n      ]\n    }\n  }\n}",
+                                    "options": { "raw": { "language": "json" } }
+                                },
+                                "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}/set",
+                                "description": "Proves that persistence identity and positional row number cannot replace the server-issued rowId."
+                            },
+                            "event": [
+                                {
+                                    "listen": "test",
+                                    "script": {
+                                        "type": "text/javascript",
+                                        "exec": [
+                                            "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                                            "const body = pm.response.json();",
+                                            "pm.test('Invalid row addressing returns AXD-REQ-001', () => pm.expect(body.code).to.eql('AXD-REQ-001'));"
+                                        ]
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "name": "Missing bearer token",
+                            "request": {
+                                "auth": { "type": "noauth" },
+                                "method": "GET",
+                                "header": [],
+                                "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}",
+                                "description": "Proves that API routes reject requests without an AxAuth bearer token."
+                            },
+                            "event": [
+                                {
+                                    "listen": "test",
+                                    "script": {
+                                        "type": "text/javascript",
+                                        "exec": [
+                                            "pm.test('HTTP 401', () => pm.response.to.have.status(401));",
+                                            "const body = pm.response.json();",
+                                            "pm.test('Missing token returns AXD-AUTH-001', () => pm.expect(body.code).to.eql('AXD-AUTH-001'));"
+                                        ]
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "name": "Unrelated authenticated user",
+                            "request": {
+                                "auth": {
+                                    "type": "bearer",
+                                    "bearer": [
+                                        {
+                                            "key": "token",
+                                            "value": "{{unrelatedBearerToken}}",
+                                            "type": "string"
+                                        }
+                                    ]
+                                },
+                                "method": "GET",
+                                "header": [],
+                                "url": "{{baseUrl}}/api/v1/axdata/{{objectId}}",
+                                "description": "Uses a second live AxAuth session for an unrelated user."
+                            },
+                            "event": [
+                                {
+                                    "listen": "test",
+                                    "script": {
+                                        "type": "text/javascript",
+                                        "exec": [
+                                            "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                                            "const body = pm.response.json();",
+                                            "pm.test('Unrelated user returns AXD-AUTH-002', () => pm.expect(body.code).to.eql('AXD-AUTH-002'));"
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
         }
-      ]
-    }
-  ]
+    ]
 }

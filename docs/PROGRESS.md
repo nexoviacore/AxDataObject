@@ -245,3 +245,27 @@ Format:
 - Decisions: The current ARM tree is the user-owned initial baseline; future ARM imports remain separate reviewed commits and direct pulls into the parent tree are prohibited.
 - Tests: Serial no-restore build passes; 154 unit, 35 integration, and 114 contract tests pass; empty end-to-end project exits successfully.
 - Next: Approve and create the initial commit, then publish `main`. Postman: not applicable.
+
+## P1D-01 done (2026-10-13)
+- Done: Added pinned AxAuth JWT validation, live ARM Redis-session resolution, trusted tenant/user/role/SITENO context, and production real-adapter/state composition; no ARM-11.4 changes.
+- Decisions: D29 implemented; Redis session liveness is authoritative, token/session/body disagreement fails authentication, and AXPERT_SESSIONID/SITENO remain outside HTTP identity and logs.
+- Tests: Serial build passes; 154 unit, 35 integration, and 127 contract tests pass without restore; empty end-to-end project exits successfully.
+- Next: P1D-02 deterministic build/dependency audit and P1D-03 CI/Redis verification. Postman: updated.
+
+## P1D-05A/B planning prepared (2026-10-24)
+- Done: Split field-engine design/measurement from implementation and recorded the AxTstructData parity trace, state/cache boundaries, capacity envelope, required reading, and handoff.
+- Decisions: D33-D35 set operation-scoped runtime reuse, internal normalized source IDs with sparse originals, fail/re-Init definition handling, and evidence-gated cache/semaphore changes; D32 is unchanged.
+- Tests: Documentation-only preparation; no product code or ARM-11.4 files changed and no tests run.
+- Next: Run P1D-05A in a separate session, resolve measured limits/thresholds, then plan and run P1D-05B. Postman: not applicable.
+
+## P1D-05A done (2026-10-24)
+- Done: Recorded parity/rebuild rules, rejected unproven StructDef-cache reuse, measured v2 and sparse-v3 candidates through 350,000 fields, and produced the exact P1D-05B file/test plan.
+- Decisions: Use repeated-name sparse JSON v3, 350,000 fields / 10,000 rows per grid / 32 MiB limits, one cache-bypassed runtime per operation, and retain the global gate pending isolation evidence.
+- Tests: Characterizations and serial build pass; 154 unit, 35 integration, and 127 contract tests pass; envelope v2 was 56.71 MiB/888 ms versus sparse v3 25.13 MiB/277 ms.
+- Next: Implement and verify P1D-05B against the recorded runtime, capacity, memory, and concurrency thresholds. Postman: not applicable.
+
+## P1D-05B done (2026-10-26)
+- Done: Added operation-scoped runtime/hydration/readback, reject-safe rebuild, normalized source IDs, and deterministic sparse snapshot v3; no ARM-11.4 changes.
+- Decisions: Retain one cache-bypassed StructDef load and the global gate for the full operation; v1/v2 read compatibility remains and all new writes use v3.
+- Tests: Serial build passes; 158 unit, 39 integration, and 136 contract tests pass; E2E exits successfully; 350,000 fields serialize to 25,716,825 bytes in 426.16 ms.
+- Next: Continue remaining M1.6 readiness work. Postman: not applicable (no public HTTP or AXD contract change).

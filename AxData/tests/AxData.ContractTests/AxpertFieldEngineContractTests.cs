@@ -25,6 +25,122 @@ public sealed class AxpertFieldEngineContractTests
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "users" });
 
     [Fact]
+    public async Task Ten_evaluations_share_one_runtime_and_complete_once()
+    {
+        var state = CreateState();
+        var factory = new LegacyRuntimeFactory();
+        var adapter = new AxpertFieldEngine(factory);
+        var started = await adapter.CreateOperationAsync(state, User, default);
+
+        Assert.True(started.Succeeded, started.Error);
+        await using var operation = started.Operation!;
+        for (var index = 0; index < 10; index++)
+        {
+            var result = await operation.EvaluateAsync(
+                new FieldAddress("dc1", "row_new", index % 2 == 0 ? "qty" : "rate"),
+                index + 2m,
+                default);
+            Assert.True(result.Succeeded, result.Errors.FirstOrDefault()?.Message);
+        }
+
+        var completed = await operation.CompleteAsync(default);
+
+        Assert.True(completed.Succeeded, completed.Errors.FirstOrDefault()?.Message);
+        Assert.Equal(1, factory.CallCount);
+        Assert.Equal(1, factory.LastCreatedRuntime!.HydrationCount);
+        Assert.Equal(1, factory.LastCreatedRuntime.ReadbackCount);
+        Assert.Equal(10m, state.DataContainers["dc1"].Rows[0].Fields["qty"].Value);
+        Assert.Equal(11m, state.DataContainers["dc1"].Rows[0].Fields["rate"].Value);
+        Assert.Equal(110m, state.DataContainers["dc1"].Rows[0].Fields["amount"].Value);
+    }
+
+    [Fact]
+    public async Task Rebuild_after_rejection_replays_only_accepted_state()
+    {
+        var state = CreateState();
+        var factory = new LegacyRuntimeFactory();
+        var adapter = new AxpertFieldEngine(factory);
+        var started = await adapter.CreateOperationAsync(state, User, default);
+
+        Assert.True(started.Succeeded, started.Error);
+        await using var operation = started.Operation!;
+        Assert.False((await operation.EvaluateAsync(
+            new FieldAddress("dc1", "row_new", "qty"), "invalid", default)).Succeeded);
+        Assert.True((await operation.RebuildAsync(default)).Succeeded);
+        Assert.True((await operation.EvaluateAsync(
+            new FieldAddress("dc1", "row_new", "rate"), 20m, default)).Succeeded);
+        var completed = await operation.CompleteAsync(default);
+
+        Assert.True(completed.Succeeded, completed.Errors.FirstOrDefault()?.Message);
+        Assert.Equal(2, factory.CallCount);
+        Assert.Equal([1, 1], factory.CreatedRuntimes.Select(runtime => runtime.HydrationCount));
+        Assert.Equal([0, 1], factory.CreatedRuntimes.Select(runtime => runtime.ReadbackCount));
+        Assert.Equal(1m, state.DataContainers["dc1"].Rows[0].Fields["qty"].Value);
+        Assert.Equal(20m, state.DataContainers["dc1"].Rows[0].Fields["amount"].Value);
+    }
+
+    [Fact]
+    public async Task Hydration_and_readback_preserve_normalized_source_ids()
+    {
+        var state = CreateState();
+        state.DataContainers["dc1"].Rows[0].Fields["qty"] = new AxFieldValue(1m, sourceId: 501);
+        var factory = new LegacyRuntimeFactory(sourceKeyField: true);
+        var adapter = new AxpertFieldEngine(factory);
+        var started = await adapter.CreateOperationAsync(state, User, default);
+
+        Assert.True(started.Succeeded, started.Error);
+        await using var operation = started.Operation!;
+        Assert.Equal(501, factory.LastCreatedRuntime!.Validate._sdef.GetIDValue("qty", 1));
+        var completed = await operation.CompleteAsync(default);
+
+        Assert.True(completed.Succeeded, completed.Errors.FirstOrDefault()?.Message);
+        Assert.Equal(501, state.DataContainers["dc1"].Rows[0].Fields["qty"].SourceId);
+        Assert.Equal(501, state.DataContainers["dc1"].Rows[0].Fields["qty"].OriginalSourceId);
+    }
+
+    [Fact]
+    public async Task Global_gate_is_held_for_the_whole_operation()
+    {
+        var factory = new LegacyRuntimeFactory();
+        var adapter = new AxpertFieldEngine(factory);
+        var first = await adapter.CreateOperationAsync(CreateState(), User, default);
+
+        Assert.True(first.Succeeded, first.Error);
+        var secondState = CreateState();
+        var secondUser = User with { TenantId = "other-tenant" };
+        secondState = AxDataState.Rehydrate(
+            "object-2",
+            secondUser.TenantId,
+            secondState.TransId,
+            secondState.KeyField,
+            secondState.KeyValue,
+            secondState.RecordId,
+            secondState.OwnerUserName,
+            secondState.InitiatorUserName,
+            secondState.Version,
+            secondState.StructDefVersion,
+            secondState.CreatedAtUtc,
+            secondState.LastAccessedAtUtc,
+            secondState.ExpiresAtUtc,
+            secondState.Status,
+            secondState.DataContainers.Values,
+            secondState.Workflow,
+            secondState.Files,
+            secondState.AxOpen);
+        var secondTask = adapter.CreateOperationAsync(secondState, secondUser, default);
+
+        await Task.Delay(50);
+        Assert.False(secondTask.IsCompleted);
+        Assert.Equal(1, factory.CallCount);
+
+        await first.Operation!.DisposeAsync();
+        var second = await secondTask;
+        Assert.True(second.Succeeded, second.Error);
+        Assert.Equal(2, factory.CallCount);
+        await second.Operation!.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Valid_dependency_matches_existing_validate_and_parser_result()
     {
         var direct = LegacyFixture.CreateRuntime();
@@ -291,18 +407,26 @@ public sealed class AxpertFieldEngineContractTests
 
     private sealed class LegacyRuntimeFactory(
         bool invalidCalculationExpression = false,
-        bool asGrid = false) : IAxpertFieldRuntimeFactory
+        bool asGrid = false,
+        bool sourceKeyField = false) : IAxpertFieldRuntimeFactory
     {
+        public int CallCount { get; private set; }
+
         public AxpertFieldRuntime? LastCreatedRuntime { get; private set; }
+
+        public List<AxpertFieldRuntime> CreatedRuntimes { get; } = [];
 
         public Task<AxpertOperationResult<AxpertFieldRuntime>> CreateAsync(
             AxpertFieldRuntimeRequest request,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
             LastCreatedRuntime = LegacyFixture.CreateRuntime(
                 invalidCalculationExpression: invalidCalculationExpression,
-                asGrid: asGrid);
+                asGrid: asGrid,
+                sourceKeyField: sourceKeyField);
+            CreatedRuntimes.Add(LastCreatedRuntime);
             return Task.FromResult(AxpertOperationResult<AxpertFieldRuntime>.Success(
                 LastCreatedRuntime));
         }
@@ -319,7 +443,8 @@ public sealed class AxpertFieldEngineContractTests
             bool invalidValidationExpression = false,
             bool invalidCalculationExpression = false,
             bool encryptedField = false,
-            bool asGrid = false)
+            bool asGrid = false,
+            bool sourceKeyField = false)
         {
             var common = new Utils();
             var trace = new NullTraceService();
@@ -337,7 +462,12 @@ public sealed class AxpertFieldEngineContractTests
 
             structDef.Flds!.AddRange(
             [
-                NumericField("qty", 1, invalidValidationExpression ? "missing_variable + 1" : "", asGrid: asGrid),
+                NumericField(
+                    "qty",
+                    1,
+                    invalidValidationExpression ? "missing_variable + 1" : "",
+                    asGrid: asGrid,
+                    sourceKey: sourceKeyField),
                 NumericField("rate", 2, asGrid: asGrid),
                 NumericField("amount", 3, calculation: invalidCalculationExpression ? "missing_variable + 1" : "qty * rate", asGrid: asGrid)
             ]);
@@ -404,7 +534,8 @@ public sealed class AxpertFieldEngineContractTests
             int order,
             string validation = "",
             string calculation = "",
-            bool asGrid = false) => new()
+            bool asGrid = false,
+            bool sourceKey = false) => new()
         {
             FieldName = name,
             Caption = name,
@@ -414,6 +545,7 @@ public sealed class AxpertFieldEngineContractTests
             FrameNo = 1,
             OrderNo = order,
             AsGrid = asGrid,
+            SourceKey = sourceKey,
             Width = 20,
             Dec = 2,
             CurDec = 2,

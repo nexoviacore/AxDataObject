@@ -45,6 +45,8 @@ public sealed class AxpertDataLoaderContractTests
         Assert.Equal(AxRowState.Unchanged, line.State);
         Assert.Equal(20, line.PersistedRecordId);
         Assert.Equal(2m, line.Fields["qty"].Value);
+        Assert.Equal(501, line.Fields["qty"].SourceId);
+        Assert.Equal(501, line.Fields["qty"].OriginalSourceId);
         Assert.False(line.Fields["qty"].IsDirty);
     }
 
@@ -128,6 +130,48 @@ public sealed class AxpertDataLoaderContractTests
         Assert.Equal(0, source.CallCount);
     }
 
+    [Fact]
+    public async Task Rejects_non_positive_source_id_from_axget_projection()
+    {
+        var loader = new AxpertDataLoader(new StubDataSource(new AxpertDataSourceResult(
+            true,
+            101,
+            [new("dc1", [new(10, new Dictionary<string, object?> { ["customer"] = "ACME" },
+                new Dictionary<string, long?> { ["customer"] = 0 })])])),
+            new FakeRowIdGenerator("row_invalid"));
+
+        var result = await loader.LoadAsync(
+            SampleStructDefFixture.Definition,
+            new AxRecordKey(null, null, 101),
+            User,
+            default);
+
+        Assert.False(result.Succeeded);
+        Assert.Null(result.State);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("9223372036854775808")]
+    [InlineData("not-a-number")]
+    public void Axget_projection_rejects_malformed_source_id_companions(string sourceId)
+    {
+        var payload = new Dictionary<string, Dictionary<string, Dictionary<string, object?>>>
+        {
+            ["dc1"] = new()
+            {
+                ["row1"] = new()
+                {
+                    ["customer"] = "ACME",
+                    ["customer_sourceid"] = sourceId
+                }
+            }
+        };
+
+        Assert.Throws<InvalidOperationException>(() => AxpertDataSource.ProjectContainers(payload));
+    }
+
     private static AxpertDataSourceResult SuccessfulResult() => new(
         true,
         101,
@@ -139,7 +183,7 @@ public sealed class AxpertDataLoaderContractTests
                 ["qty"] = 2m,
                 ["rate"] = 12.5m,
                 ["amount"] = 25m
-            })])
+            }, new Dictionary<string, long?> { ["qty"] = 501 })])
         ]);
 
     private sealed class StubDataSource(AxpertDataSourceResult result) : IAxpertDataSource

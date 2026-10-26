@@ -32,7 +32,8 @@ public sealed record AxpertDataContainerResult(
 
 public sealed record AxpertDataRowResult(
     long? RecordId,
-    IReadOnlyDictionary<string, object?> Fields);
+    IReadOnlyDictionary<string, object?> Fields,
+    IReadOnlyDictionary<string, long?>? SourceIds = null);
 
 public sealed class AxpertDataLoader(
     IAxpertDataSource source,
@@ -138,7 +139,10 @@ public sealed class AxpertDataLoader(
             field => field.Name,
             field => new AxFieldValue(
                 row.Fields.TryGetValue(field.Name, out var value) ? value : null,
-                field.IsReadOnly),
+                field.IsReadOnly,
+                row.SourceIds is not null && row.SourceIds.TryGetValue(field.Name, out var sourceId)
+                    ? sourceId
+                    : null),
             StringComparer.OrdinalIgnoreCase);
 
         return row.RecordId is > 0

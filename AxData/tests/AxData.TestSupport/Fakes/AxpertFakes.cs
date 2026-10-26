@@ -157,21 +157,36 @@ public sealed class FakeAxpertFieldEngine(StructDefHandle definition) : IAxpertF
 {
     public List<FieldAddress> EvaluatedFields { get; } = [];
 
-    public Task<FieldEvaluationResult> SetValidateAndRefreshAsync(
+    public int OperationCount { get; private set; }
+
+    public int RebuildCount { get; private set; }
+
+    public int CompleteCount { get; private set; }
+
+    public Task<FieldOperationStartResult> CreateOperationAsync(
         AxDataState state,
-        FieldAddress field,
-        object? value,
         AxUserContext user,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        EvaluatedFields.Add(field);
-
+        OperationCount++;
         if (!string.Equals(state.TenantId, user.TenantId, StringComparison.OrdinalIgnoreCase))
         {
-            return Task.FromResult(FieldEvaluationResult.Failure(
-                new(field, "TENANT_MISMATCH", "The user and state tenant do not match.")));
+            return Task.FromResult(FieldOperationStartResult.Failure(
+                "The user and state tenant do not match."));
         }
+
+        return Task.FromResult(FieldOperationStartResult.Success(new Operation(this, state)));
+    }
+
+    private Task<FieldEvaluationResult> EvaluateAsync(
+        AxDataState state,
+        FieldAddress field,
+        object? value,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EvaluatedFields.Add(field);
 
         if (!TryGetField(state, field, out var target))
         {
@@ -220,6 +235,41 @@ public sealed class FakeAxpertFieldEngine(StructDefHandle definition) : IAxpertF
         }
 
         return Task.FromResult(new FieldEvaluationResult(true, changes, []));
+    }
+
+    private sealed class Operation(FakeAxpertFieldEngine owner, AxDataState state) : IAxpertFieldOperation
+    {
+        private readonly List<FieldChange> _changes = [];
+
+        public async Task<FieldEvaluationResult> EvaluateAsync(
+            FieldAddress field,
+            object? value,
+            CancellationToken cancellationToken)
+        {
+            var result = await owner.EvaluateAsync(state, field, value, cancellationToken).ConfigureAwait(false);
+            if (result.Succeeded)
+            {
+                _changes.AddRange(result.Changes);
+            }
+
+            return result;
+        }
+
+        public Task<FieldOperationStatus> RebuildAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            owner.RebuildCount++;
+            return Task.FromResult(FieldOperationStatus.Success);
+        }
+
+        public Task<FieldEvaluationResult> CompleteAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            owner.CompleteCount++;
+            return Task.FromResult(new FieldEvaluationResult(true, _changes.ToArray(), []));
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private static bool TryGetField(AxDataState state, FieldAddress address, out AxFieldValue field)

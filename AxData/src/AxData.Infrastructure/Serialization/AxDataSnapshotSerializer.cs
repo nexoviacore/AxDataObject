@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -10,7 +11,7 @@ namespace AxData.Infrastructure.Serialization;
 
 public sealed class AxDataSnapshotSerializer
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -34,18 +35,23 @@ public sealed class AxDataSnapshotSerializer
             throw new ArgumentOutOfRangeException(nameof(options.MaximumGridRows));
         }
 
+        if (options.MaximumFieldInstances <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options.MaximumFieldInstances));
+        }
+
         _options = options;
     }
 
     public byte[] Serialize(AxDataState state)
     {
         ArgumentNullException.ThrowIfNull(state);
-        EnsureGridRowLimits(state.DataContainers.Values);
+        EnsureStateLimits(state.DataContainers.Values);
 
         byte[] payload;
         try
         {
-            payload = JsonSerializer.SerializeToUtf8Bytes(ToSnapshot(state), JsonOptions);
+            payload = SerializeV3(state);
         }
         catch (AxDataSnapshotException)
         {
@@ -77,11 +83,13 @@ public sealed class AxDataSnapshotSerializer
             {
                 1 => FromSnapshot(document.RootElement.Deserialize<AxDataSnapshotV1>(JsonOptions)
                     ?? throw new AxDataSnapshotException("The snapshot payload is empty.")),
-                CurrentSchemaVersion => FromSnapshot(document.RootElement.Deserialize<AxDataSnapshotV2>(JsonOptions)
+                2 => FromSnapshot(document.RootElement.Deserialize<AxDataSnapshotV2>(JsonOptions)
+                    ?? throw new AxDataSnapshotException("The snapshot payload is empty.")),
+                CurrentSchemaVersion => FromSnapshot(document.RootElement.Deserialize<AxDataSnapshotV3>(JsonOptions)
                     ?? throw new AxDataSnapshotException("The snapshot payload is empty.")),
                 _ => throw new AxDataSnapshotException($"Snapshot schema version '{schemaVersion}' is not supported.")
             };
-            EnsureGridRowLimits(state.DataContainers.Values);
+            EnsureStateLimits(state.DataContainers.Values);
             return state;
         }
         catch (AxDataSnapshotException)
@@ -94,9 +102,210 @@ public sealed class AxDataSnapshotSerializer
         }
     }
 
-    private static AxDataSnapshotV2 ToSnapshot(AxDataState state)
+    private byte[] SerializeV3(AxDataState state)
     {
-        return new AxDataSnapshotV2
+        var fieldCount = state.DataContainers.Values.Sum(container =>
+            container.Rows.Sum(row => (long)row.Fields.Count));
+        var estimatedBytes = Math.Min(fieldCount * 80L + 4_096L, _options.MaximumSerializedBytes);
+        var buffer = new ArrayBufferWriter<byte>((int)estimatedBytes);
+        using var writer = new Utf8JsonWriter(buffer);
+
+        writer.WriteStartObject();
+        writer.WriteNumber("schemaVersion", CurrentSchemaVersion);
+        writer.WriteString("objectId", state.ObjectId);
+        writer.WriteString("tenantId", state.TenantId);
+        writer.WriteString("transId", state.TransId);
+        WriteString(writer, "keyField", state.KeyField);
+        WriteString(writer, "keyValue", state.KeyValue);
+        WriteNumber(writer, "recordId", state.RecordId);
+        writer.WriteString("ownerUserName", state.OwnerUserName);
+        writer.WriteString("initiatorUserName", state.InitiatorUserName);
+        writer.WriteNumber("version", state.Version);
+        writer.WriteStartObject("structDef");
+        writer.WriteString("transId", state.TransId);
+        writer.WriteString("version", state.StructDefVersion);
+        writer.WriteEndObject();
+        writer.WriteString("createdAtUtc", FormatTimestamp(state.CreatedAtUtc));
+        writer.WriteString("lastAccessedAtUtc", FormatTimestamp(state.LastAccessedAtUtc));
+        if (state.ExpiresAtUtc is DateTimeOffset expiresAtUtc)
+        {
+            writer.WriteString("expiresAtUtc", FormatTimestamp(expiresAtUtc));
+        }
+
+        writer.WriteString("status", state.Status.ToString());
+        writer.WriteStartArray("dataContainers");
+        foreach (var container in state.DataContainers.Values
+                     .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(item => item.Name, StringComparer.Ordinal))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("dcId", container.Name);
+            writer.WriteBoolean("isGrid", container.IsGrid);
+            writer.WriteStartArray("rows");
+            foreach (var row in container.Rows)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("rowId", row.RowId);
+                WriteNumber(writer, "recordId", row.PersistedRecordId);
+                writer.WriteString("state", row.State.ToString());
+                writer.WriteStartArray("fields");
+                foreach (var field in row.Fields
+                             .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+                             .ThenBy(item => item.Key, StringComparer.Ordinal))
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("name", field.Key);
+                    WriteSnapshotValue(writer, "value", field.Value.Value);
+                    if (field.Value.IsReadOnly)
+                    {
+                        writer.WriteBoolean("isReadOnly", true);
+                    }
+
+                    WriteNumber(writer, "sourceId", field.Value.SourceId);
+                    if (field.Value.IsDirty)
+                    {
+                        writer.WriteBoolean("isDirty", true);
+                        WriteSnapshotValue(writer, "originalValue", field.Value.OriginalValue);
+                        WriteNumber(writer, "originalSourceId", field.Value.OriginalSourceId);
+                    }
+
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+        if (state.Workflow is not null)
+        {
+            writer.WriteStartObject("workflow");
+            writer.WriteString("workflowInstanceId", state.Workflow.WorkflowInstanceId);
+            WriteString(writer, "currentTaskId", state.Workflow.CurrentTaskId);
+            writer.WriteString("initiatorUserName", state.Workflow.InitiatorUserName);
+            writer.WriteString("status", state.Workflow.Status.ToString());
+            writer.WriteNumber("approvalLevel", state.Workflow.ApprovalLevel);
+            writer.WriteStartArray("approvers");
+            foreach (var approver in state.Workflow.Approvers)
+            {
+                writer.WriteStringValue(approver);
+            }
+
+            writer.WriteEndArray();
+            writer.WriteNumber("workflowVersion", state.Workflow.WorkflowVersion);
+            writer.WriteString("pendingFromUtc", FormatTimestamp(state.Workflow.PendingFromUtc));
+            writer.WriteEndObject();
+        }
+
+        writer.WriteStartArray("files");
+        foreach (var file in state.Files
+                     .OrderBy(item => item.FileId, StringComparer.Ordinal)
+                     .ThenBy(item => item.FileName, StringComparer.Ordinal))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("fileId", file.FileId);
+            writer.WriteString("fileName", file.FileName);
+            WriteString(writer, "contentType", file.ContentType);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+        writer.WriteBoolean("axOpen", state.AxOpen);
+        writer.WriteEndObject();
+        writer.Flush();
+        return buffer.WrittenSpan.ToArray();
+    }
+
+    private static void WriteSnapshotValue(Utf8JsonWriter writer, string propertyName, object? value)
+    {
+        writer.WriteStartObject(propertyName);
+        switch (value)
+        {
+            case null:
+                writer.WriteString("kind", "null");
+                break;
+            case string typed:
+                WriteTypedValue("string", typed);
+                break;
+            case bool typed:
+                WriteTypedValue("boolean", typed ? "true" : "false");
+                break;
+            case byte typed:
+                WriteTypedValue("byte", typed.ToString(CultureInfo.InvariantCulture));
+                break;
+            case short typed:
+                WriteTypedValue("int16", typed.ToString(CultureInfo.InvariantCulture));
+                break;
+            case int typed:
+                WriteTypedValue("int32", typed.ToString(CultureInfo.InvariantCulture));
+                break;
+            case long typed:
+                WriteTypedValue("int64", typed.ToString(CultureInfo.InvariantCulture));
+                break;
+            case float typed:
+                WriteTypedValue("single", typed.ToString("R", CultureInfo.InvariantCulture));
+                break;
+            case double typed:
+                WriteTypedValue("double", typed.ToString("R", CultureInfo.InvariantCulture));
+                break;
+            case decimal typed:
+                WriteTypedValue("decimal", typed.ToString(CultureInfo.InvariantCulture));
+                break;
+            case DateTime typed:
+                WriteTypedValue("dateTimeUtc", typed.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+                break;
+            case DateTimeOffset typed:
+                WriteTypedValue("dateTimeOffsetUtc", FormatTimestamp(typed));
+                break;
+            case DateOnly typed:
+                WriteTypedValue("date", typed.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+                break;
+            case TimeOnly typed:
+                WriteTypedValue("time", typed.ToString("O", CultureInfo.InvariantCulture));
+                break;
+            case Guid typed:
+                WriteTypedValue("guid", typed.ToString("D"));
+                break;
+            case byte[] typed:
+                WriteTypedValue("binary", Convert.ToBase64String(typed));
+                break;
+            default:
+                throw new AxDataSnapshotException(
+                    $"Field value type '{value.GetType().FullName}' is not supported in snapshots.");
+        }
+
+        writer.WriteEndObject();
+
+        void WriteTypedValue(string kind, string text)
+        {
+            writer.WriteString("kind", kind);
+            writer.WriteString("value", text);
+        }
+    }
+
+    private static void WriteString(Utf8JsonWriter writer, string propertyName, string? value)
+    {
+        if (value is not null)
+        {
+            writer.WriteString(propertyName, value);
+        }
+    }
+
+    private static void WriteNumber(Utf8JsonWriter writer, string propertyName, long? value)
+    {
+        if (value is long number)
+        {
+            writer.WriteNumber(propertyName, number);
+        }
+    }
+
+    private static AxDataSnapshotV3 ToSnapshot(AxDataState state)
+    {
+        return new AxDataSnapshotV3
         {
             SchemaVersion = CurrentSchemaVersion,
             ObjectId = state.ObjectId,
@@ -128,27 +337,38 @@ public sealed class AxDataSnapshotSerializer
         };
     }
 
-    private static DataContainerV2 ToSnapshot(AxDataContainer container)
+    private static DataContainerV3 ToSnapshot(AxDataContainer container)
     {
         var rows = container.Rows
-            .Select(row => new DataRowV2(
+            .Select(row => new DataRowV3(
                 row.RowId,
                 row.PersistedRecordId,
                 row.State.ToString(),
                 row.Fields
                     .OrderBy(field => field.Key, StringComparer.OrdinalIgnoreCase)
                     .ThenBy(field => field.Key, StringComparer.Ordinal)
-                    .Select(field => new FieldV1(
-                        field.Key,
-                        ToSnapshotValue(field.Value.Value),
-                        ToSnapshotValue(field.Value.OriginalValue),
-                        field.Value.IsDirty,
-                        field.Value.IsReadOnly))
+                    .Select(field => ToSnapshot(field.Key, field.Value))
                     .ToList()))
             .ToList();
 
-        return new DataContainerV2(container.Name, container.IsGrid, rows);
+        return new DataContainerV3(container.Name, container.IsGrid, rows);
     }
+
+    private static FieldV3 ToSnapshot(string name, AxFieldValue field) =>
+        field.IsDirty
+            ? new FieldV3(
+                name,
+                ToSnapshotValue(field.Value),
+                field.IsReadOnly ? true : null,
+                field.SourceId,
+                true,
+                ToSnapshotValue(field.OriginalValue),
+                field.OriginalSourceId)
+            : new FieldV3(
+                name,
+                ToSnapshotValue(field.Value),
+                field.IsReadOnly ? true : null,
+                field.SourceId);
 
     private static WorkflowV1 ToSnapshot(PegActiveState workflow)
     {
@@ -210,6 +430,51 @@ public sealed class AxDataSnapshotSerializer
     }
 
     private static AxDataState FromSnapshot(AxDataSnapshotV2 snapshot)
+    {
+        if (snapshot.SchemaVersion != 2)
+        {
+            throw new AxDataSnapshotException($"Snapshot schema version '{snapshot.SchemaVersion}' is not supported.");
+        }
+
+        var transId = Required(snapshot.TransId, "transId");
+        var structDef = snapshot.StructDef ?? throw new AxDataSnapshotException("The snapshot is missing structDef.");
+        if (!string.Equals(transId, Required(structDef.TransId, "structDef.transId"), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new AxDataSnapshotException("The StructDef reference does not match the snapshot transaction.");
+        }
+
+        var containers = (snapshot.DataContainers ?? throw new AxDataSnapshotException("The snapshot is missing dataContainers."))
+            .Select(FromSnapshot)
+            .ToList();
+        var files = (snapshot.Files ?? throw new AxDataSnapshotException("The snapshot is missing files."))
+            .Select(file => new AxFileReference(
+                Required(file.FileId, "files.fileId"),
+                Required(file.FileName, "files.fileName"),
+                file.ContentType))
+            .ToList();
+
+        return AxDataState.Rehydrate(
+            Required(snapshot.ObjectId, "objectId"),
+            Required(snapshot.TenantId, "tenantId"),
+            transId,
+            snapshot.KeyField,
+            snapshot.KeyValue,
+            snapshot.RecordId,
+            Required(snapshot.OwnerUserName, "ownerUserName"),
+            Required(snapshot.InitiatorUserName, "initiatorUserName"),
+            snapshot.Version,
+            Required(structDef.Version, "structDef.version"),
+            ParseTimestamp(snapshot.CreatedAtUtc, "createdAtUtc"),
+            ParseTimestamp(snapshot.LastAccessedAtUtc, "lastAccessedAtUtc"),
+            snapshot.ExpiresAtUtc is null ? null : ParseTimestamp(snapshot.ExpiresAtUtc, "expiresAtUtc"),
+            ParseEnum<AxDataLifecycleStatus>(snapshot.Status, "status"),
+            containers,
+            snapshot.Workflow is null ? null : FromSnapshot(snapshot.Workflow),
+            files,
+            snapshot.AxOpen);
+    }
+
+    private static AxDataState FromSnapshot(AxDataSnapshotV3 snapshot)
     {
         if (snapshot.SchemaVersion != CurrentSchemaVersion)
         {
@@ -300,6 +565,50 @@ public sealed class AxDataSnapshotSerializer
         return new AxDataContainer(Required(container.DcId, "dataContainers.dcId"), container.IsGrid, rows);
     }
 
+    private static AxDataContainer FromSnapshot(DataContainerV3 container)
+    {
+        var rows = (container.Rows ?? throw new AxDataSnapshotException("A data container is missing rows."))
+            .Select(row => new AxDataRow(
+                Required(row.RowId, "dataContainers.rows.rowId"),
+                ParseEnum<AxRowState>(row.State, "dataContainers.rows.state"),
+                row.RecordId,
+                (row.Fields ?? throw new AxDataSnapshotException("A row is missing fields."))
+                    .ToDictionary(
+                        field => Required(field.Name, "dataContainers.rows.fields.name"),
+                        FromSnapshot,
+                        StringComparer.OrdinalIgnoreCase)))
+            .ToList();
+
+        return new AxDataContainer(Required(container.DcId, "dataContainers.dcId"), container.IsGrid, rows);
+    }
+
+    private static AxFieldValue FromSnapshot(FieldV3 field)
+    {
+        var value = FromSnapshotValue(field.Value);
+        if (field.IsDirty is null or false)
+        {
+            if (field.OriginalValue is not null || field.OriginalSourceId is not null)
+            {
+                throw new AxDataSnapshotException("A clean v3 field cannot contain an original value or source ID.");
+            }
+
+            return new AxFieldValue(value, field.IsReadOnly is true, field.SourceId);
+        }
+
+        if (field.OriginalValue is null)
+        {
+            throw new AxDataSnapshotException("A dirty v3 field is missing its original value.");
+        }
+
+        return AxFieldValue.Rehydrate(
+            value,
+            FromSnapshotValue(field.OriginalValue),
+            true,
+            field.IsReadOnly is true,
+            field.SourceId,
+            field.OriginalSourceId);
+    }
+
     private static string LegacyRowId(string objectId, string dcId, string? legacyRowId, int index)
     {
         var input = $"{objectId}\n{dcId}\n{legacyRowId}\n{index}";
@@ -376,12 +685,21 @@ public sealed class AxDataSnapshotSerializer
         };
     }
 
-    private void EnsureGridRowLimits(IEnumerable<AxDataContainer> containers)
+    private void EnsureStateLimits(IEnumerable<AxDataContainer> containers)
     {
-        var oversized = containers.FirstOrDefault(container => container.IsGrid && container.Rows.Count > _options.MaximumGridRows);
+        var materialized = containers as IReadOnlyCollection<AxDataContainer> ?? containers.ToArray();
+        var oversized = materialized.FirstOrDefault(container => container.IsGrid && container.Rows.Count > _options.MaximumGridRows);
         if (oversized is not null)
         {
             throw new AxDataSnapshotException($"Grid '{oversized.Name}' exceeds the maximum row count of {_options.MaximumGridRows}.");
+        }
+
+
+        var fieldCount = materialized.Sum(container => container.Rows.Sum(row => (long)row.Fields.Count));
+        if (fieldCount > _options.MaximumFieldInstances)
+        {
+            throw new AxDataSnapshotException(
+                $"Snapshot field count exceeds the maximum of {_options.MaximumFieldInstances}.");
         }
     }
 

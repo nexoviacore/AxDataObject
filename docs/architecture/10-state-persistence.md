@@ -4,6 +4,8 @@
 
 Redis contains the complete serialized active AxData object, including its runtime state and active PEG workflow state, for fast access.
 
+"Runtime state" means the durable AxData values and lifecycle metadata needed to reconstruct processing. Redis does not contain mutable Axpert service objects such as `StructDef`, `Validate`, or `Parser`. A fresh Axpert runtime is created for one operation, hydrated from AxData state, used for that operation, and then discarded.
+
 API nodes remain stateless and can access the active object using `ObjectId`.
 
 Redis entries include:
@@ -40,6 +42,8 @@ AxDataObjectInstance
 Full-snapshot persistence is the first-release strategy because it provides a simple and reliable recovery model.
 
 Change-only/delta persistence may be considered later if performance and load testing demonstrate that full snapshots introduce significant processing, storage, or network overhead.
+
+Snapshot field state is sparse: a clean field stores its current value and, when applicable, its normalized source ID. Original value/source ID are stored only while the field is dirty. Data-container identity is stored once per container, and row identity plus persisted record identity are stored once per row rather than repeated for every field. P1D-05A characterizes the 50 DC x 70 rows x 100 fields capacity envelope before P1D-05B fixes the v3 wire representation and supported limits.
 
 ### 10.3 Critical Persistence
 

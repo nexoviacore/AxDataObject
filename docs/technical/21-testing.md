@@ -53,3 +53,13 @@
 10. Concurrent same-user tabs with stale object version.
 11. Redis restart and recovery from persisted snapshot/PEG tables.
 12. Bulk Save using CallerId and Sequence.
+
+### 21.6 P1D-05 field-runtime and capacity evidence
+
+- AxTstructData parity: runtime initialization order, existing-record baseline load, normalized source IDs, submitted values, validation, and result readback.
+- One normal Set creates and hydrates one Axpert runtime regardless of submitted field count; rebuilding after a rejected field is explicit and cannot leak rejected state into independent fields.
+- Existing normalized fields round-trip current/original display values and source IDs; arbitrary client IDs are not trusted.
+- Snapshot v1/v2 fixtures remain readable; v3 is deterministic, sparse for clean fields, and enforces its measured byte/row limits.
+- Stale StructDef hashes continue to return `AXD-CONC-003`; cache reuse cannot serve a different tenant or definition revision.
+- Baseline and after-change measurements include runtime creations, StructDef loads, hydration/readback counts, semaphore wait, validation duration, Set latency/throughput, serialized bytes, and approximate memory for small, medium, and 50 DC x 70 rows x 100 fields cases.
+- Concurrency covers two objects, tenants, and simultaneous Set requests. The global semaphore is kept or narrowed only from documented thread-safety and throughput evidence.

@@ -186,39 +186,67 @@ public sealed class M1DevelopmentDataLoader(IRowIdGenerator rowIdGenerator) : IA
 
 public sealed class M1DevelopmentFieldEngine : IAxpertFieldEngine
 {
-    public Task<FieldEvaluationResult> SetValidateAndRefreshAsync(
+    public Task<FieldOperationStartResult> CreateOperationAsync(
         AxDataState state,
-        FieldAddress field,
-        object? value,
         AxUserContext user,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!string.Equals(state.TenantId, user.TenantId, StringComparison.OrdinalIgnoreCase) ||
-            !TryGetField(state, field, out var target))
+        return Task.FromResult(!string.Equals(state.TenantId, user.TenantId, StringComparison.OrdinalIgnoreCase)
+            ? FieldOperationStartResult.Failure("The M1 field runtime tenant is invalid.")
+            : FieldOperationStartResult.Success(new Operation(state)));
+    }
+
+    private sealed class Operation(AxDataState state) : IAxpertFieldOperation
+    {
+        private readonly List<FieldChange> _changes = [];
+
+        public Task<FieldEvaluationResult> EvaluateAsync(
+            FieldAddress field,
+            object? value,
+            CancellationToken cancellationToken)
         {
-            return Task.FromResult(FieldEvaluationResult.Failure(
-                new FieldEvaluationError(field, "FIELD_NOT_FOUND", "The M1 field address is invalid.")));
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryGetField(state, field, out var target))
+            {
+                return Task.FromResult(FieldEvaluationResult.Failure(
+                    new FieldEvaluationError(field, "FIELD_NOT_FOUND", "The M1 field address is invalid.")));
+            }
+
+            target.SetValue(value);
+            var changes = new List<FieldChange> { new(field, value, FieldChangeSource.Submitted) };
+            if (string.Equals(field.DataContainer, "dc2", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(field.FieldName, "qty", StringComparison.OrdinalIgnoreCase) &&
+                TryGetField(state, new FieldAddress("dc2", field.RowId, "rate"), out var rateField) &&
+                TryGetField(state, new FieldAddress("dc2", field.RowId, "amount"), out var amountField) &&
+                TryDecimal(value, out var quantity) &&
+                TryDecimal(rateField.Value, out var rate))
+            {
+                var amount = quantity * rate;
+                amountField.SetValue(amount);
+                changes.Add(new FieldChange(
+                    new FieldAddress("dc2", field.RowId, "amount"),
+                    amount,
+                    FieldChangeSource.Dependency));
+            }
+
+            _changes.AddRange(changes);
+            return Task.FromResult(new FieldEvaluationResult(true, changes, []));
         }
 
-        target.SetValue(value);
-        var changes = new List<FieldChange> { new(field, value, FieldChangeSource.Submitted) };
-        if (string.Equals(field.DataContainer, "dc2", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(field.FieldName, "qty", StringComparison.OrdinalIgnoreCase) &&
-            TryGetField(state, new FieldAddress("dc2", field.RowId, "rate"), out var rateField) &&
-            TryGetField(state, new FieldAddress("dc2", field.RowId, "amount"), out var amountField) &&
-            TryDecimal(value, out var quantity) &&
-            TryDecimal(rateField.Value, out var rate))
+        public Task<FieldOperationStatus> RebuildAsync(CancellationToken cancellationToken)
         {
-            var amount = quantity * rate;
-            amountField.SetValue(amount);
-            changes.Add(new FieldChange(
-                new FieldAddress("dc2", field.RowId, "amount"),
-                amount,
-                FieldChangeSource.Dependency));
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(FieldOperationStatus.Success);
         }
 
-        return Task.FromResult(new FieldEvaluationResult(true, changes, []));
+        public Task<FieldEvaluationResult> CompleteAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new FieldEvaluationResult(true, _changes.ToArray(), []));
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private static bool TryGetField(AxDataState state, FieldAddress address, out AxFieldValue field)

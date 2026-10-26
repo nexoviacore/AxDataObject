@@ -71,6 +71,40 @@ public sealed record FieldEvaluationResult(
         new(false, [], [error]);
 }
 
+public sealed record FieldOperationStartResult(
+    bool Succeeded,
+    IAxpertFieldOperation? Operation,
+    string? Error = null,
+    FieldOperationFailureKind FailureKind = FieldOperationFailureKind.DependencyUnavailable)
+{
+    public static FieldOperationStartResult Success(IAxpertFieldOperation operation) =>
+        new(true, operation);
+
+    public static FieldOperationStartResult Failure(
+        string error,
+        FieldOperationFailureKind failureKind = FieldOperationFailureKind.DependencyUnavailable) =>
+        new(false, null, error, failureKind);
+}
+
+public enum FieldOperationFailureKind
+{
+    DependencyUnavailable,
+    DefinitionChanged
+}
+
+public sealed record FieldOperationStatus(
+    bool Succeeded,
+    string? Error = null,
+    FieldOperationFailureKind FailureKind = FieldOperationFailureKind.DependencyUnavailable)
+{
+    public static FieldOperationStatus Success { get; } = new(true);
+
+    public static FieldOperationStatus Failure(
+        string error,
+        FieldOperationFailureKind failureKind = FieldOperationFailureKind.DependencyUnavailable) =>
+        new(false, error, failureKind);
+}
+
 public sealed record AxRecordKey(string? KeyField, string? KeyValue, long? RecordId);
 
 public sealed record AxCreatePermission(bool IsAllowed, bool IsReadOnly = false);

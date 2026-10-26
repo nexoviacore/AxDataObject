@@ -1,5 +1,6 @@
 using AxData.Integration.Axpert.Runtime;
 using AxData.Integration.Axpert.StructDef;
+using AxParserApp;
 using AxValidate;
 using LegacyStructDef = AxStructDef.StructDef;
 
@@ -22,7 +23,9 @@ public sealed class AxpertFieldRuntimeFactory(
         if (current is null ||
             !string.Equals(current.ContentHash, request.PublishedDefinitionVersion, StringComparison.OrdinalIgnoreCase))
         {
-            return Failure("The current StructDef content hash does not match the AxData snapshot.");
+            return Failure(
+                "The current StructDef content hash does not match the AxData snapshot.",
+                definitionChanged: true);
         }
 
         var runtimeResult = await contextFactory.CreateAsync(request.TenantId, cancellationToken)
@@ -51,8 +54,28 @@ public sealed class AxpertFieldRuntimeFactory(
             {
                 _common = context.Common,
                 _sdef = definition,
-                _dbType = context.Common._dbType
+                _dbType = context.Common._dbType,
+                _parser = new AxParser(context.Common, definition)
             };
+            var recordId = request.RecordId.GetValueOrDefault();
+            validate._parser.RegisterVar(
+                "recordid",
+                "n",
+                recordId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            definition.LastSavedRecordid = recordId;
+            if (!string.IsNullOrWhiteSpace(context.Common.ApiDateFormat))
+            {
+                definition.clientDateFormat = context.Common.ApiDateFormat;
+            }
+            else
+            {
+                var globalDateFormat = validate._parser.GetVarValue("axclient_dateformat");
+                if (!string.IsNullOrWhiteSpace(globalDateFormat))
+                {
+                    definition.clientDateFormat = globalDateFormat;
+                }
+            }
+
             if (!await validate.InitValidateAsync(request.TransId).ConfigureAwait(false))
             {
                 return Failure("The Axpert Validate/Parser runtime could not be initialized.");
@@ -77,6 +100,8 @@ public sealed class AxpertFieldRuntimeFactory(
         }
     }
 
-    private static AxpertOperationResult<AxpertFieldRuntime> Failure(string error) =>
-        new(false, null!, error);
+    private static AxpertOperationResult<AxpertFieldRuntime> Failure(
+        string error,
+        bool definitionChanged = false) =>
+        new(false, null!, error, definitionChanged);
 }

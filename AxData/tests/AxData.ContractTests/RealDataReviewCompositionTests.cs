@@ -103,6 +103,18 @@ public sealed class RealDataReviewCompositionTests
         Assert.Contains(services, IsRegistration<IAxpertFieldEngine, M1DevelopmentFieldEngine>);
     }
 
+    [Fact]
+    public void M1_identity_is_rejected_outside_development()
+    {
+        var services = new ServiceCollection();
+        var configuration = Configuration(("AxData:M1:Enabled", "true"));
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            services.AddM1DevelopmentMode(configuration, Environment(Environments.Production)));
+
+        Assert.Contains("Development", exception.Message, StringComparison.Ordinal);
+    }
+
     private static bool IsRegistration<TService, TImplementation>(ServiceDescriptor descriptor) =>
         descriptor.ServiceType == typeof(TService) &&
         descriptor.ImplementationType == typeof(TImplementation);

@@ -5,28 +5,24 @@ This pack reviews the M1.5 Init, Get/recovery, Set, Query, concurrency, and auth
 ## Prepare local values
 
 1. Copy `AxData-M1.5.template.postman_environment.json` to a file whose name contains `.local.`, for example `AxData-M1.5.local.postman_environment.json`.
-2. Keep the `.local.` file uncommitted. Fill in the reviewed new/existing TransIds and the existing record's key value there.
+2. Keep the `.local.` file uncommitted. Fill in the reviewed new/existing TransIds, the existing record's key value, a live AxAuth bearer token, and a live bearer token for an unrelated user.
 3. Import the collection and the local environment into Postman.
 
-Never put real record IDs or environment-specific connections into the committed template or collection.
+Never put tokens, session IDs, real record IDs, or environment-specific connections into the committed template or collection.
 
 ## Required local review configuration
 
-The review composition is Development-only and requires these settings before startup:
+Run the production composition locally for this review. Do not enable `AxData:M1` or `AxData:RealDataReview`; both are Development-only configured-identity modes and do not exercise production authentication.
 
-- `ASPNETCORE_ENVIRONMENT=Development`
-- `AxData__RealDataReview__Enabled=true`
-- `AxData__RealDataReview__TenantId`
-- `AxData__RealDataReview__UserName`
-- at least `AxData__RealDataReview__Roles__0`
-- `AxData__RealDataReview__SessionId`
-- `AxData__RealDataReview__AxpertSessionId`
-- `AxData__RealDataReview__DatabaseType`
-- `AxData__RealDataReview__ConnectionString`
-- `AxData__RealDataReview__AllowedHosts__0`
+Provide these settings through environment variables or user-secrets before startup:
+
+- `ASPNETCORE_ENVIRONMENT=Production`
+- `Jwt__Key`, `Jwt__Issuer`, and `Jwt__Audience`, matching AxAuth
 - `AxData__Redis__ConnectionString`
 - `AxData__Postgres__ConnectionString`
 - worker settings `AXDATA_REDIS_CONNECTION`, `AXDATA_POSTGRES_CONNECTION`, and `AXDATA_TENANT_ID`
+
+The deployed ARM `AppSettings.ini` must be available in the location expected by `ARMCommon.AppSettingsService`; it supplies the per-application Redis and database routing used to resolve the live ARM session. The session's `APPNAME` must resolve to the reviewed tenant schema.
 
 The API and worker tenant IDs, Redis connections, and snapshot-store connections must match. The Redis server must support Redis 6.2 or later. Apply `src/AxData.Infrastructure/Sql/Migrations/Postgres/001_AxDataObjectInstance.sql` to the local snapshot database before the review.
 
@@ -62,18 +58,7 @@ Replace the two uppercase placeholders with the configured tenant ID and the `ob
 
 Then run `05 Get after eviction (run after manual evict)`. Its tests assert that recovery returns the same version, `dcId`, and `rowId` as request 04. The expected walkthrough version is 2, and the enforced invariant is equality with the state captured immediately before eviction.
 
-The main numeric run finishes with two negatives: a client `bypassPermission` attempt using the saved stale version (`409 / AXD-CONC-001`), and an edit that supplies only `recordId`/`rowNo` instead of `rowId` (`400 / AXD-REQ-001`). Neither persistence identity nor positional legacy row number is mutation authority.
-
-## Manual identity folder
-
-Do not include `M1.5 / Manual identity` in the normal run. After the main run:
-
-1. Retain the collection's `objectId`.
-2. Stop the API.
-3. Change only the trusted local review identity to an unrelated user with no applicable relationship or permission.
-4. Restart the API and run `Unauthorized Get` manually.
-
-The expected response is `403 / AXD-AUTH-002`. Restore the approved identity configuration before any further review.
+The main numeric run finishes with four negatives: a client `bypassPermission` attempt using the saved stale version (`409 / AXD-CONC-001`), an edit that supplies only `recordId`/`rowNo` instead of `rowId` (`400 / AXD-REQ-001`), a request with no bearer token (`401 / AXD-AUTH-001`), and an unrelated authenticated user (`403 / AXD-AUTH-002`). Neither persistence identity, positional legacy row number, nor possession of an ObjectId is mutation authority.
 
 ## Maintenance rule
 

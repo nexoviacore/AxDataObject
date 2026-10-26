@@ -5,6 +5,9 @@ Group a folder into one line when it has more than 5 files. All paths below are 
 
 src/AxData.Api: HTTP endpoints, authentication, filters
 src/AxData.Api/Contracts, Errors, Identity, Middleware, Requests, Routing: versioned API conventions, trusted claims, safe errors, correlation/logging scopes, and request metadata parsing
+src/AxData.Api/Identity/AxAuthAuthentication.cs: pinned AxAuth JWT validation and AXD authentication challenge responses
+src/AxData.Api/Identity/ArmSessionConsistencyMiddleware.cs: transitional body ARMSessionId equality guard without trusting body identity
+src/AxData.Api/Production/ProductionServices.cs: production Redis/snapshot and live Axpert adapter deployment composition
 src/AxData.Api/Observability: Baseline/Diagnostic structured Microsoft logging over allow-listed operational events
 src/AxData.Api/Middleware/RequestCompletionLoggingMiddleware.cs: correlation-aware HTTP status and duration completion events
 src/AxData.Api/Development/M1DevelopmentServices.cs: opt-in Development-only real Redis/Postgres state composition with deterministic fake Axpert adapters
@@ -17,6 +20,7 @@ src/AxData.Application/Set/SetAxData.cs: authorized Set orchestration, exact-Str
 src/AxData.Application/Authorization: pure tenant, actor-relation, operation-permission, and editability authorization policy
 src/AxData.Application/Ports/Axpert: Axpert-neutral StructDef (including evaluation order), load, field evaluation, FillGrid, and transaction-writer contracts
 src/AxData.Application/Ports: tenant-scoped state store, trusted user context, clock, and ObjectId generation contracts
+src/AxData.Application/Ports/Identity/AxpertSession.cs: trusted live ARM session resolution contract with internal site metadata
 src/AxData.Application/Ports/Observability/OperationalLogging.cs: infrastructure-neutral safe event schema, levels, detail modes, and sink port
 src/AxData.Application/Ports/System/CryptographicObjectIdGenerator.cs: cryptographically random ULID ObjectIds and system clock
 src/AxData.Application/Ports/System/CryptographicRowIdGenerator.cs: cryptographically random opaque row identities independent of persistence IDs and row positions
@@ -33,12 +37,15 @@ src/AxData.Infrastructure/Redis/RedisAxDataLock.cs: token-owned Redis object lea
 src/AxData.Infrastructure/Redis/RedisSnapshotTransport.cs: atomic state-CAS/stream publication, consumer-group delivery, durability-gated TTL, DLQ, and acknowledged-offset trimming
 src/AxData.Infrastructure/Serialization: deterministic, versioned AxData snapshot contracts, typed values, and size/grid limit enforcement
 src/AxData.Infrastructure/Serialization/AxDataSnapshotV2.cs: dcId/rowId snapshot schema preserving semantic row array order with separate nullable recordId
+src/AxData.Infrastructure/Serialization/AxDataSnapshotV3.cs: deterministic sparse snapshot schema with normalized source IDs and dirty-only originals
 src/AxData.Infrastructure/Sql: ARMCommon-backed snapshot writes, three-provider atomic version guards, and provider-specific table migrations including PostgreSQL UTC timestamptz upgrade
 src/AxData.Integration.Axpert: adapters for StructDef/Validate/Parser/AxGet/AxPut
 src/AxData.Integration.Axpert/AxpertRecordKeyMapping.cs: consistent business-key and record-ID mapping for legacy permission/AxGet calls
 src/AxData.Integration.Axpert/StructDef/AxpertStructDefProvider.cs: immutable versioned StructDef provider and tenant-aware cache over an authoritative Axpert source
 src/AxData.Integration.Axpert/StructDef/AxpertStructDefSource.cs: tenant-scoped current tstructs loader, raw-props SHA-256 revision, cache-bypassed StructDef projection
 src/AxData.Integration.Axpert/Runtime/AxpertRuntimeContextFactory.cs: scoped trusted review session, tenant/schema validation, and Axpert Utils initialization
+src/AxData.Integration.Axpert/Runtime/AxpertSessionResolver.cs: live per-request ARM Redis session, tenant schema, user, role, and SITENO resolution
+src/AxData.Integration.Axpert/Runtime/ProductionAxpertRuntimeContextFactory.cs: authenticated session-backed production Utils runtime for real adapters
 src/AxData.Integration.Axpert/Runtime/AxpertReviewStartupGuard.cs: passive PostgreSQL privilege audit that rejects writable review identities at startup
 src/AxData.Integration.Axpert/Runtime/NoOpRedisCache.cs: in-process cache sink that keeps database-only review loading Redis-free
 src/AxData.Integration.Axpert/AxGet/AxpertDataLoader.cs: result-safe AxGet request adapter and StructDef-validated AxData state loader

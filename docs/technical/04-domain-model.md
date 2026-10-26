@@ -41,7 +41,7 @@ public sealed class AxDataContainer
 
 public sealed class AxDataRow
 {
-    // Stable identity is required for edit/delete; exact Axpert key is to be confirmed.
+    // Stable AxData identity. Legacy rowN is derived from current array order only in the adapter.
     public required string RowId { get; init; }
     public long? PersistedRecordId { get; set; }
     public AxRowState State { get; set; }
@@ -51,11 +51,23 @@ public sealed class AxDataRow
 public sealed class AxFieldValue
 {
     public object? Value { get; set; }
+    // Present in serialized state only while dirty.
     public object? OriginalValue { get; set; }
+    // Internal normalized/source-key identity; never mutation authority by itself.
+    public long? SourceId { get; set; }
+    public long? OriginalSourceId { get; set; }
     public bool IsDirty { get; set; }
     public bool IsReadOnly { get; set; }
 }
 ```
+
+`dcN` remains the authoritative Axpert container identity. `RowId` is an immutable, opaque AxData identity; `rowN` is a transient 1-based position derived only at the Integration.Axpert boundary; `PersistedRecordId`/`axp_recid` is a separate nullable database identity. The container owns its rows and the row owns its fields, so DC, row, and record identity are not duplicated in every field value.
+
+For a normalized field, `Value` is the display/business value and `SourceId` is its Axpert source-key ID. Existing-record Init restores both from AxGet. Clean fields treat current value/source ID as their baseline; dirty fields retain the original pair until changes are accepted. Client-supplied source IDs are not trusted without server-side resolution or revalidation.
+
+### 4.1.1 Axpert runtime lifetime
+
+`StructDef`, `Validate`, and `Parser` are mutable integration runtime objects, not domain state. Set creates one fresh operation-scoped runtime, hydrates it once from the AxData state, applies fields in authoritative evaluation order, reads the resulting state once, and discards it. It is never serialized, cached as an active object, or shared across requests/users. If a rejected field can leave the legacy runtime mutated, continuation rebuilds from the last accepted AxData state before evaluating another independent field.
 
 Suggested lifecycle values:
 

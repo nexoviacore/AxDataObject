@@ -12,6 +12,7 @@ public static class AxDataEndpoints
 {
     public static RouteGroupBuilder MapAxDataEndpoints(this RouteGroupBuilder routes)
     {
+        routes.RequireAuthorization();
         routes.MapPost("/axdata", HandleInitializeAsync);
         routes.MapPost("/axdata/{objectId}/query", HandleQueryAsync);
         routes.MapPost("/axdata/{objectId}/set", HandleSetAsync);

@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <None Update="Serialization\Fixtures\axdata-snapshot-v1.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Serialization\Fixtures\axdata-snapshot-v2.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
