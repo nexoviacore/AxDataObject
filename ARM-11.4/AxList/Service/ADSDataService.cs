@@ -12,7 +12,7 @@ namespace AxList
     {
         private readonly IADSDataRepository _repo;
         private readonly Utils _common;
-        private readonly IARMLogTraceService _traceService;        
+        private readonly IARMLogTraceService _traceService;
 
         public ADSDataService(IADSDataRepository repo, IARMLogTraceService traceService, Utils common)
         {
@@ -20,7 +20,7 @@ namespace AxList
             _traceService = traceService;
             _common = common;
         }
-        
+
         public async Task<ARMResult> GetDataFromDatasource(ADSDataRequest request)
         {
             if (request.Trace)
@@ -46,13 +46,13 @@ namespace AxList
                 request.UserName = sessionVars[SESSION_DATA.USERNAME.ToString()].ToString();
                 request.SchemaName = sessionVars[SESSION_DATA.SCHEMANAME.ToString()].ToString();
                 request.Roles = sessionVars[SESSION_DATA.USER_ROLES.ToString()].ToString();
-                
-                result = await GetADSDataAsync(request);                
+
+                result = await GetADSDataAsync(request);
             }
             catch (Exception ex)
             {
                 result.result["success"] = false;
-                if(ex.Message.IndexOf("is missing in input params.") > -1)
+                if (ex.Message.IndexOf("is missing in input params.") > -1)
                     result.result["message"] = ex.Message;
                 else
                     result.result["message"] = "Error occurred. Please check with administrator.";
@@ -73,7 +73,7 @@ namespace AxList
         public async Task<ARMResult> GetADSDataAsync(ADSDataRequest request)
         {
             var result = new ARMResult();
-            
+
             var adsDataSource = await _repo.GetADSDefinitionAsync(request.SchemaName, request.DataSource);
             if (adsDataSource == null)
             {
@@ -90,7 +90,7 @@ namespace AxList
         }
 
         private async Task<ARMResult> GetADSDataWithCachingAsync(ADSDataSource dataSource, ADSDataRequest request, string schemaName)
-        {            
+        {
             var sqlParams = _common.ValidateSQLAndExtractParams(dataSource.SQLText, dataSource.SQLParams, _common._globalVars, request.SQLParams);
             string dataCacheKey = "";
             var result = new ARMResult();
@@ -100,7 +100,7 @@ namespace AxList
 
                 // Try to get data from cache
                 string cachedData = await _repo.GetADSDataFromCacheAsync(dataCacheKey);
-                
+
                 if (cachedData != null)
                 {
                     result.result["success"] = true;
@@ -117,9 +117,9 @@ namespace AxList
                 result.result["success"] = false;
                 result.result["name"] = request.DataSource;
                 result.result["error"] = dbData.error;
-                result.result["message"] = dbData.error;                
+                result.result["message"] = dbData.error;
                 return result;
-            }            
+            }
 
             if (!string.IsNullOrEmpty(dataSource.EncryptedFlds))
             {
@@ -130,7 +130,7 @@ namespace AxList
 
             if (dataSource.CacheData == "T")            // Save data to cache
             {
-                if(string.IsNullOrEmpty(dataCacheKey))
+                if (string.IsNullOrEmpty(dataCacheKey))
                     dataCacheKey = _repo.GenerateDataCacheKey(schemaName, request.DataSource, sqlParams);
 
                 var cacheInterval = dataSource.CacheInterval.Split(" ")[0];
@@ -153,14 +153,16 @@ namespace AxList
             var adsDataSource = await _repo.GetADSDefinitionAsync(adsDataRequest.SchemaName, adsDataRequest.DataSource);
             if (adsDataSource == null)
             {
-                apiResult.success = false; 
+                apiResult.success = false;
                 apiResult.data["adsname"] = adsName;
                 apiResult.data["error"] = $"ADS definition '{adsDataRequest.DataSource}' not found.";
                 return apiResult;
             }
 
+            var filterCond = "NA";
             string adsSQL = "";
-
+            if (listData.PageSize == null)
+                listData.PageSize = adsDataSource.FetchSize;
             if (!listData.ADS)
             {
                 // Validate user access based on ADS Permission.
@@ -177,28 +179,35 @@ namespace AxList
                     return accessResult;
                 }
 
-                var filterCond = "NA";
                 if (!string.IsNullOrEmpty(listData.TransId))
                     filterCond = accessResult.data["FilterCond"]?.ToString() ?? "NA";
 
-                adsSQL = await _repo.GetADSSQLForAxList(listData, adsName, filterCond);
-                if (string.IsNullOrEmpty(adsSQL))
-                {
-                    apiResult.success = false;
-                    apiResult.data["adsname"] = adsName;
-                    apiResult.data["error"] = $"Not able to load ADS {adsName} sql.";
-                    return apiResult;
-                }
+                //adsSQL = await _repo.GetADSSQLForAxList(listData, adsName, filterCond);
+                //if (string.IsNullOrEmpty(adsSQL))
+                //{
+                //    apiResult.success = false;
+                //    apiResult.data["adsname"] = adsName;
+                //    apiResult.data["error"] = $"Not able to load ADS {adsName} sql.";
+                //    return apiResult;
+                //}
             }
             else
             {
-                adsSQL = adsDataSource.SQLText;
-
+                //adsSQL = adsDataSource.SQLText;
                 // Validate user access based on roles
                 if (!await _repo.ValidateUserAccess(listData.RolesStr, adsDataSource.Roles))
                 {
                     return new APIResult(false, "User doesn't have access to this ADS.");
                 }
+            }
+
+            adsSQL = await _repo.GetADSSQLForAxList(listData, adsName, filterCond);
+            if (string.IsNullOrEmpty(adsSQL))
+            {
+                apiResult.success = false;
+                apiResult.data["adsname"] = adsName;
+                apiResult.data["error"] = $"Not able to load ADS {adsName} sql.";
+                return apiResult;
             }
 
             adsDataSource.SQLText = ApplyDynamicFiltersSortingPagination(adsSQL, listData, false); //Do pagination, sorting, orderby logics.

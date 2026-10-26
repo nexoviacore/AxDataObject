@@ -113,7 +113,7 @@ namespace AxTstructData
                     parserJson;
 
                 var remainingExpiry =
-                    await _common.GetRemainingKeyExpirySeconds(
+                    await _common._redisCache.GetKeyExpiryAsync(
                         armSessionId);
 
                 // Do not create a persistent parser key.

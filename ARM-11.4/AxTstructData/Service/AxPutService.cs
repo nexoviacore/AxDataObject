@@ -8,6 +8,7 @@ using AxStructDef.Models;
 using AxValidate;
 using AxValidate.Dto;
 using Newtonsoft.Json;
+using StackExchange.Redis;
 using System.Data;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -34,6 +35,7 @@ namespace AxTstructData
         private List<StructDef> _structDefList = new List<StructDef>();
         private List<string> _transidList = new List<string>();
         private List<int> _parentList = new List<int>();
+        private List<TGenMap?> _genMapList = new List<TGenMap?>();   // parallel to _transidList; null for primary trans
         private List<Dictionary<string, object>> _saveDataResultList = new List<Dictionary<string, object>>();
         //private string _parserJson = string.Empty;
         private List<Int64> _recordIds = new List<Int64>();
@@ -545,6 +547,7 @@ namespace AxTstructData
             _validate._parser = parser;
             _validate._parser.RegisterVar("recordid", "n", putData.RecordId.ToString());
             _validate._sdef.LastSavedRecordid = putData.RecordId;
+            _validate.PrepareExps();
             //_validate._sdef.TraceService = _traceService;
             if (!string.IsNullOrEmpty(putDataInput.AxClient_DateFormat))
                 _validate._sdef.clientDateFormat = putDataInput.AxClient_DateFormat;
@@ -576,6 +579,7 @@ namespace AxTstructData
             string transId = putDataInput.Data[0].TransId.ToString();
             _transidList.Add(transId);
             _parentList.Add(-1);
+            _genMapList.Add(null);
             var result = new APIResult();
             bool error = false;
             try
@@ -602,6 +606,20 @@ namespace AxTstructData
                     var accessControlKey = (putData.Action.ToUpper() == Constants.TSTRUCT_ACTIONS.CREATE.ToString() ? $"{putData.TransId}_{putData.Action.ToUpper()}" : $"{putData.TransId}_{putData.Action.ToUpper()}_{putData.KeyField.ToUpper()}_{putData.KeyValue.ToUpper()}");
 
                     parentDefIndex = _parentList[transIndex];
+                    TGenMap currentGenMap = _genMapList[transIndex];
+
+                    if (parentDefIndex > -1 && currentGenMap != null && !string.IsNullOrEmpty(currentGenMap.GenControlField))
+                    {
+                        _traceService.LogMessage($"Genmap ControlFieldName: {currentGenMap.GenControlField}");
+                        var cfValue = _structDefList[parentDefIndex]?.GetFieldValue(currentGenMap.GenControlField, 1);
+                        if (cfValue?.ToLower() != "t")
+                            goto SKIP_CHILD_TRANS;
+                        //continue;
+                        // Else part needs to be handled
+                        //End Else If lowercase(OldFieldValue) = 't' Then Begin
+                        //  struct.axprovider.dbm.gf.dodebug.msg('Deleting transaction as controlField value is changed from '+OldFieldValue+' to '+FieldValue);
+                        //  Result:=DeleteTrans;
+                    }
 
                     if (accessControls.ContainsKey(accessControlKey))
                     {
@@ -762,8 +780,9 @@ namespace AxTstructData
                     else
                     {
                         string tableName = _validate._sdef.PrimaryTable;
-                        string mapName = _validate._sdef.GetGenMapName(_structDefList[parentDefIndex]);
+                        string mapName = currentGenMap.Name;
                         var parentRecId = _structDefList[parentDefIndex].LastSavedRecordid.ToString();
+
                         if (putData.Action.ToUpper() == Constants.TSTRUCT_ACTIONS.CREATE.ToString())
                         {
                             putData.RecordId = 0;
@@ -805,54 +824,68 @@ namespace AxTstructData
                                 await _validate.SubmitValueOnLoad(tstData);
                             }
                         }
-
-                        _validate._sdef.SaveGenMap(_structDefList[parentDefIndex]);
-                        var validateResult = await _validate.ValidateData();
-
-                        if (validateResult.Result == "Fail")
+                        var validateResult = new OperationResult();
+                        var frame = _structDefList[parentDefIndex].GetFrameFromName(currentGenMap.SourceDC);
+                        if (frame?.FrameNo > 0)
                         {
-                            result = new APIResult(false, validateResult.Message);
-                            result.data["transid"] = putData.TransId;
-                            result.data["index"] = inputTransIndex;
-                            break;
-                        }
+                            var maxRow = _structDefList[parentDefIndex].GetRowCount(frame.FrameNo);
+                            _validate._sdef.MapName = currentGenMap.Name;
+                            _validate._sdef._parentStructDef = _structDefList[parentDefIndex];
 
-                        sqlCommands.AddRange(isCreate ?
-                            await GetTableWiseSQLCommandsForCreate(putData, true) :
-                            await GetTableWiseSQLCommandsForEdit(putData, true));
 
-                        int insertCount = sqlCommands.Count(x => x.Action == DATA_ACTION.INSERT);
-
-                        if (insertCount > 0)
-                        {
-                            _recordIds.AddRange(await GetNewRecordIds(insertCount));
-
-                            foreach (var sqlCommand in sqlCommands.Where(x => x.Action == DATA_ACTION.INSERT))
+                            for (var row = 1; row <= maxRow; row++)
                             {
-                                foreach (var p in _recordIdParams)
+                                if (frame.AsGrid)
                                 {
-                                    int idx = Array.IndexOf(sqlCommand.ParameterNames, p);
-                                    if (idx >= 0)
-                                    {
-                                        // [fix]: for genmap grid rows it's creating new recordIds also the grid rows are not maped with primaryTable
-                                        if (putData.RecordId != 0 && p == "@recordid")
-                                        {
-                                            sqlCommand.ParameterValues[idx] = putData.RecordId;
-                                        }
-                                        else
-                                        {
-                                            sqlCommand.ParameterValues[idx] = GetRecordIdForCreate();
-                                        }
+                                    _validate._sdef.SourceId = _structDefList[parentDefIndex].GetRecordId(frame.FrameNo, row);
+                                }
+                                else
+                                {
+                                    _validate._sdef.SourceId = _structDefList[parentDefIndex].GetRecordId(frame.FrameNo, 1);
+                                }
 
-                                        if (p == "@recordid")
+                                var ordNo = 1;
+                                var specificRowFound = false;
+                                foreach (var tempGenFld in currentGenMap.FieldMappings)
+                                {
+                                    specificRowFound = false;
+                                    foreach (var genFld in currentGenMap.FieldMappings)
+                                    {
+                                        if (_validate._sdef.ShouldProcessAsSpecificRow(genFld))
                                         {
-                                            putData.RecordId = Convert.ToInt64(sqlCommand.ParameterValues[idx]);
+                                            if(genFld.TargetRow == ordNo)
+                                            {
+                                                _validate._sdef.FillSpecificRow(genFld, row);
+                                                specificRowFound = true;
+                                            }
                                         }
                                     }
+                                    ordNo++;
+                                    if (!specificRowFound)
+                                        break;
                                 }
-                            }
 
+                                _validate._sdef.SaveGridGenMap(_structDefList[parentDefIndex], currentGenMap);
+
+                                validateResult = await _validate.ValidateData();
+
+                                if (validateResult.Result == "Fail")
+                                {
+                                    result = new APIResult(false, validateResult.Message);
+                                    result.data["transid"] = putData.TransId;
+                                    result.data["index"] = inputTransIndex;
+                                    break;
+                                }
+
+                                newRowsCount = _validate._sdef.GetAllDcRowCount();
+
+                                sqlCommands.AddRange(isCreate ?
+                                    await GetTableWiseSQLCommandsForCreate(putData, false) :
+                                    await GetTableWiseSQLCommandsForEdit(putData, false));
+
+                            }
                         }
+
                     }
 
                     //MDMap
@@ -924,13 +957,14 @@ namespace AxTstructData
                     _validate._parser.RegisterVar("recordid", "n", putData.RecordId.ToString());
                     _validate._sdef.LastSavedRecordid = putData.RecordId;
 
-                    var childTransiIds = _validate._sdef.GetChildTransAsList();
-                    foreach (var childTransiId in childTransiIds)
+                    foreach (var childMap in _validate._sdef.GetChildGenMaps())
                     {
-                        _transidList.Add(childTransiId);
+                        _transidList.Add(childMap.TargetTransId);
                         _parentList.Add(defIndex);
+                        _genMapList.Add(childMap);
                     }
 
+                SKIP_CHILD_TRANS:
                     if (transIndex == _transidList.Count - 1)
                     {
                         inputTransIndex++;
@@ -1800,6 +1834,7 @@ namespace AxTstructData
                         Dictionary<string, string> fieldData = new Dictionary<string, string>();
 
                         Int64 gridRecId = isGenMapRecord ? 0 : GetRecordIdForCreate();
+                        _validate._sdef.SubmitRecordId(currentFrame.FrameNo, rowNo, gridRecId);
 
                         for (int fldIdx = startFldIdx; fldIdx <= endFldIdx - 1; fldIdx++)
                         {
@@ -1841,10 +1876,16 @@ namespace AxTstructData
                             rowRecId = isGenMapRecord ? 0 : GetRecordIdForCreate();
                             putData.RecordId = rowRecId;
                         }
+                        else if (!string.IsNullOrEmpty(_validate._sdef?.MapName))
+                        {
+                            rowRecId = isGenMapRecord ? 0 : GetRecordIdForCreate();
+                            putData.RecordId = rowRecId;
+                        }
                     }
                     else
                         rowRecId = isGenMapRecord ? 0 : GetRecordIdForCreate();
 
+                    _validate._sdef.SubmitRecordId(currentFrame.FrameNo, rowNo, rowRecId);
                     //if ((changedFields == null || changedFields.Count == 0) && tableName != primaryTable)
                     //{
                     //    tableWiseSQLCommands.Remove(tableName);
@@ -2532,75 +2573,6 @@ namespace AxTstructData
             // Unrecognized or neutral action -> No reconciliation needed
             return false;
         }
-
-        //private async Task RestoreSessionGlobals(AxParser parser)
-        //{
-        //    if (_common._globalVars == null || _common._globalVars.Count == 0)
-        //        return;
-
-        //    foreach (var globalVar in _common._globalVars)
-        //    {
-        //        // Metadata used to determine variable types; it is not a parser variable.
-        //        if (globalVar.Key.Equals("appvartypes",
-        //                StringComparison.OrdinalIgnoreCase))
-        //        {
-        //            continue;
-        //        }
-
-        //        var variableType =
-        //            await _common.GetGlobalVariableType(globalVar.Key);
-
-        //        parser.RegisterVar(
-        //            globalVar.Key,
-        //            string.IsNullOrEmpty(variableType) ? "c" : variableType,
-        //            globalVar.Value ?? string.Empty);
-        //    }
-        //}
-
-        //private async Task PreserveReconstructedParser(
-        //    AxParser parser,
-        //    string armSessionId)
-        //{
-        //    var common = parser._common;
-        //    var structDef = parser._structDef;
-
-        //    try
-        //    {
-        //        // These runtime dependencies should not be serialized.
-        //        parser._common = null;
-        //        parser._structDef = null;
-
-        //        // Keeping this value also prevents another cache read/reconstruction
-        //        // during the current AxPut request.
-        //        _parserJson = JsonConvert.SerializeObject(parser);
-
-        //        var remainingExpiry =
-        //            await _common.GetRemainingKeyExpirySeconds(armSessionId);
-
-        //        // Never create a persistent parser key or extend it beyond the session.
-        //        if (remainingExpiry > 0)
-        //        {
-        //            await _common.StoreAxParserObjInCache(
-        //                armSessionId,
-        //                _parserJson,
-        //                remainingExpiry);
-        //        }
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        // Re-caching is an optimization and should not fail AxPut.
-        //        if (_traceService.IsTracingEnabled())
-        //        {
-        //            _traceService.LogError(
-        //                $"Unable to cache reconstructed parser: {ex.Message}");
-        //        }
-        //    }
-        //    finally
-        //    {
-        //        parser._common = common;
-        //        parser._structDef = structDef;
-        //    }
-        //}
     
     }
 

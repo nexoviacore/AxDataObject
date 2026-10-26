@@ -3029,32 +3029,6 @@ namespace ARMCommon.Helpers
             }
         }
 
-        public async Task<int> GetRemainingKeyExpirySeconds(string key)
-        {
-            try
-            {
-                var redisConnected = await OpenRedisConnectionAsync(key);
-
-                if (!redisConnected || _redisCache?.Redis == null)
-                    return 0;
-
-                var expiry = await _redisCache.Redis
-                    .GetDatabase()
-                    .KeyTimeToLiveAsync(key);
-
-                if (!expiry.HasValue)
-                    return 0;
-
-                var seconds = (int)Math.Floor(
-                    expiry.Value.TotalSeconds);
-
-                return seconds > 0 ? seconds : 0;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
     }
 }
 

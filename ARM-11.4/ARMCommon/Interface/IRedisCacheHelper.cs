@@ -75,6 +75,8 @@ namespace ARMCommon.Interface
 
         Task<bool> SetKeyExpiryAsync(string key, int expiry = 0);
         bool SetKeyExpiry(string key, int expiry = 0);
+        Task<int> GetKeyExpiryAsync(string key);
+        int GetKeyExpiry(string key);
 
     }
 }

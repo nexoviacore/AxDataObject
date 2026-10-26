@@ -59,7 +59,7 @@ try
     services.AddScoped<IAxAttachmentsService, AxAttachmentsService>();
     services.AddScoped<AppSettingsValidaterService>();
     services.AddScoped<IAxParserProvider, AxParserProvider>();
-    
+
     services.AddScoped<Utils>();
     services.AddScoped<IRedisCacheHelper, RedisCacheHelper>();
 

@@ -45,12 +45,13 @@ namespace AxList
                             CacheInterval = row["cacheinterval"]?.ToString() ?? "",
                             SQLName = dataSourceName,
                             EncryptedFlds = row["encryptedflds"]?.ToString() ?? "",
+                            FetchSize = int.TryParse(row["fetchsize"]?.ToString(), out int fetchSize) ? fetchSize : 100
                         };
 
                         await SetADSDefinitionToCache(schemaName, dataSourceName, JsonConvert.SerializeObject(dataSource));
 
                         return dataSource;
-                    }                    
+                    }
                     else
                     {
                         return null;
@@ -65,7 +66,7 @@ namespace AxList
                 return null;
             }
         }
-    
+
         private async Task<string> GetADSDefinitionFromCache(string schemaName, string dataSourceName)
         {
             var redisConnected = await _common.OpenRedisConnectionAsync();
@@ -147,10 +148,10 @@ namespace AxList
 
                 // Sort parameters by key name in ascending order
                 var sortedParams = parameters.OrderBy(kvp => kvp.Key).ToList();
-                
+
                 var paramStrings = sortedParams.Select(kvp => $"{kvp.Key}={kvp.Value}");
                 string paramString = string.Join("~", paramStrings);
-                
+
                 return $"{schemaName}-ARM-AxADSData-{dataSourceName}-{paramString}";
             }
             catch
@@ -172,14 +173,14 @@ namespace AxList
         public async Task<SQLResult> GetADSDataFromDB(string sqlText, Dictionary<string, string> parameters)
         {
             if (_common._dbHelper == null)
-                await _common.OpenDBConnectionAsync();            
-            
+                await _common.OpenDBConnectionAsync();
+
             var adsResult = new SQLResult();
             if (parameters != null && parameters.Count > 0)
             {
                 var (modifiedSqlText, paramNames, paramTypes, paramValues) = await _common.GetSQLParams(sqlText, parameters);
 
-                if(_common._dbType.ToUpper() == Constants.DBTYPE.MSSQL.ToString())
+                if (_common._dbType.ToUpper() == Constants.DBTYPE.MSSQL.ToString())
                     modifiedSqlText = ParamRegex.Replace(modifiedSqlText, "@$1");
 
                 adsResult = await _common._dbHelper.ExecuteSQLAsync(modifiedSqlText, paramNames, paramTypes, paramValues);
@@ -190,10 +191,10 @@ namespace AxList
                     sqlText = ParamRegex.Replace(sqlText, "@$1");
 
                 adsResult = await _common._dbHelper.ExecuteSQLAsync(sqlText);
-            }            
-            
+            }
+
             return adsResult;
-        }        
+        }
 
         public async Task<SQLResult> GetADSDataViewPermissionFromDB(string transId, string adsName, string userName, List<string> roles, string keyField, string keyValue)
         {
@@ -219,7 +220,7 @@ namespace AxList
         public async Task<string> GetADSSQLForAxList(AxList listData, string adsName, string constraint = "NA")
         {
             string sql = "";
-            if(listData.CachePermissions)
+            if (listData.CachePermissions)
                 sql = await GetADSSQLForAxListFromCache(listData, adsName, constraint);
 
             if (string.IsNullOrEmpty(sql))
@@ -314,16 +315,16 @@ namespace AxList
         {
             if (_common._dbHelper == null)
                 await _common.OpenDBConnectionAsync();
-            
+
             if (parameters != null && parameters.Count > 0)
             {
                 var (modifiedSqlText, paramNames, paramTypes, paramValues) = await _common.GetSQLParams(sqlText, parameters);
-                
+
                 if (_common._dbType.ToUpper() == Constants.DBTYPE.MSSQL.ToString())
                     modifiedSqlText = ParamRegex.Replace(modifiedSqlText, "@$1");
 
-                ScalarResult result  = await _common._dbHelper.ExecuteScalarAsync(modifiedSqlText, paramNames, paramTypes, paramValues);
-                if(string.IsNullOrEmpty(result.error))
+                ScalarResult result = await _common._dbHelper.ExecuteScalarAsync(modifiedSqlText, paramNames, paramTypes, paramValues);
+                if (string.IsNullOrEmpty(result.error))
                     return Convert.ToInt32(result.result);
                 else
                     return -1;

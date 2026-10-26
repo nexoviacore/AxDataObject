@@ -195,7 +195,7 @@ namespace AxValidate
             sqlResult = null;
             idValue = 0;
 
-            bool fieldEmpty = true;
+            bool fieldEmpty = false;
             int k;
             DataRow row = null;
             DynamicSql = "";
@@ -434,8 +434,9 @@ namespace AxValidate
 
                     result = _sdef.GetFieldValue(xfld, rowNo);
 
-                    if (result == "" && xfld.Exprn > -1)
-                    {
+                    //if (result == "" && xfld.Exprn > -1)
+                    if (result == "" && !string.IsNullOrEmpty(xfld.Cexp))
+                        {
                         _traceService.LogMessage("Evaluating - " + xfld.Cexp);
                         if (!_parser.Evaluate(xfld.Cexp))
                             throw new InvalidOperationException($"Unable to evaluate expression for {xfld.FieldName}.");
@@ -1202,8 +1203,8 @@ namespace AxValidate
 
                 if (fld.TxtSelection)
                 {
-                    if (
-                        sqlResult.data != null
+                    if (sqlResult != null
+                        && sqlResult.data != null
                         && sqlResult.data.Rows.Count > 0
                         && !string.IsNullOrEmpty(fieldValue)
                     )
@@ -2825,5 +2826,25 @@ namespace AxValidate
 
             return tstData;
         }
+
+
+        public void PrepareExps()
+        {
+            for (int i = 0; i < _sdef.Flds.Count; i++)
+            {
+                var fld = _sdef.Flds[i];
+
+                if (fld.DataType.ToLower() == "n")
+                    _parser.RegisterVar(fld.FieldName, fld.DataType.ToString(), "0");
+
+                if (fld.Cexp != "")
+                {
+                    if (fld.DataType.ToLower() != "n")
+                        _parser.RegisterVar(fld.FieldName, fld.DataType.ToString(), "");
+                }
+
+            }
+        }
+
     }
 }

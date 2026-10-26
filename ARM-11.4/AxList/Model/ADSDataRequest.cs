@@ -1,5 +1,5 @@
 ﻿namespace AxList
-{  
+{
     public class ADSDataRequest
     {
         public string? UserName { get; set; }
@@ -25,5 +25,6 @@
         public string CacheInterval { get; set; } // in minutes
         public string SQLName { get; set; }
         public string EncryptedFlds { get; set; }
+        public int FetchSize { get; set; }
     }
 }

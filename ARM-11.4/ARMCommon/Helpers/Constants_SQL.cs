@@ -488,7 +488,7 @@ WHERE g.levelno <= 3
         #endregion
 
         #region ADS
-        public const string GET_ADS_DEFINITION = "SELECT axdirectsqlid, sqltext, paramcal as sqlparams, accessstring as roles, cachedata, cacheinterval, encryptedflds FROM axdirectsql a WHERE sqlname = @datasource ";
+        public const string GET_ADS_DEFINITION = "SELECT axdirectsqlid, sqltext, paramcal as sqlparams, accessstring as roles, cachedata, cacheinterval, encryptedflds,fetchsize FROM axdirectsql a WHERE sqlname = @datasource ";
         #endregion
 
         #region Attachments and Images

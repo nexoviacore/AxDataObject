@@ -40,7 +40,6 @@ public class Worker : BackgroundService
             {
                 try
                 {
-                    //return await CachedSave(message);
                     return await CachedSaveNew(message);
                 }
                 catch (Exception ex)
@@ -53,7 +52,8 @@ public class Worker : BackgroundService
                     return "error";
                 }
             }
-            _consumer.DoConsumeWorkerService(queueName, OnConsuming);
+            _consumer.DoConsumeWorkerServiceStable(queueName, OnConsuming, stoppingToken);
+            await Task.Delay(Timeout.Infinite, stoppingToken);
         }
         catch (Exception ex)
         {
@@ -63,322 +63,7 @@ public class Worker : BackgroundService
             _exeDir = Path.Combine(_exeDir, _logFileName);
             File.AppendAllText(_exeDir, $"{ex}\n\n" + Environment.NewLine);
         }
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            await Task.Delay(1000, stoppingToken);
-        }
     }
-
-    private async Task<string> CachedSave(string queueRequest)
-    {
-        string _exeDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "log");
-        Directory.CreateDirectory(_exeDir);
-        string logFileName = "CachedSave-" + DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss") + ".log";
-        _exeDir = Path.Combine(_exeDir, logFileName);
-        try
-        {
-            JObject saveObj = JObject.Parse(queueRequest);
-            string queueData = string.Empty;
-            //string armResponseQueue = string.Empty;
-            JObject saveData;
-            string SignalrClientId = saveObj["signalrclient"].ToString();
-            queueData = saveObj["queuedata"]?.ToString();
-            //armResponseQueue = saveObj["responsequeue"]?.ToString();
-            if (queueData != null)
-            {
-                queueData = queueData.Replace("\r\n”}", "”}").Replace("\\”", "”").Trim('"');
-                saveData = JsonConvert.DeserializeObject<JObject>(queueData);
-                if (saveData?["payload"] != null)
-                    saveData = (JObject)saveData["payload"];
-            }
-            else
-                saveData = saveObj;
-
-            string url = saveData["url"]?.ToString();
-            string method = saveData["method"]?.ToString();
-            if (method == null || method == string.Empty)
-                method = "POST";
-            string axResponseQueue = saveData["responsequeue"]?.ToString();
-            string transid = saveData["_parameters"][0]["savedata"]["transid"].ToString();
-            string project = saveData["_parameters"][0]["savedata"]["axpapp"].ToString();
-            string username = saveData["_parameters"][0]["savedata"]["username"].ToString();
-            string _trace = saveData["_parameters"][0]["savedata"]["trace"].ToString();
-            bool trace = _trace == "true" ? true : false;
-            string payload = JsonConvert.SerializeObject(saveData);
-            string mediaType = "application/json";
-            API _api = new API();
-            ApiRequest apiRequest = new ApiRequest();
-            apiRequest.StartTime = DateTime.Now;
-            apiRequest.Project = project;
-            apiRequest.Url = url;
-            apiRequest.Method = method;
-            apiRequest.RequestString = JsonConvert.SerializeObject(new { savedata = saveData });
-            apiRequest.APIDesc = "Cached Save";
-
-            try
-            {
-                Dictionary<string, string> configcon = _appSettingsHelper.GetDBConfigurations(project);
-
-                string signalrUrl = _appSettingsHelper.GetARMUrl(project).ToString();
-                signalrUrl = $"{signalrUrl.TrimEnd('/')}/ARM_APIs/api/v1/SendSignalR";
-
-                string armScriptUlr = _appSettingsHelper.GetARMScriptsURL(project);
-                if (string.IsNullOrEmpty(url))
-                {
-                    url = $"{armScriptUlr.TrimEnd('/')}/ASBTStructRest.dll/datasnap/rest/TASBTstruct/savedata";
-                    apiRequest.Url = url;
-                    apiRequest.Method = method;
-                }
-                ARMResult apiResult;
-                if (method == "POST")
-                {
-                    if (trace)
-                    {
-                        File.AppendAllText(_exeDir, "url called:" + url + Environment.NewLine);
-                        File.AppendAllText(_exeDir, "payload called" + payload + Environment.NewLine);
-                    }
-                    apiResult = await _api.POSTData(url, payload, mediaType);
-                }
-                else
-                {
-                    if (trace)
-                    {
-                        File.AppendAllText(_exeDir, "url called:" + url + Environment.NewLine);
-                        File.AppendAllText(_exeDir, "payload called" + payload + Environment.NewLine);
-                    }
-                    apiResult = await _api.GetData(url);
-                }
-
-                try
-                {
-                    var successmessage = apiResult.result["message"] ?? "";
-                    JObject apimessage = JObject.Parse(apiResult.result["message"].ToString());
-                    //string successapimessage = apimessage?["result"]?[0]?["message"]?[0]?["msg"]?.ToString() ?? "";
-                    //if (!string.IsNullOrEmpty(successapimessage))
-                    //{
-                    //    string recordid = apimessage?["result"]?[0]?["message"]?[0]?["recordid"]?.ToString() ?? "";
-                    //    string link = "t" + transid + "&recordid=" + recordid;
-                    //    string _Payload = "[{\"notifytype\":\"Tstruct Save Success\",\"type\":\"Tstruct Save Success\",\"icon\":\"\",\"title\":\"Tstruct Saved Successfully\",\"message\":\"" + successapimessage + "\",\"dt\":\"" + DateTime.Now.ToString() + "\",\"link\":{\"t\":\"e\",\"name\":\"\",\"p\":\"\",\"act\":\"" + link + "\",\"axmsgid\":\"\"}}]";
-                    //    await SendSignalRMessage(signalrUrl, project, username, _Payload);
-                    //    if (trace)
-                    //    {
-                    //        File.AppendAllText(_exeDir, "Success:" + successapimessage + Environment.NewLine);
-                    //    }
-                    //}
-                    //else
-                    //{
-                    //    string errormessage = apimessage["result"][0]["error"]["msg"].ToString() ?? "";
-                    //    var signalrobjlist = new List<object>
-                    //{
-                    //    new
-                    //    {
-                    //        type = "Tstruct Save Failed",
-                    //        title = "Tstruct Save Failed",
-                    //        message = errormessage,
-                    //        link = ""
-                    //    }
-                    //};
-                    //    Console.WriteLine("Message sent to signalR client is " + JsonConvert.SerializeObject(signalrobjlist));
-                    //    var singalRMessage = new
-                    //    {
-                    //        UserId = username,
-                    //        Project = project,
-                    //        Message = JsonConvert.SerializeObject(signalrobjlist)
-                    //    };
-                    //    await _api.POSTData(signalrUrl, JsonConvert.SerializeObject(singalRMessage), "application/json");
-                    //    Console.Write("message sent to signalR client");
-                    //}
-                }
-                catch (Exception ex)
-                {
-                    var signalrobjlist = new List<object>
-                    {
-                        new
-                        {
-                            type = "Tstruct Save Failed",
-                            title = "Tstruct Save Exception",
-                            message = apiResult.result["message"] +" Exception:"+ex.Message,
-                            link = ""
-                        }
-                    };
-                    var singalRMessage = new
-                    {
-                        UserId = username,
-                        Project = project,
-                        Message = JsonConvert.SerializeObject(signalrobjlist)
-                    };
-                    await _api.POSTData(signalrUrl, JsonConvert.SerializeObject(singalRMessage), "application/json");
-                    File.AppendAllText(_exeDir, "Error :" + ex.Message + ex.StackTrace + Environment.NewLine);
-                }
-
-                var result = JsonConvert.SerializeObject(new { status = apiResult.result["success"], msg = apiResult.result["message"] });
-                //if (Convert.ToBoolean(apiResult.result["success"]) && apiResult.result?["message"]?.ToString()?.IndexOf("\"error\"") == -1)
-                //    apiRequest.Status = "Success";
-                //else
-                //    apiRequest.Status = "Fail";
-                //apiRequest.Response = apiResult.result["message"].ToString();
-                //apiRequest.EndTime = DateTime.Now;
-                //await LogAPICall(apiRequest);
-                return result;
-            }
-            catch (Exception ex)
-            {
-                //try
-                //{
-                //    apiRequest.EndTime = DateTime.Now;
-                //    apiRequest.Status = "Fail";
-                //    apiRequest.Response = JsonConvert.SerializeObject(ex);
-                //    await LogAPICall(apiRequest);
-                //}
-                //catch (Exception ex1)
-                //{
-                //    apiRequest.Response = JsonConvert.SerializeObject(ex1);
-                //    await LogAPICall(apiRequest);
-                //    var errResult1 = JsonConvert.SerializeObject(new { error = new List<string> { ex1.Message } });
-                //}
-
-                var errResult = JsonConvert.SerializeObject(new { error = new List<string> { ex.Message } });
-                File.AppendAllText(_exeDir, "Error :" + ex.Message + ex.StackTrace + Environment.NewLine);
-                return errResult;
-            }
-        }
-        catch (Exception ex)
-        {
-            var errResult = JsonConvert.SerializeObject(new { error = new List<string> { ex.Message } });
-            File.AppendAllText(_exeDir, "Error :" + ex.Message + ex.StackTrace + Environment.NewLine);
-            return ex.Message;
-        }
-    }
-
-    //private async Task<string> CachedSaveNew(string queueRequest)
-    //{
-    //    string logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "log");
-    //    Directory.CreateDirectory(logDir);
-    //    string logPath = Path.Combine(logDir, $"CachedSave-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.log");
-    //    try
-    //    {
-    //        JObject saveObj = JObject.Parse(queueRequest);
-    //        string queueData = saveObj["queuedata"]?.ToString();
-    //        JObject saveData;
-    //        if (!string.IsNullOrEmpty(queueData))
-    //        {
-    //            queueData = queueData.Replace("\r\n”}", "”}").Replace("\\”", "”").Trim('"');
-    //            saveData = JsonConvert.DeserializeObject<JObject>(queueData);
-    //            if (saveData?["payload"] != null)
-    //                saveData = (JObject)saveData["payload"];
-    //        }
-    //        else
-    //        {
-    //            saveData = saveObj;
-    //        }
-    //        var savedataToken = saveData["_parameters"]?[0]?["savedata"];
-    //        if (savedataToken == null)
-    //            return JsonConvert.SerializeObject(new { error = "Invalid savedata" });
-    //        if (savedataToken["transid"] != null)
-    //        {
-    //            return await ProcessSingleSave(saveData, logPath);
-    //        }
-    //        List<object> results = new List<object>();
-    //        bool isfirst = true;
-    //        foreach (JProperty formNode in savedataToken.Children<JProperty>())
-    //        {
-    //            var transactionsObj = formNode.Value as JObject;
-    //            foreach (JProperty txn in transactionsObj.Properties())
-    //            {
-    //                JObject txnData = txn.Value as JObject;
-    //                JObject singleSaveData = new JObject
-    //                {
-    //                    ["_parameters"] = new JArray(
-    //                        new JObject
-    //                        {
-    //                            ["savedata"] = txnData,
-    //                            ["goldendump114"] = saveData["_parameters"][0]?["goldendump114"],
-    //                            ["axprops"] = saveData["_parameters"][0]?["axprops"],
-    //                            ["globalvars"] = saveData["_parameters"][0]?["globalvars"],
-    //                            ["uservars"] = saveData["_parameters"][0]?["uservars"]
-    //                        }
-    //                    )
-    //                };
-    //                string result = await ProcessMultiSave(singleSaveData, logPath);
-    //                results.Add(JsonConvert.DeserializeObject(result));
-    //            }
-    //        }
-    //        if (results.Count > 0)
-    //        {
-    //            try
-    //            {
-    //                StringBuilder msgBuilder = new StringBuilder();
-    //                var firstItem = JObject.Parse(results[0].ToString());
-    //                string project = firstItem["project"]?.ToString();
-    //                string username = firstItem["username"]?.ToString();
-    //                string tstructCap = string.Empty;
-    //                string transid = string.Empty;                 
-    //                var _appSettingsService = new AppSettingsService();
-    //                var _appSettingsHelper = new AppSettingsHelper(_appSettingsService);
-    //                _common._appName = project;
-    //                _common._appSettingsHelper = _appSettingsHelper;
-    //                Dictionary<string, string> configcon = _appSettingsHelper.GetDBConfigurations(project);
-    //                string connectionString = configcon["ConnectionString"];
-    //                string dbType = configcon["DBType"];
-
-    //                string signalrUrl = _appSettingsHelper.GetARMNotificationUrl(project);
-    //                signalrUrl += "/api/v1/SendSignalR";
-    //                bool success = false;
-    //                bool error = false;
-    //                foreach (var item in results)
-    //                {
-    //                    JObject obj = JObject.Parse(item.ToString());
-    //                    string _tstructCap = obj["tstructCap"]?.ToString();
-    //                    tstructCap = _tstructCap + ",";
-    //                    transid = obj["transid"]?.ToString() + ",";
-    //                    bool _status = (bool)obj["status"];
-    //                    JObject objmsg = JObject.Parse(obj["msg"].ToString());
-    //                    if (objmsg["result"][0]["error"] != null && _status)
-    //                    {
-    //                        error = true;
-    //                        msgBuilder.Append(_tstructCap + " " + objmsg["result"][0]["error"]["msg"].ToString() + Environment.NewLine);
-    //                    }
-    //                    else if (objmsg["result"][0]["message"] != null && _status)
-    //                    {
-    //                        success = true;
-    //                        msgBuilder.Append(objmsg["result"][0]["message"][0]["msg"].ToString() + " Recordid:" + objmsg["result"][0]["message"][0]["recordid"].ToString() + Environment.NewLine);
-    //                    }
-    //                }
-    //                string finalMsg = msgBuilder.ToString().TrimEnd(',', ' ');
-    //                string notiTitle = "Multi transaction saved successfully";
-    //                if (success && error)
-    //                    notiTitle = "Multi Transaction saved successfully with error";
-    //                else if (!success && error)
-    //                    notiTitle = "Multi Transaction save- error";
-
-    //                string _srPayload = JsonConvert.SerializeObject(new[] { new { notifytype = "cachedsave", type = "TStruct", icon = "", title = notiTitle, message = finalMsg, dt = DateTime.Now.ToString(), link = new { t = "", name = "", p = "", act = "load", axmsgid = "" } } });
-    //                if (!string.IsNullOrEmpty(finalMsg))
-    //                {
-    //                    string sql = Constants_SQL.INSERT_TO_AXACTIVEMESG;
-    //                    string currentTime = DateTime.Now.ToString("yyyyMMddHHmmssfff");
-    //                    sql = string.Format(sql, currentTime, "cachedsave", username, username, "cached save", "cached save", "cached save -" + transid, transid, finalMsg, tstructCap, "");
-
-    //                    IDbHelper dbHelper = DBHelper.CreateDbHelper(dbType);
-    //                    var result = await dbHelper.ExecuteQueryAsync(sql, connectionString);
-
-    //                    await SendSignalRMessage(signalrUrl, project, username, _srPayload);
-    //                }
-    //            }
-    //            catch (Exception ex)
-    //            {
-    //                await File.AppendAllTextAsync(logPath,
-    //                    "Error result parse: " + JsonConvert.SerializeObject(results) +
-    //                    " Exception:" + ex + Environment.NewLine);
-    //            }
-    //        }
-    //        return JsonConvert.SerializeObject(results);
-    //    }
-    //    catch (Exception ex)
-    //    {
-    //        await File.AppendAllTextAsync(logPath, "Fatal Error: " + ex + Environment.NewLine);
-    //        return JsonConvert.SerializeObject(new { error = ex.Message });
-    //    }
-    //}
     public JObject XmlToJObject(string xml)
     {
         XmlDocument doc = new XmlDocument();
@@ -407,10 +92,41 @@ public class Worker : BackgroundService
                 RemoveAttributes(item);
         }
     }
-    private async Task<JObject> GetRedisJson(string key, string field)
+    private async Task<JObject> GetRedisJson(string key, string field, string _exeDir)
     {
-        var value = await _common._redisCache.HashGetAsync(key, field);
-        return !string.IsNullOrEmpty(value) ? JObject.Parse(value) : new JObject();
+        //string jsonFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "GLOBALVARS.txt");
+        //if (File.Exists(jsonFilePath))
+        //{
+        //    string fileValue = await File.ReadAllTextAsync(jsonFilePath);
+        //    if (string.IsNullOrWhiteSpace(fileValue))
+        //    {
+        //        return new JObject();
+        //    }
+        //    try
+        //    {
+        //        return JObject.Parse(fileValue);
+        //    }
+        //    catch (JsonReaderException ex)
+        //    {
+        //        return new JObject();
+        //    }
+        //}
+        try
+        {
+            var value = await _common._redisCache.HashGetAsync(key, field);
+            //return !string.IsNullOrEmpty(value) ? JObject.Parse(value) : new JObject();
+            if (string.IsNullOrEmpty(value))
+            {
+                File.AppendAllText(_exeDir, "Error:Empty json:" + Environment.NewLine + value + Environment.NewLine + "ARMSessionId:" + key);
+                return new JObject();
+            }
+            return JObject.Parse(value);
+        }
+        catch (Exception ex)
+        {
+            File.AppendAllText(_exeDir, "Error:GetRedisJson json parse:" + Environment.NewLine + ex.Message + Environment.NewLine + "ARMSessionId:" + key);
+            return new JObject();
+        }
     }
     private async Task<string> GetRedisString(string key, string field)
     {
@@ -547,10 +263,10 @@ public class Worker : BackgroundService
                 if (!redisConnected)
                 {
                     //await File.AppendAllTextAsync(logPath, "Error: Redis not connecting" + Environment.NewLine);
-                    File.AppendAllText(_exeDir, "Error: Redis not connecting" + Environment.NewLine);
+                    File.AppendAllText(_exeDir, "Error: Redis not connecting" + Environment.NewLine + " RedisInfo:" + _common._redisCache.RedisSettings.Host + " " + _common._redisCache.RedisSettings.Port + " " + _common._redisCache.RedisSettings.DecryptedPwd);
                     return JsonConvert.SerializeObject(new { error = "Redis not connecting" });
                 }
-                JObject globalvars = await GetRedisJson(ARMSessionId, "GLOBALVARS");
+                JObject globalvars = await GetRedisJson(ARMSessionId, "GLOBALVARS", _exeDir);
                 if (globalvars == null || globalvars.ToString() == "{}")
                 {
                     //await File.AppendAllTextAsync(logPath, "Error: Globalvars are empty, please check ARMSessionId and try again" + Environment.NewLine);
@@ -961,7 +677,7 @@ public class Worker : BackgroundService
         string tstructCap = string.Empty, transid = string.Empty, project = string.Empty, username = string.Empty;
         try
         {
-            string url = saveData["url"]?.ToString();
+            string url = string.Empty;// saveData["url"]?.ToString();
             string method = saveData["method"]?.ToString();
             if (string.IsNullOrEmpty(method))
                 method = "POST";
@@ -971,11 +687,12 @@ public class Worker : BackgroundService
             tstructCap = saveData["_parameters"]?[0]?["savedata"]?["tstructcap"]?.ToString();
             bool trace = saveData["_parameters"]?[0]?["savedata"]?["trace"]?.ToString() == "true";
             string payload = JsonConvert.SerializeObject(saveData);
+
             string armScriptUrl = _appSettingsHelper.GetARMScriptsURL(project);
-            if (string.IsNullOrEmpty(url))
-            {
-                url = $"{armScriptUrl.TrimEnd('/')}/ASBTStructRest.dll/datasnap/rest/TASBTstruct/savedata";
-            }
+            string proj_BaseRestPath = _config["AppConfig:" + project + "_ASBTStructRest_URL"];
+            string selectedUrl = !string.IsNullOrEmpty(proj_BaseRestPath) ? proj_BaseRestPath : armScriptUrl;
+
+            url = $"{selectedUrl.TrimEnd('/')}/ASBTStructRest.dll/datasnap/rest/TASBTstruct/savedata";
             if (trace)
             {
                 //await File.AppendAllTextAsync(logPath, $"URL: {url}\nPayload: {payload}\n");

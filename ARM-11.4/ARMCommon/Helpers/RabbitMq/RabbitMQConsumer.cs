@@ -113,7 +113,7 @@ namespace ARMCommon.Helpers.RabbitMq
             }
             var queue = channel.QueueDeclare(queueName, true, false, false, null);
             channel.QueueBind(queue, $"{queueName}-exchange", $"{queueName}-route");
-            ushort maxParallel = 5; // tune this
+            ushort maxParallel = 10; // tune this
             channel.BasicQos(0, maxParallel, false);
             var semaphore = new SemaphoreSlim(maxParallel);
             var consumer = new AsyncEventingBasicConsumer(channel);
@@ -301,7 +301,7 @@ namespace ARMCommon.Helpers.RabbitMq
 
                         DeclareInfrastructure();
 
-                        ushort maxParallel = 5;
+                        ushort maxParallel = 10;
                         channel.BasicQos(0, maxParallel, false);
 
                         var semaphore = new SemaphoreSlim(maxParallel);

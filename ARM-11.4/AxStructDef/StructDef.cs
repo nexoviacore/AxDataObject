@@ -73,7 +73,7 @@ namespace AxStructDef
         private Utils? _common;
         private AxStructDefUtils? _utils;
         private IARMLogTraceService? _traceService;
-        private StructDef? _parentStructDef;
+        public StructDef? _parentStructDef;
         private static readonly Dictionary<Type, DbType> _typeMap = new()
         {
             { typeof(byte), DbType.Byte },
@@ -99,6 +99,7 @@ namespace AxStructDef
         private XmlDocument? _xml;
         private Dictionary<string, TField>? _fieldLookup;
         private bool _lookupInitialized;
+        private List<GenMapField>? _currentGenMappings;
 
         #endregion
 
@@ -1511,7 +1512,7 @@ namespace AxStructDef
                     TargetTransId = GetNodeValue(x, Consts.xml_GenTarget),
                     TargetCaption = GetAttributeValue(x.SelectSingleNode(Consts.xml_GenTarget), "tcap") ?? "",
                     SourceDC = GetNodeValue(x, Consts.xml_GenParent),
-                    GridControlCaption = GetNodeValue(x, Consts.xml_GenControl),
+                    GenControlField = GetNodeValue(x, Consts.xml_GenControl),
                     //AllowEmpty = GetNodeValue(x, Consts.xml_Active) == "True",
                     AllowEmpty = true,
                     Condition = GetNodeValue(x, Consts.xml_GenCField),
@@ -2451,6 +2452,17 @@ namespace AxStructDef
             return Frames?.FirstOrDefault(f => f.TableName.Equals(tbName, StringComparison.OrdinalIgnoreCase));
         }
 
+        public TFrame? GetFrameFromName(string? frameName)
+        {
+            if (string.IsNullOrWhiteSpace(frameName) || frameName.Length < 2)
+                return default;
+
+            if (!int.TryParse(frameName.AsSpan(2), out var frameNo))
+                return default;
+
+            return Frames?.FirstOrDefault(f => f.FrameNo == frameNo);
+        }
+
         /// <param name="Frameno">Frame number to search for</param>
         /// <returns>Index of first field in specified frame, -1 if no fields</returns>
         /// <example>GetFirstFieldIndex(1) returns 0</example>
@@ -2959,7 +2971,7 @@ namespace AxStructDef
             string result = "";
             string sqlWoUpd = "";
 
-            SetAutoGenList();
+            await SetAutoGenList();
 
             string compName = !string.IsNullOrEmpty(CompanyName)
                 ? CompanyName.Substring(0, CompanyName.Length - 1)
@@ -2997,7 +3009,7 @@ namespace AxStructDef
             }
             else
             {
-                string prefix = GetUserActivePrefix(transid, fieldName);
+                string prefix = await GetUserActivePrefix(transid, fieldName);
                 string DBType = _common._dbType;
                 AutoGen_Prefix = prefix;
 
@@ -3041,7 +3053,7 @@ namespace AxStructDef
             try
             {
                 // Execute the query using your DBHelper
-                var queryResult = ExecuteSQLAsync(sql).Result;
+                var queryResult = await _common._dbHelper?.ExecuteSQLAsync(sql);
 
                 if (queryResult.data.Rows.Count > 0)
                 {
@@ -3061,7 +3073,7 @@ namespace AxStructDef
                         string sval = GetFieldValue(prefixfield, 1);
                         if (sval.StartsWith(":"))
                         {
-                            // result = GetPrefixFieldValue(fieldName, sval, transid, onlyGet, digits);
+                             result = await GetPrefixFieldValue(fieldName, sval, transid, onlyGet, digits);
                             return result;
                         }
                         else
@@ -3086,6 +3098,338 @@ namespace AxStructDef
                     _traceService.LogError($"Error in GetLastNo: {ex.Message}");
             }
             
+            return result;
+        }
+
+        public async Task<string>  GetPrefixFieldValue(
+                string fieldname,
+                string sval,
+                string transid,
+                bool OnlyGet,
+                int digits)
+        {
+            int j, done;
+            string pval, sql = "", wstr, dstr, s, lastno = "", fval, seqtbl;
+            double id;
+            bool GetVal = false;
+            TField fd;
+            string aTransid, aFName;
+            bool openforupdate = false;
+            bool postAutoGen = false;
+            string result = string.Empty;
+            string sqlLower = _common._dbVars["sqllower"];
+
+            try
+            {
+
+                s = GetNthString(sval, 1);
+                fval = s.Length > 1 ? s.Substring(1) : string.Empty;
+
+                fd = GetField(fval);
+
+                if (fd != null)
+                    pval = GetFieldValue(fval, 1);
+                else
+                    pval = fval;
+
+                s = GetNthString(sval, 4);
+
+                if (!string.IsNullOrEmpty(s))
+                    aTransid = s;
+                else
+                    aTransid = transid;
+
+                s = GetNthString(sval, 5);
+
+                if (!string.IsNullOrEmpty(s))
+                    aFName = s;
+                else
+                    aFName = fieldname;
+
+                seqtbl = GetFieldValue("Axp_SeqTable", 1)?.Trim();
+
+                if (string.IsNullOrEmpty(seqtbl))
+                    seqtbl = "Sequence";
+
+                sql = "Select * FROM " + CompanyName.ToUpperInvariant() + seqtbl +
+                      " WHERE " +
+                      sqlLower +
+                      "(TRANSTYPE)=" +
+                      sqlLower + "(" +
+                      QuotedStr(aTransid) + ")" +
+                      " and " +
+                      sqlLower +
+                      "(FIELDNAME)=" +
+                      sqlLower + "(" +
+                      QuotedStr(aFName) + ")" +
+                      " and " +
+                      sqlLower +
+                      "(prefix)=" +
+                      sqlLower + "(" +
+                      QuotedStr(pval) + ")";
+
+                wstr = sqlLower +
+                       "(TRANSTYPE) = " +
+                       sqlLower + "(" +
+                       QuotedStr(aTransid) + ") and " +
+                       sqlLower +
+                       "(FIELDNAME) = " +
+                       sqlLower + "(" +
+                       QuotedStr(aFName) + ") and " +
+                       sqlLower +
+                       "(prefix) = " +
+                       sqlLower + "(" +
+                       QuotedStr(pval) + ")";
+
+                var queryResult = await _common._dbHelper?.ExecuteSQLAsync(sql);
+
+                if (queryResult.data.Rows.Count == 0)
+                {
+                    s = GetNthString(sval, 2);
+
+                    lastno = !string.IsNullOrEmpty(s) ? s : "1";
+
+                    s = GetNthString(sval, 3);
+
+                    if (!string.IsNullOrEmpty(s))
+                        digits = Convert.ToInt32(s);
+
+                    if (OnlyGet)
+                    {
+                        GetVal = false;
+                    }
+                    else
+                    {
+                        var recIdsResult = await GetRecordIdsFromDB(1);
+
+                        if (!string.IsNullOrEmpty(recIdsResult.error))
+                            throw new Exception($"Error fetching new Record Ids: {recIdsResult.error}");
+
+                        id = recIdsResult.data.AsEnumerable()
+                                 .Where(row => row["recordid"] != DBNull.Value)
+                                 .Select(row => Convert.ToInt64(row["recordid"]))
+                                 .FirstOrDefault();
+
+                        s = "insert into " +
+                            CompanyName.ToUpperInvariant() + seqtbl +
+                            "(sequenceid, prefix,transtype,fieldname,activesequence," +
+                            "description,prefixfield,lastno,noofdigits) values(";
+
+                        s += id.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture) + ",";
+                        s += QuotedStr(pval) + ",";
+                        s += QuotedStr(aTransid) + ",";
+                        s += QuotedStr(aFName) + ",";
+                        s += QuotedStr("F") + ",";
+                        s += QuotedStr("~dynamic prefix") + ",";
+                        s += QuotedStr("'") + ",";
+                        s += (Convert.ToInt32(lastno) + 1).ToString() + ",";
+                        s += digits.ToString() + ")";
+
+                        try
+                        {
+                            await _common._dbHelper.ExecuteScalarAsync(s);
+
+                            GetVal = false;
+                        }
+                        catch (Exception e)
+                        {
+                            if (e.Message.ToLowerInvariant().Contains("unique"))
+                            {
+                                GetVal = true;
+                            }
+                            else
+                            {
+                                throw;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    GetVal = true;
+                }
+
+                try
+                {
+                    if (GetVal)
+                    {
+                        if (!OnlyGet)
+                        {
+                            if (_common._dbType == "ms sql")
+                            {
+                                sql = "Select * FROM " +
+                                      CompanyName.ToUpperInvariant() + seqtbl +
+                                      " " + _common._dbVars["forupdate"] +
+                                      " WHERE " +
+                                      sqlLower +
+                                      "(TRANSTYPE)=" +
+                                      sqlLower + "(" +
+                                      QuotedStr(aTransid) + ")" +
+                                      " and " +
+                                      sqlLower +
+                                      "(FIELDNAME)=" +
+                                      sqlLower + "(" +
+                                      QuotedStr(aFName) + ")" +
+                                      " and " +
+                                      sqlLower +
+                                      "(prefix)=" +
+                                      sqlLower + "(" +
+                                      QuotedStr(pval) + ")";
+                            }
+                            else
+                            {
+                                sql = "Select * FROM " +
+                                      CompanyName.ToUpperInvariant() + seqtbl +
+                                      " WHERE " +
+                                      sqlLower +
+                                      "(TRANSTYPE)=" +
+                                      sqlLower + "(" +
+                                      QuotedStr(aTransid) + ")" +
+                                      " and " +
+                                      sqlLower +
+                                      "(FIELDNAME)=" +
+                                      sqlLower + "(" +
+                                      QuotedStr(aFName) + ")" +
+                                      " and " +
+                                      sqlLower +
+                                      "(prefix)=" +
+                                      sqlLower + "(" +
+                                      QuotedStr(pval) + ")";
+                            }
+                        }
+                        else
+                        {
+                            sql = "Select * FROM " +
+                                  CompanyName.ToUpperInvariant() + seqtbl +
+                                  " WHERE " +
+                                  sqlLower +
+                                  "(TRANSTYPE)=" +
+                                  sqlLower + "(" +
+                                  QuotedStr(aTransid) + ")" +
+                                  " and " +
+                                  sqlLower +
+                                  "(FIELDNAME)=" +
+                                  sqlLower + "(" +
+                                  QuotedStr(aFName) + ")" +
+                                  " and " +
+                                  sqlLower +
+                                  "(prefix)=" +
+                                  sqlLower + "(" +
+                                  QuotedStr(pval) + ")";
+                        }
+
+                        var XmlDoc = await _common._dbHelper?.ExecuteSQLAsync(sql);
+                        openforupdate = false;
+
+                        if (!postAutoGen)
+                        {
+                            if (!OnlyGet)
+                            {
+                                if (_common._dbType == "mysql")
+                                {
+                                    {
+                                        try
+                                        {
+
+                                            var t = sql + _common._dbVars["forupdate"];
+
+                                            var query = await _common._dbHelper?.ExecuteSQLAsync(t);
+
+                                            openforupdate = true;
+                                        }
+                                        catch (Exception e)
+                                        {
+                                                throw new Exception(e.Message);
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    string qt = "";
+                                    if (_common._dbType == "ms sql")
+                                    {
+                                        qt = sql;
+
+                                    }
+                                    else
+                                        qt = sql + _common._dbVars["forupdate"];
+
+                                    var query = await _common._dbHelper?.ExecuteSQLAsync(qt);
+                                }
+                            }
+                        }
+
+                        if (XmlDoc.data.Rows.Count > 0)
+                        {
+                            DataRow row = XmlDoc.data.Rows[0];
+                            lastno = GetRowValue(row, "LASTNO");
+                            string digtVal = GetRowValue(row, "NOOFDIGITS");
+                            if(!string.IsNullOrEmpty(digtVal))
+                            {
+                                digits = Convert.ToInt32(digtVal);
+                            }
+
+                            pval = GetRowValue(row, "PREFIX")?.Trim();
+                        }
+                        else
+                        {
+                            pval = string.Empty;
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(pval))
+                    {
+                        dstr = string.Empty;
+
+                        for (j = 0; j < digits; j++)
+                            dstr += "0";
+
+                        int paddingLength = digits - lastno.Length;
+
+                        if (paddingLength < 0)
+                            paddingLength = 0;
+
+                        if (paddingLength > dstr.Length)
+                            paddingLength = dstr.Length;
+
+                        result = pval +
+                                 dstr.Substring(0, paddingLength) +
+                                 lastno;
+
+                        if (!OnlyGet)
+                        {
+                            if (GetVal)
+                            {
+                                if (!postAutoGen)
+                                {
+                                    sql = "update " + CompanyName + seqtbl +
+                                          " set lastno = " +
+                                          (Convert.ToInt32(lastno) + 1).ToString() +
+                                          " where " + wstr;
+
+                                    var query = await _common._dbHelper?.ExecuteSQLAsync(sql);
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception e)
+                {
+                    if (openforupdate)
+                    {
+                        await _common._dbHelper?.ExecuteSQLAsync(sql);
+                    }
+
+                    throw;
+                }
+            }
+            catch (Exception e)
+            {
+
+                throw;
+            }
+
             return result;
         }
 
@@ -3293,6 +3637,24 @@ namespace AxStructDef
             else
                 return Frames[dcNo - 1].RowCount >= 0 ? Frames[dcNo - 1].RowCount : 0;
         }
+
+        public int GetAllDcRowCount()
+        {
+            int totalRowCount = 0;
+            HashSet<string> processedTables = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var frm in Frames)
+            {
+                if (!processedTables.Add(frm.TableName))
+                    continue;
+
+                totalRowCount += GetRowCount(frm.FrameNo);
+            }
+
+            return totalRowCount;
+        }
+
 
         /// <returns>Comma-separated list of grid DC numbers</returns>
         /// <example>GetGridDcs() returns "1,3,5"</example>
@@ -4154,7 +4516,7 @@ namespace AxStructDef
             return result;
         }
 
-        public void FillSpecificRow(GenMapField genMapField)
+        public void FillSpecificRow(GenMapField genMapField, int sourceRowNo)
         {
             //StructDef sdef = _parentStructDef;
             //TField fld = _parentStructDef.GetField(genMapField.TargetField);
@@ -4174,68 +4536,66 @@ namespace AxStructDef
             int i;
             int x = 0;
 
-            // --- Field value lookup ---
-
-
+                _parentRowNo = sourceRowNo;
             //if (map.Attributes["type" == "field" && Convert.ToInt32(map.Attributes["srow"]) == 0)
-            if (genMapField.Type == "field" && Convert.ToInt32(genMapField.SourceRow) == 0)
-            {
+                if (genMapField.Type == "field" && Convert.ToInt32(genMapField.SourceRow) == 0)
+                {
 
-                GetGenFieldValue(fieldName, _parentRowNo, genMapField);
-                validity = ValidRow(_parentRowNo, genMapField);
-            }
-            else
-            {
-                //int srow = Convert.ToInt32(map.Attributes["srow"]);
-                int srow = genMapField.SourceRow;
-                GetGenFieldValue(fieldName, srow, genMapField);
-
-                if (srow != 0)
-                    validity = ValidRow(srow, genMapField);
-                else
+                    GetGenFieldValue(fieldName, _parentRowNo, genMapField);
                     validity = ValidRow(_parentRowNo, genMapField);
-            }
+                }
+                else
+                {
+                    //int srow = Convert.ToInt32(map.Attributes["srow"]);
+                    int srow = genMapField.SourceRow;
+                    GetGenFieldValue(fieldName, srow, genMapField);
+
+                    if (srow != 0)
+                        validity = ValidRow(srow, genMapField);
+                    else
+                        validity = ValidRow(_parentRowNo, genMapField);
+                }
 
 
-            // --- Numeric auto ID handling ---
-            if (dataType == "n" && _genIdValue > 0)
-            {
-                _genFieldValue = _genIdValue.ToString();
-                _genIdValue = 0;
-            }
-            //else if(dataType == "d")
-            //{
-            //    _genFieldValue = _common.ConvertDBDateToClientDateFormat(customDataType, _genFieldValue, clientDateFormat);
-            //}
+                // --- Numeric auto ID handling ---
+                if (dataType == "n" && _genIdValue > 0)
+                {
+                    _genFieldValue = _genIdValue.ToString();
+                    _genIdValue = 0;
+                }
+                //else if(dataType == "d")
+                //{
+                //    _genFieldValue = _common.ConvertDBDateToClientDateFormat(customDataType, _genFieldValue, clientDateFormat);
+                //}
 
-            if (!fld.SourceKey)
-            {
-                _genIdValue = 0;
-            }
-            else if (genMapField.IsID)
-            {
-                _genIdValue = Int64.Parse(_genFieldValue);
+                if (!fld.SourceKey)
+                {
+                    _genIdValue = 0;
+                }
+                else if (genMapField.IsID)
+                {
+                    _genIdValue = Int64.Parse(_genFieldValue);
 
-                _genFieldValue = string.Empty;
-            }
+                    _genFieldValue = string.Empty;
+                }
 
-            // --- Compute TRow (x) while skipping invalid rows ---
-            //if (map != null || map.Attributes != null)
-            //x = Convert.ToInt32(map?.Attributes?["trow"]?.Value);
-            x = Convert.ToInt32(genMapField.TargetRow);
-            //for (i = 1; i <= Convert.ToInt32(map?.Attributes?["trow"]?.Value) - 1; i++)
-            for (i = 1; i <= x - 1; i++)
-            {
-                //s = structObj.axprovider.dbm.gf.Pad(frameNo.ToString(), 2, ' ')
-                //    + structObj.axprovider.dbm.gf.Pad(i.ToString(), 2, ' ');
-                s = _utils.Pad(frameNo.ToString(), 2, ' ')
-                    + _utils.Pad(i.ToString(), 2, ' ');
+                // --- Compute TRow (x) while skipping invalid rows ---
+                //if (map != null || map.Attributes != null)
+                //x = Convert.ToInt32(map?.Attributes?["trow"]?.Value);
+                x = Convert.ToInt32(genMapField.TargetRow);
+                //for (i = 1; i <= Convert.ToInt32(map?.Attributes?["trow"]?.Value) - 1; i++)
+                for (int j = 1; j <= x - 1; j++)
+                {
+                    //s = structObj.axprovider.dbm.gf.Pad(frameNo.ToString(), 2, ' ')
+                    //    + structObj.axprovider.dbm.gf.Pad(i.ToString(), 2, ' ');
+                    s = _utils.Pad(frameNo.ToString(), 2, ' ')
+                        + _utils.Pad(j.ToString(), 2, ' ');
 
 
 
-                if (_invalidRows.Contains(s))
-                    x--;
-            }
+                    if (_invalidRows.Contains(s))
+                        x--;
+                }
 
             // --- Find or add field to FieldsAdded ---
             int fpos = _fieldsAdded.IndexOf(fieldName);
@@ -4248,165 +4608,142 @@ namespace AxStructDef
 
             // --- Exit if invalid row ---
             if (!validity)
-            {
-                //s = structObj.axprovider.dbm.gf.Pad(frameNo.ToString(), 2, ' ')
-                //    + structObj.axprovider.dbm.gf.Pad(map.Attributes["trow"], 2, ' ');
-                //s = _utils.Pad(frameNo.ToString(), 2, ' ')
-                //   + _utils.Pad(map?.Attributes?["trow"]?.Value, 2, ' ');
-                s = _utils.Pad(frameNo.ToString(), 2, ' ')
-                   + _utils.Pad(genMapField.TargetRow.ToString(), 2, ' ');
-
-                if (!_invalidRows.Contains(s))
                 {
-                    _invalidRows.Add(s);
+                    //s = structObj.axprovider.dbm.gf.Pad(frameNo.ToString(), 2, ' ')
+                    //    + structObj.axprovider.dbm.gf.Pad(map.Attributes["trow"], 2, ' ');
+                    //s = _utils.Pad(frameNo.ToString(), 2, ' ')
+                    //   + _utils.Pad(map?.Attributes?["trow"]?.Value, 2, ' ');
+                    s = _utils.Pad(frameNo.ToString(), 2, ' ')
+                       + _utils.Pad(genMapField.TargetRow.ToString(), 2, ' ');
 
-                    if (_rowExists)
-                        DeleteRow(frameNo, x);
+                    if (!_invalidRows.Contains(s))
+                    {
+                        _invalidRows.Add(s);
+
+                        if (_rowExists)
+                            DeleteRow(frameNo, x);
+                    }
+                    return;
                 }
-                return;
-            }
 
-            // --- Update max row list ---
-            //if (int.Parse(structDefRec.MaxRowList[frameNo - 1]) < x)
-            //    structDefRec.MaxRowList[frameNo - 1] = x.ToString();
+                // --- Update max row list ---
+                //if (int.Parse(structDefRec.MaxRowList[frameNo - 1]) < x)
+                //    structDefRec.MaxRowList[frameNo - 1] = x.ToString();
 
-            _rowsAdded[fpos] = x.ToString();
+                _rowsAdded[fpos] = x.ToString();
 
-            // --- Auto-generate mode field value ---
-            if (fld.ModeofEntry == "autogenerate")
-            {
-                fv = GetFieldValue(fieldName, 1);
-                if (!string.IsNullOrEmpty(fv))
-                    _genFieldValue = fv;
-            }
+                // --- Auto-generate mode field value ---
+                if (fld.ModeofEntry == "autogenerate")
+                {
+                    fv = GetFieldValue(fieldName, 1);
+                    if (!string.IsNullOrEmpty(fv))
+                        _genFieldValue = fv;
+                }
 
-            // --- Save field ---
-            //SetFieldValue(
-            //     fieldName,
-            //     dataType,
-            //     saveTableName,
-            //     _genFieldValue,
-            //     "",
-            //     x,
-            //     _genIdValue,
-            //     0,
-            //     frameNo,
-            //     0,
-            //     sourceKey
-            // );
+                // --- Save field ---
+                //SetFieldValue(
+                //     fieldName,
+                //     dataType,
+                //     saveTableName,
+                //     _genFieldValue,
+                //     "",
+                //     x,
+                //     _genIdValue,
+                //     0,
+                //     frameNo,
+                //     0,
+                //     sourceKey
+                // );
 
-            SubmitValue(
-                    fieldName,
-                    x,
-                    _genFieldValue,
-                    "",
-                    _genIdValue,
-                    0,
-                    0
-                );
+                SubmitValue(
+                        fieldName,
+                        x,
+                        _genFieldValue,
+                        "",
+                        _genIdValue,
+                        0,
+                        0
+                    );
 
-            // NOTE: Handle Parser here
-            //structDefRec.Validate.Parser.RegisterVar(fieldName, dataType[0], fieldValue);
-            AxParser.RegisterVar(fieldName, dataType[0].ToString(), _genFieldValue);
+                // NOTE: Handle Parser here
+                //structDefRec.Validate.Parser.RegisterVar(fieldName, dataType[0], fieldValue);
+                AxParser.RegisterVar(fieldName, dataType[0].ToString(), _genFieldValue);
 
-            //structObj.axprovider.dbm.gf.DoDebug.Msg(
-            //    $"Mapped {fieldName} Row = {x} value = {FieldValue} idvalue {IdValue}"
-            //);
+                //structObj.axprovider.dbm.gf.DoDebug.Msg(
+                //    $"Mapped {fieldName} Row = {x} value = {FieldValue} idvalue {IdValue}"
+                //);
+            //}
         }
 
-        public int GetSourceFrameNo(TField field, GenMapField genMapField)
+        public int GetSourceFrameNo(TField field)
         {
             int result = 0;
-            int k, fno, i, j;
+            int fno = field.FrameNo;
+            TField fpb = null;
 
-            //StructDef sd = new StructDef();
-
-            //if (_parentStructDef != null && _parentStructDef._xml != null)
-            //sd = _parentStructDef;
-
-            // Pick correct StoreData
-            //if (StoreDataRec.SourceTransId == fTransId)
-            //if (ParentStructDef?.Transid == Transid)
-            //    {
-            //    sd = ParentStructDef;
-            //}
-            //else
-            //{
-            //    k = StoreDataRec.SourceIndex;
-            //    if (k == -1)
-            //        return result;
-
-            //    sd = _structDefList[k];
-            //}
-
-            fno = field.FrameNo;
-
-            TField fpb = new TField(); // MUST be declared so Delphi behavior matches
-
-            // Loop through XML child nodes
-            //var children = StoreDataRec.Node.ChildNodes;
-
-            //for (i = 0; i < GenMaps.Count - 1; i++)
-            //{
-            //XmlNode na = children[i];
-
-            // Check type="field" and trow=0
-            //string typeAttr = na.Attributes?["type"]?.Value;
-            string typeAttr = genMapField.Type;
-            //string trowStr = na.Attributes?["trow"]?.Value ?? "0";
-            int trow = genMapField.TargetRow;
-
-            if (typeAttr == "field" && trow == 0)
+            // Process every GenMap field, as the Delphi code processes
+            // every child node.
+            foreach (GenMapField genMapField in _currentGenMappings)
             {
-                //string tfname = na.Name.ToLower();
-                string tfname = genMapField.TargetField.ToLower();
-                //string sfname = (na.Attributes?["value"]?.Value ?? "").ToLower();
-                //string sfname = _genFieldValue.ToLower();
-                string sfname = genMapField.SourceField.ToLower();
+                if (genMapField == null)
+                    continue;
 
-                // fpa := StoreDataRec.StoreData.structdef.GetField(tfname)
-                var fpa = GetField(tfname);
+                string typeAttr = genMapField.Type;
+                int trow = genMapField.TargetRow;
 
-                if (fpa?.FrameNo == fno)
+                if (typeAttr == "field" && trow == 0)
                 {
-                    // fpb := sd.structdef.GetField(sfname)
+                    string tfname = (genMapField.TargetField ?? "").ToLowerInvariant();
+                    string sfname = (genMapField.SourceField ?? "").ToLowerInvariant();
 
+                    if (string.IsNullOrEmpty(tfname) || string.IsNullOrEmpty(sfname))
+                        continue;
+
+                    // Equivalent to:
+                    // StoreDataRec.StoreData.structdef.GetField(tfname)
+                    TField fpa = GetField(tfname);
+
+                    if (fpa == null || fpa.FrameNo != fno)
+                        continue;
+
+                    // Equivalent to:
+                    // sd.structdef.GetField(sfname)
                     fpb = _parentStructDef.GetField(sfname);
 
                     if (fpb != null && fpb.AsGrid)
                     {
                         result = fpb.FrameNo;
-                        //break;
+                        break;
                     }
                     else
                     {
-                        // Try <tablename>id matching
-                        //for (j = 0; j < sd.StructDef.Frames.Count; j++)
-                        for (j = 0; j < _parentStructDef.Frames.Count; j++)
+                        // Check whether the source field matches a frame's TableName + "id".
+                        for (int j = 0; j < _parentStructDef.Frames.Count; j++)
                         {
-                            //var frame = (FrameDef)sd.StructDef.Frames[j];
                             var frame = _parentStructDef.Frames[j];
 
-                            if (sfname == (frame.TableName.Trim().ToLower() + "id"))
+                            if (string.Equals(
+                                sfname,
+                                frame.TableName.Trim() + "id",
+                                StringComparison.OrdinalIgnoreCase))
                             {
                                 result = frame.FrameNo;
                                 break;
                             }
                         }
                     }
+
                 }
+
+
             }
-            //}
 
-
-            // Delphi last line:
-            // if assigned(fpb) and (result = 0) then result := fpb.FrameNo;
+            // Preserve the final Delphi behavior.
             if (fpb != null && result == 0)
                 result = fpb.FrameNo;
 
             return result;
         }
-
         public void FillGroupedGridToGrid(GenMapField genMapField)
         {
             //StructDef? sdef = _parentStructDef;
@@ -4440,7 +4777,7 @@ namespace AxStructDef
             //    SD = _structDefList[k];
             //}
 
-            fno = GetSourceFrameNo(fld, genMapField);
+            fno = GetSourceFrameNo(fld);
             int maxRow = _parentStructDef.GetRowCount(fno);
 
             _groupFieldValues.Clear();
@@ -4565,6 +4902,7 @@ namespace AxStructDef
 
                 AxParser.RegisterVar(fieldName, dataType[0].ToString(), _genFieldValueList[i]);
 
+                //SourceId = _parentStructDef.GetRecordId(fld.FrameNo, i);
 
                 //structObj.axprovider.dbm.gf.DoDebug.Msg(
                 //    $"Mapped {fieldName} Row = {r} value = {FieldValueList[i]} idvalue {IdValueList[i]}"
@@ -4608,7 +4946,7 @@ namespace AxStructDef
             //    SD = ((StoreDataRecWrapper)StoreDataList[k]).StoreData;
             //}
 
-            int fno = GetSourceFrameNo(fld!, genMapField);
+            int fno = GetSourceFrameNo(fld!);
             int? maxRow = _parentStructDef.GetRowCount(fno);
 
             // Find or add field
@@ -4931,25 +5269,16 @@ namespace AxStructDef
         //}
 
         public List<string> GetChildTransAsList()
-        {
-            return GenMaps.Select(genM => genM.TargetTransId).ToList() ?? [];
-        }
+    => GenMaps?.Select(g => g.TargetTransId).ToList() ?? new List<string>();
 
-        public string GetGenMapName()
-        {
-            return GenMaps?
-                .Where(gm => gm.TargetTransId.Equals(Struct.TransId, StringComparison.OrdinalIgnoreCase))
-                .Select(gm => gm.Name)
-                .SingleOrDefault() ?? string.Empty;
-        }
+        public List<TGenMap> GetChildGenMaps()
+            => GenMaps?.ToList() ?? new List<TGenMap>();
 
-        public string GetGenMapName(StructDef parentStructDef)
-        {
-            return parentStructDef.GenMaps?
-                .Where(gm => gm.TargetTransId.Equals(Struct.TransId, StringComparison.OrdinalIgnoreCase))
-                .Select(gm => gm.Name)
-                .SingleOrDefault() ?? string.Empty;
-        }
+        public string GetGenMapName() => GenMaps?
+            .FirstOrDefault(gm => gm.TargetTransId.Equals(Struct.TransId, StringComparison.OrdinalIgnoreCase))?.Name ?? string.Empty;
+
+        public string GetGenMapName(StructDef parentStructDef) => parentStructDef.GenMaps?
+            .FirstOrDefault(gm => gm.TargetTransId.Equals(Struct.TransId, StringComparison.OrdinalIgnoreCase))?.Name ?? string.Empty;
 
         public void DeleteRow(int dcNo, int RowNo)
         {
@@ -4969,19 +5298,20 @@ namespace AxStructDef
             }
         }
 
-        public void SaveGenMap(StructDef parentStructDef)
+        public void SaveGridGenMap(StructDef parentStructDef, TGenMap currentGenMap = null)
         {
             if (parentStructDef == null) // || parentStructDef._xml == null)
                 throw new ArgumentNullException(nameof(parentStructDef), "Parent structdef is not assigned.");
 
             _parentStructDef = parentStructDef;
-            TGenMap currentGenMap = _parentStructDef.GenMaps?.FirstOrDefault(gm => gm.TargetTransId.Equals(Struct.TransId, StringComparison.OrdinalIgnoreCase));
+            currentGenMap ??= _parentStructDef.GenMaps?.FirstOrDefault(gm => gm.TargetTransId.Equals(Struct.TransId, StringComparison.OrdinalIgnoreCase));
+            _currentGenMappings = currentGenMap.FieldMappings;
 
-            //genMap := Findgenmap using current trsuctdef transid (structdef.transid=Parentstructdef.genmap.targettransid)
-            //loop genmap.map and call Fill methods
+            if (currentGenMap == null)
+                throw new InvalidOperationException($"No genmap found for target transid {Struct.TransId}.");
 
             MapName = currentGenMap.Name;
-            SourceId = _parentStructDef.LastSavedRecordid;
+            //SourceId = _parentStructDef.LastSavedRecordid;
 
             if (AxParser == null) 
                 throw new ArgumentNullException(nameof(AxParser), "AxParser not assigned");
@@ -4991,7 +5321,8 @@ namespace AxStructDef
 
                 if (ShouldProcessAsSpecificRow(genFld))
                 {
-                    FillSpecificRow(genFld);
+                    //FillSpecificRow(genFld);
+                    continue;
                 }
                 else if (ShouldProcessAsGroupedGrid(genFld))
                 {
@@ -5258,7 +5589,7 @@ namespace AxStructDef
 
             try
             {
-                var result = await ExecuteSQLAsync(sql,
+                var result = await _common._dbHelper?.ExecuteSQLAsync(sql,
                     new[] { "@transId" },
                     new[] { DbType.String },
                     new[] { $"'{transId.ToLower()}'" });
@@ -5307,7 +5638,7 @@ namespace AxStructDef
 
         #region Private Methods
 
-        private void SetAutoGenList()
+        private async Task SetAutoGenList()
         {
             if (SdAutogenFields.Count > 0)
                 return;
@@ -5327,7 +5658,7 @@ namespace AxStructDef
                     + "ORDER BY activesequence DESC";
 
                 // Execute SQL using your DBHelper
-                var result = ExecuteSQLAsync(sql).Result;
+                var result = await _common._dbHelper?.ExecuteSQLAsync(sql);
 
                 if (result.data.Rows.Count > 0)
                 {
@@ -5374,7 +5705,7 @@ namespace AxStructDef
         /// <param name="fieldname">Field name to get prefix for</param>
         /// <returns>User-specific active prefix for the field</returns>
         /// <example>GetUserActivePrefix("SALES", "InvoiceNo") returns "INV-"</example>
-        private string GetUserActivePrefix(string transid, string fieldname)
+        private async Task<string> GetUserActivePrefix(string transid, string fieldname)
         {
             try
             {
@@ -5389,7 +5720,7 @@ namespace AxStructDef
                 string sql = $"SELECT prefix FROM {CompanyName.ToUpper()}USERSEQUENCE WHERE {wstr}";
 
                 // Execute the query
-                var result = ExecuteSQLAsync(sql).Result;
+                var result = await _common._dbHelper?.ExecuteSQLAsync(sql);
 
                 if (result.data.Rows.Count == 0)
                     return "";
@@ -5408,7 +5739,7 @@ namespace AxStructDef
         /// <param name="fieldname">Field name to get prefix for</param>
         /// <returns>Active prefix for the field</returns>
         /// <example>GetActivePrefix("SALES", "InvoiceNo") returns "INV-"</example>
-        private string GetActivePrefix(string transid, string fieldname)
+        private async Task<string> GetActivePrefix(string transid, string fieldname)
         {
             try
             {
@@ -5422,7 +5753,7 @@ namespace AxStructDef
                     + $"AND {sqlLower}(uname) = {QuotedStr(username)}";
 
                 string sql = $"SELECT prefix FROM {CompanyName.ToUpper()}USERSEQUENCE WHERE {wstr}";
-                var userSeqResult = ExecuteSQLAsync(sql).Result;
+                var userSeqResult = await _common._dbHelper?.ExecuteSQLAsync(sql);
 
                 string seqtbl = GetFieldValue("Axp_SeqTable", 1)?.Trim();
                 if (string.IsNullOrEmpty(seqtbl))
@@ -5451,7 +5782,7 @@ namespace AxStructDef
                 }
 
                 // Execute the second query
-                var seqResult = ExecuteSQLAsync(sql).Result;
+                var seqResult = await _common._dbHelper?.ExecuteSQLAsync(sql);
 
                 if (seqResult.data.Rows.Count == 0)
                     return "";
@@ -5932,25 +6263,25 @@ namespace AxStructDef
             return _common._dbVars.ContainsKey("sqllower") ? _common._dbVars["sqllower"] : "LOWER";
         }
 
-        private async Task<SQLResult> ExecuteSQLAsync(
-            string sql,
-            string[] paramNames = null,
-            DbType[] paramTypes = null,
-            object[] paramValues = null
-        )
-        {
-            if (_common._dbHelper == null)
-                await _common.OpenDBConnectionAsync();
+        //private async Task<SQLResult> ExecuteSQLAsync(
+        //    string sql,
+        //    string[] paramNames = null,
+        //    DbType[] paramTypes = null,
+        //    object[] paramValues = null
+        //)
+        //{
+        //    if (_common._dbHelper == null)
+        //        await _common.OpenDBConnectionAsync();
 
-            var sqlResult = await _common._dbHelper?.ExecuteSQLAsync(
-                sql,
-                paramNames,
-                paramTypes,
-                paramValues
-            );
+        //    var sqlResult = await _common._dbHelper?.ExecuteSQLAsync(
+        //        sql,
+        //        paramNames,
+        //        paramTypes,
+        //        paramValues
+        //    );
 
-            return sqlResult;
-        }
+        //    return sqlResult;
+        //}
 
         private async Task<NonQueryResult> ExecuteNonSQLAsync(
             string sql,
@@ -6093,12 +6424,12 @@ namespace AxStructDef
             }
         }
 
-private bool ShouldProcessAsSpecificRow(GenMapField genFld)
+        public bool ShouldProcessAsSpecificRow(GenMapField genFld)
         {
             return genFld.TargetRow > 0;
         }
 
-        private bool ShouldProcessAsGroupedGrid(GenMapField genFld)
+        public bool ShouldProcessAsGroupedGrid(GenMapField genFld)
         {
             return !string.IsNullOrEmpty(genFld?.Group);
         }
@@ -6143,6 +6474,14 @@ private bool ShouldProcessAsSpecificRow(GenMapField genFld)
             else if (genMapField.Type == "field")
             {
                 _genFieldValue = GetFieldValueFromParent(genMapField.SourceField, rowNo);
+                if (_parentStructDef.GetField(genMapField.SourceField).SourceKey)
+                {
+                    _genIdValue = _parentStructDef.GetIDValue(genMapField.SourceField, rowNo);
+                }
+                else
+                {
+                    _genIdValue = 0;
+                }
 
                 // Handle auto generation records
                 //if (PostAutoGen && !string.IsNullOrEmpty(_parentTransId))
@@ -6541,7 +6880,7 @@ private bool ShouldProcessAsSpecificRow(GenMapField genFld)
 
             try
             {
-                result = await ExecuteSQLAsync(sql, parameters.ToArray(), fldDbTypes.ToArray(), values.ToArray());
+                result = await _common._dbHelper?.ExecuteSQLAsync(sql, parameters.ToArray(), fldDbTypes.ToArray(), values.ToArray());
 
                 if (result != null && result.data.Rows.Count > 0)
                 {

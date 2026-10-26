@@ -13,7 +13,7 @@ namespace AxStructDef.Models
         public string TargetTransId { get; set; } = string.Empty;
         public string TargetCaption { get; set; } = string.Empty;
         public string SourceDC { get; set; } = string.Empty;
-        public string GridControlCaption { get; set; } = string.Empty;
+        public string GenControlField { get; set; } = string.Empty;
         public bool AllowEmpty { get; set; }
         public string Condition { get; set; } = string.Empty;
         public List<GenMapField> FieldMappings { get; set; } = new List<GenMapField>();

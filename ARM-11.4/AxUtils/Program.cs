@@ -56,6 +56,8 @@ try
     services.AddScoped<IAxMenuService, AxMenuService>();
     services.AddScoped<IAxInMemoryRepository, AxInMemoryRepository>();
     services.AddScoped<IAxInMemoryService, AxInMemoryService>();
+    builder.Services.AddScoped<IQueueStatusService, QueueStatusService>();
+    builder.Services.AddScoped<IQueueStatusRepository, QueueStatusRepository>();
     services.AddScoped<AppSettingsValidaterService>();
 
 

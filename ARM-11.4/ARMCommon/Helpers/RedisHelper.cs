@@ -587,6 +587,58 @@ namespace ARMCommon.Helpers
             return result;
         }
 
+        public async Task<int> GetKeyExpiryAsync(string key)
+        {
+            if (string.IsNullOrEmpty(_appName))
+                _appName = GetAppNameFromKey(key);
+
+            try
+            {
+                using var redis = ConnectionMultiplexer.Connect(GetRedisConfig());
+                var db = redis.GetDatabase();
+
+                var expiry = await db.KeyTimeToLiveAsync(key);
+
+                if (!expiry.HasValue)
+                    return 0;
+
+                var seconds = (int)Math.Floor(
+                    expiry.Value.TotalSeconds);
+
+                return seconds > 0 ? seconds : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        public int GetKeyExpiry(string key)
+        {
+            if (string.IsNullOrEmpty(_appName))
+                _appName = GetAppNameFromKey(key);
+
+            try
+            {
+                using var redis = ConnectionMultiplexer.Connect(GetRedisConfig());
+                var db = redis.GetDatabase();
+
+                var expiry = db.KeyTimeToLive(key);
+
+                if (!expiry.HasValue)
+                    return 0;
+
+                var seconds = (int)Math.Floor(
+                    expiry.Value.TotalSeconds);
+
+                return seconds > 0 ? seconds : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
         public ConfigurationOptions GetRedisConfig()
         {
             if (_redisConfig != null)

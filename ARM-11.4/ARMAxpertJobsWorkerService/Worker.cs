@@ -10,6 +10,8 @@ using ARMCommon.Model;
 using RabbitMQ.Client;
 using System.Runtime.InteropServices;
 using System.Collections;
+using System.Globalization;
+using System.Security.Policy;
 
 namespace ARMAxpertJobsWorkerService
 {
@@ -71,19 +73,21 @@ namespace ARMAxpertJobsWorkerService
         {
             try
             {
-                foreach (var appName in _appSettingsService._appSettings)
+                //foreach (var appName in _appSettingsService._appSettings)
+                foreach (var appName in _appSettingsService.AppSettingsConfig.AppSettings)
                 {
                     string accessCode = appName.Key;
                     _common._appName = accessCode;
+
+                    var config = _appSettingsHelper.GetRedisSettings(accessCode);
+                    string redisConnectionString = config.Host + ":" + config.Port + ",password=" + config.DecryptedPwd;
+                    await _redis.RemoveAllJobs(accessCode, redisConnectionString, "*");
                     var dt = await GetAllActiveJobs(accessCode);
                     if (dt == null || dt.Rows.Count == 0)
                         continue;
                     try
                     {
                         appList.Add(accessCode);
-                        var config = _appSettingsHelper.GetRedisSettings(accessCode);
-                        string redisConnectionString = config.Host + ":" + config.Port + ",password=" + config.DecryptedPwd;
-
                         foreach (DataRow row in dt.Rows)
                         {
                             string jobId = row["jobid"]?.ToString();
@@ -96,6 +100,9 @@ namespace ARMAxpertJobsWorkerService
 
                             JObject jobObj = JObject.Parse(payload);
                             var next = CalculateNextOccurrence(jobObj);
+
+                            //Console.WriteLine($"Next UTC : {next:dd/MM/yyyy hh:mm:ss tt}");
+                            //Console.WriteLine($"Next IST : {next.ToLocalTime():dd/MM/yyyy hh:mm:ss tt}");
 
                             bool exists = await _redis.JobExists(accessCode, redisConnectionString, jobId);
                             bool scheduled = await _redis.IsScheduled(accessCode, redisConnectionString, jobId);
@@ -166,9 +173,16 @@ namespace ARMAxpertJobsWorkerService
             string jobName = jobObj["queuejson"]["jobname"]?.ToString();
             if (string.IsNullOrEmpty(project) || string.IsNullOrEmpty(jobName))
                 return "Invalid message";
+            var config = _appSettingsHelper.GetRedisSettings(project);
+            string redisConnString = config.Host + ":" + config.Port + ",password=" + config.DecryptedPwd;
             var dt = await GetJobModifiedOn(project, jobName);
             if (dt == null || dt.Rows.Count == 0)
+            {
+                string _jobid = jobObj["queuejson"]?["jobid"]?.ToString();
+                if (!string.IsNullOrEmpty(_jobid))
+                    await _redis.Remove(project, redisConnString, _jobid);
                 return "Job not found";
+            }
             string jobId = dt.Rows[0]["jobid"]?.ToString();
             string redisKey = dt.Rows[0]["rediskeyname"]?.ToString();
             string redisVal = dt.Rows[0]["rediskeyval"]?.ToString();
@@ -182,16 +196,23 @@ namespace ARMAxpertJobsWorkerService
             jobObj["isactive"] = isActive;
 
             var next = CalculateNextOccurrence(jobObj);
+
+            //Console.WriteLine($"Next1 UTC : {next:dd/MM/yyyy hh:mm:ss tt}");
+            //Console.WriteLine($"Next1 IST : {next.ToLocalTime():dd/MM/yyyy hh:mm:ss tt}");
+
             if (!appList.Contains(project))
                 appList.Add(project);
-            var config = _appSettingsHelper.GetRedisSettings(project);
-            string redisConnString = config.Host + ":" + config.Port + ",password=" + config.DecryptedPwd;
 
             await _redis.Remove(project, redisConnString, jobId);
-
-            await _redis.SaveJob(project, redisConnString, jobId, jobObj.ToString());
-            await _redis.Schedule(project, redisConnString, jobId, next);
-
+            if (isActive == "T")
+            {
+                await _redis.SaveJob(project, redisConnString, jobId, jobObj.ToString());
+                await _redis.Schedule(project, redisConnString, jobId, next);
+            }
+            else
+            {
+                await _redis.RemoveJobData(project, redisConnString, jobId);
+            }
             return "Scheduled";
         }
         private async Task ExecuteScheduledJob(string accessCode, string redisConnection, string jobId)
@@ -209,6 +230,10 @@ namespace ARMAxpertJobsWorkerService
                 }
                 await CallAxpertJobAPI(accessCode, jobObj);
                 var next = CalculateNextOccurrence(jobObj);
+
+                //Console.WriteLine($"Next2 UTC : {next:dd/MM/yyyy hh:mm:ss tt}");
+                //Console.WriteLine($"Next2 IST : {next.ToLocalTime():dd/MM/yyyy hh:mm:ss tt}");
+
                 if (next > DateTime.UtcNow)
                 {
                     await _redis.Schedule(accessCode, redisConnection, jobId, next);
@@ -225,7 +250,6 @@ namespace ARMAxpertJobsWorkerService
                 File.AppendAllText(_exeDir, $"Execution error (Access: {accessCode}, Job: {jobId}): {ex.Message}" + ex.StackTrace + Environment.NewLine + " Exception at:" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + Environment.NewLine);
             }
         }
-
         private async Task CallAxpertJobAPI(string accessCode, JObject jobObj)
         {
             try
@@ -240,10 +264,15 @@ namespace ARMAxpertJobsWorkerService
 
                 if (isActive == "F")
                     return;
-
+                string _trace = _config["AppConfig:trace"];
+                if (!string.IsNullOrEmpty(_trace) && _trace == "true")
+                    _trace = "t";
+                else
+                    _trace = "f";
                 string baseUrl = await _common.AxpertWebScriptsURL(project);
-
-                string apiUrl = $"{baseUrl.TrimEnd('/')}/ASBScriptRest.dll/datasnap/rest/TASBScriptRest/AxpertJobsAPI";
+                string proj_BaseRestPath = _config["AppConfig:" + project + "_ASBScriptRest_URL"];
+                string selectedUrl = !string.IsNullOrEmpty(proj_BaseRestPath) ? proj_BaseRestPath : baseUrl;
+                string apiUrl = $"{selectedUrl.TrimEnd('/')}/ASBScriptRest.dll/datasnap/rest/TASBScriptRest/AxpertJobsAPI";
 
                 var payload = new
                 {
@@ -252,18 +281,14 @@ namespace ARMAxpertJobsWorkerService
                         id = jobId,
                         jobid = redisKey,
                         jobdata = redisVal,
-                        trace = "true",
+                        trace = _trace,
                         JOBID = jobId,
                         ISACTIVE = isActive
                     }
                 };
 
-                var content = new StringContent(
-                    JsonConvert.SerializeObject(payload),
-                    Encoding.UTF8,
-                    "application/json");
-
-                await httpClient.PostAsync(apiUrl, content);
+                var api = new API();
+                await api.POSTData(apiUrl, JsonConvert.SerializeObject(payload), "application/json");
             }
             catch (Exception ex)
             {
@@ -276,38 +301,55 @@ namespace ARMAxpertJobsWorkerService
                 File.AppendAllText(_exeDir, $"Execution error (Access: {accessCode}, Job: {jobObj}): {ex.Message}" + ex.StackTrace + Environment.NewLine + " Exception at:" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + Environment.NewLine);
             }
         }
-
         private DateTime CalculateNextOccurrence(JObject jobObj)
         {
             var scheduler = new JobScheduler();
+            DateTime nextLocal;
             if (jobObj["queuejson"] != null)
             {
+                var _startDate = jobObj["queuejson"]["start_date"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(_startDate))
+                {
+                    DateTime dateValue;
+                    if (!DateTime.TryParse(_startDate.Trim(), CultureInfo.CurrentCulture, DateTimeStyles.None, out dateValue))
+                    {
+                        //throw new Exception($"Invalid start date: {_startDate}");
+                    }
+                    _startDate = dateValue.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+                }
                 var timeJson = new
                 {
-                    startDate = jobObj["queuejson"]["start_date"]?.ToString(),
+                    startDate = _startDate,// jobObj["queuejson"]["start_date"]?.ToString(),
                     period = jobObj["queuejson"]["period"]?.ToString(),
                     sendTime = jobObj["queuejson"]["sendtime"]?.ToString(),
                     sendOn = jobObj["queuejson"]["sendon"]?.ToString()
                 };
-
-                return scheduler
-                    .GetNextOccurrence(JsonConvert.SerializeObject(timeJson))
-                    .ToUniversalTime();
+                nextLocal = scheduler.GetNextOccurrence(JsonConvert.SerializeObject(timeJson));
             }
             else
             {
+                var _startDate = jobObj["start_date"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(_startDate))
+                {
+                    DateTime dateValue;
+                    if (!DateTime.TryParse(_startDate.Trim(), CultureInfo.CurrentCulture, DateTimeStyles.None, out dateValue))
+                    {
+                        //throw new Exception($"Invalid start date: {_startDate}");
+                    }
+                    _startDate = dateValue.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+                }
                 var timeJson = new
                 {
-                    startDate = jobObj["start_date"]?.ToString(),
+                    startDate = _startDate,// jobObj["start_date"]?.ToString(),
                     period = jobObj["period"]?.ToString(),
                     sendTime = jobObj["sendtime"]?.ToString(),
                     sendOn = jobObj["sendon"]?.ToString()
                 };
-
-                return scheduler
-                    .GetNextOccurrence(JsonConvert.SerializeObject(timeJson))
-                    .ToUniversalTime();
+                nextLocal = scheduler.GetNextOccurrence(JsonConvert.SerializeObject(timeJson));
             }
+            DateTime nextUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(nextLocal, DateTimeKind.Unspecified), TimeZoneInfo.Local);
+
+            return nextUtc;
         }
         private async Task<DataTable> GetAllActiveJobs(string appName)
         {

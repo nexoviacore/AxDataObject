@@ -573,6 +573,51 @@ namespace ARMCommon.Helpers
             return true;
         }
 
+        public async Task<int> GetKeyExpiryAsync(string key)
+        {
+            try
+            {
+                var db = _redis.GetDatabase();
+
+                var expiry = await db.KeyTimeToLiveAsync(key);
+
+                if (!expiry.HasValue)
+                    return 0;
+
+                var seconds = (int)Math.Floor(
+                    expiry.Value.TotalSeconds);
+
+                return seconds > 0 ? seconds : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        public int GetKeyExpiry(string key)
+        {
+            try
+            {
+                var db = _redis.GetDatabase();
+
+                var expiry = db.KeyTimeToLive(key);
+
+                if (!expiry.HasValue)
+                    return 0;
+
+                var seconds = (int)Math.Floor(
+                    expiry.Value.TotalSeconds);
+
+                return seconds > 0 ? seconds : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+
         public ConfigurationOptions GetRedisConfig()
         {            
             string redisHost = $"{_redisSettings.Host}:{_redisSettings.Port}";

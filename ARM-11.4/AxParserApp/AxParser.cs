@@ -127,6 +127,14 @@ namespace AxParserApp
         {
             string result = string.Empty;
 
+            // Convert "~e~" placeholder values to empty strings.
+            // Process a maximum of 20 parameters (As per Delphi code), or all available parameters if the array has fewer than 20.
+            for (int i = 0; i < Math.Min(20, _params.Length); i++)
+            {
+                if (_params[i] == "~e~")
+                    _params[i] = string.Empty;
+            }
+
             if (functionname == "length" || functionname == "getlength")
                 result = Length(_params[0]).ToString();
             else if (functionname == "substr")
