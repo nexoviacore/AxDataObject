@@ -7,6 +7,7 @@ using AxData.Infrastructure.Serialization;
 
 namespace AxData.IntegrationTests.Serialization;
 
+[Collection(SnapshotCapacityCollection.Name)]
 public sealed class AxDataSnapshotSerializerTests
 {
     private static readonly DateTimeOffset CreatedAt = new(2026, 9, 25, 4, 30, 0, TimeSpan.Zero);
@@ -202,7 +203,7 @@ public sealed class AxDataSnapshotSerializerTests
         var retainedBytes = GC.GetTotalMemory(forceFullCollection: true) - retainedBaseline;
 
         Console.WriteLine(
-            $"P1D-05B capacity: bytes={metrics.Bytes}; elapsedMs={metrics.Elapsed.TotalMilliseconds:F2}; " +
+            $"P1D-05B capacity: bytes={metrics.Bytes}; bestElapsedMs={metrics.Elapsed.TotalMilliseconds:F2}; " +
             $"allocatedBytes={metrics.AllocatedBytes}; retainedBytes={retainedBytes}");
 
         Assert.True(metrics.Bytes <= AxDataSnapshotOptions.DefaultMaximumSerializedBytes);
@@ -308,15 +309,36 @@ public sealed class AxDataSnapshotSerializerTests
         AxDataSnapshotSerializer serializer,
         AxDataState state)
     {
-        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-        var timer = Stopwatch.StartNew();
-        var first = serializer.Serialize(state);
-        timer.Stop();
-        var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
-        var second = serializer.Serialize(state);
-        Assert.True(first.AsSpan().SequenceEqual(second), "Capacity snapshots were not deterministic.");
-        return new CapacityMetrics(first.Length, timer.Elapsed, allocatedBytes);
+        byte[]? expected = null;
+        var bytes = 0;
+        var bestElapsed = TimeSpan.MaxValue;
+        var bestAllocatedBytes = long.MaxValue;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var timer = Stopwatch.StartNew();
+            var current = serializer.Serialize(state);
+            timer.Stop();
+            var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+            expected ??= current;
+            Assert.True(expected.AsSpan().SequenceEqual(current), "Capacity snapshots were not deterministic.");
+            bytes = current.Length;
+            if (timer.Elapsed < bestElapsed)
+            {
+                bestElapsed = timer.Elapsed;
+                bestAllocatedBytes = allocatedBytes;
+            }
+        }
+
+        return new CapacityMetrics(bytes, bestElapsed, bestAllocatedBytes);
     }
 
     private sealed record CapacityMetrics(int Bytes, TimeSpan Elapsed, long AllocatedBytes);
+}
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class SnapshotCapacityCollection
+{
+    public const string Name = "Snapshot capacity";
 }

@@ -269,3 +269,9 @@ Format:
 - Decisions: Retain one cache-bypassed StructDef load and the global gate for the full operation; v1/v2 read compatibility remains and all new writes use v3.
 - Tests: Serial build passes; 158 unit, 39 integration, and 136 contract tests pass; E2E exits successfully; 350,000 fields serialize to 25,716,825 bytes in 426.16 ms.
 - Next: Continue remaining M1.6 readiness work. Postman: not applicable (no public HTTP or AXD contract change).
+
+## ARM Dev import through 76080f7 done (2026-10-26)
+- Done: Imported nine upstream Dev commits through 76080f7 as separate ARM commit 9092f4a; reconciled parser/session, AxPut/GenMap, queue, worker, and ADS changes.
+- Decisions: Preserved fail-closed parser reads; fresh AxData operation runtimes restore trusted session globals and call PrepareExps without parser cache reuse.
+- Tests: Nine affected ARM projects and serial AxData solution build pass; 158 unit, 39 integration, and 137 contract tests pass; E2E exits successfully.
+- Next: Continue M1.6 readiness work. Postman: not applicable (no public AxData HTTP or AXD contract change).

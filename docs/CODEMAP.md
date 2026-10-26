@@ -73,7 +73,7 @@ tests/AxData.UnitTests/Application/Recovery/AxDataRecoveryServiceTests.cs: recov
 tests/AxData.UnitTests/Application/Authorization/AxAuthorizationPolicyTests.cs: complete relation-operation matrix and ObjectId/tenant/PEG security tests
 tests/AxData.UnitTests/DependencyDirectionTests.cs: verifies Domain/Application do not reference infrastructure or Axpert dependencies
 tests/AxData.UnitTests/Domain: lifecycle, version, row-action, field-value, and error-catalog tests
-tests/AxData.IntegrationTests/Serialization: snapshot round-trip, v1 fixture compatibility, determinism, and rejection tests
+tests/AxData.IntegrationTests/Serialization: v1/v2/v3 snapshot compatibility, deterministic limits, rejection, and isolated capacity tests
 tests/AxData.IntegrationTests/Redis/RedisAxDataStoreTests.cs: real-Redis stale/concurrent CAS, TTL refresh, and tenant-isolation tests
 tests/AxData.IntegrationTests/Redis/RedisAxDataLockTests.cs: real-Redis lease ownership, expiry, reacquisition, and stale-write tests
 tests/AxData.IntegrationTests/Sql: snapshot dialect, JSON binding, stale/duplicate delivery, and tenant-isolation integration-contract tests

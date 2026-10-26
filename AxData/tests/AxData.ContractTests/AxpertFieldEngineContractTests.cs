@@ -141,6 +141,33 @@ public sealed class AxpertFieldEngineContractTests
     }
 
     [Fact]
+    public async Task Runtime_preparation_restores_session_globals_and_prepares_expressions()
+    {
+        var runtime = LegacyFixture.CreateRuntime();
+        runtime.Validate._common._globalVars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["tenant_rate"] = "7"
+        };
+        runtime.Validate._common._sessionVars = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+        {
+            [Constants.SESSION_DATA.USERNAME.ToString()] = "owner"
+        };
+        runtime.Validate._common.ApiDateFormat = "yyyy-MM-dd";
+
+        await AxpertFieldRuntimeFactory.PrepareValidationAsync(
+            runtime.Validate,
+            runtime.Validate._common,
+            42,
+            CancellationToken.None);
+
+        Assert.Equal("7", runtime.Validate._parser.GetVarValue("tenant_rate"));
+        Assert.Equal("42", runtime.Validate._parser.GetVarValue("recordid"));
+        Assert.Equal("0", runtime.Validate._parser.GetVarValue("qty"));
+        Assert.Equal(42, runtime.Validate._sdef.LastSavedRecordid);
+        Assert.Equal("yyyy-MM-dd", runtime.Validate._sdef.clientDateFormat);
+    }
+
+    [Fact]
     public async Task Valid_dependency_matches_existing_validate_and_parser_result()
     {
         var direct = LegacyFixture.CreateRuntime();

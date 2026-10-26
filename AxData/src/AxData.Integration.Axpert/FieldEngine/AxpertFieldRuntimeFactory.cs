@@ -1,5 +1,6 @@
 using AxData.Integration.Axpert.Runtime;
 using AxData.Integration.Axpert.StructDef;
+using ARMCommon.Helpers;
 using AxParserApp;
 using AxValidate;
 using LegacyStructDef = AxStructDef.StructDef;
@@ -57,24 +58,11 @@ public sealed class AxpertFieldRuntimeFactory(
                 _dbType = context.Common._dbType,
                 _parser = new AxParser(context.Common, definition)
             };
-            var recordId = request.RecordId.GetValueOrDefault();
-            validate._parser.RegisterVar(
-                "recordid",
-                "n",
-                recordId.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            definition.LastSavedRecordid = recordId;
-            if (!string.IsNullOrWhiteSpace(context.Common.ApiDateFormat))
-            {
-                definition.clientDateFormat = context.Common.ApiDateFormat;
-            }
-            else
-            {
-                var globalDateFormat = validate._parser.GetVarValue("axclient_dateformat");
-                if (!string.IsNullOrWhiteSpace(globalDateFormat))
-                {
-                    definition.clientDateFormat = globalDateFormat;
-                }
-            }
+            await PrepareValidationAsync(
+                validate,
+                context.Common,
+                request.RecordId.GetValueOrDefault(),
+                cancellationToken).ConfigureAwait(false);
 
             if (!await validate.InitValidateAsync(request.TransId).ConfigureAwait(false))
             {
@@ -97,6 +85,35 @@ public sealed class AxpertFieldRuntimeFactory(
         catch (Exception)
         {
             return Failure("The Axpert Validate/Parser runtime could not be initialized.");
+        }
+    }
+
+    internal static async Task PrepareValidationAsync(
+        Validate validate,
+        Utils common,
+        long recordId,
+        CancellationToken cancellationToken)
+    {
+        await common.RestoreSessionGlobalsToParser(validate._parser).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        validate._parser.RegisterVar(
+            "recordid",
+            "n",
+            recordId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        validate._sdef.LastSavedRecordid = recordId;
+        validate.PrepareExps();
+
+        if (!string.IsNullOrWhiteSpace(common.ApiDateFormat))
+        {
+            validate._sdef.clientDateFormat = common.ApiDateFormat;
+            return;
+        }
+
+        var globalDateFormat = validate._parser.GetVarValue("axclient_dateformat");
+        if (!string.IsNullOrWhiteSpace(globalDateFormat))
+        {
+            validate._sdef.clientDateFormat = globalDateFormat;
         }
     }
 
