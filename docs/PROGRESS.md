@@ -275,3 +275,9 @@ Format:
 - Decisions: Preserved fail-closed parser reads; fresh AxData operation runtimes restore trusted session globals and call PrepareExps without parser cache reuse.
 - Tests: Nine affected ARM projects and serial AxData solution build pass; 158 unit, 39 integration, and 137 contract tests pass; E2E exits successfully.
 - Next: Continue M1.6 readiness work. Postman: not applicable (no public AxData HTTP or AXD contract change).
+
+## ARM Dev import through 5b42a46 done (2026-10-30)
+- Done: Imported AxPut QA fixes and release16 version bump as ARM commit 396a05d; added sparse-grid and row-specific parser parity coverage.
+- Decisions: Preserved fail-closed parser/tax handling and removed submitted/control values from new trace lines; no AxData production adapter change was required.
+- Tests: AxStructDef, AxValidate, AxTstructData, and serial AxData solution builds pass; 158 unit, 39 integration, and 139 contract tests pass; E2E exits successfully.
+- Next: Continue M1.6 readiness work. Postman: not applicable (legacy ARM behavior changed, not the AxData HTTP/AXD contract).

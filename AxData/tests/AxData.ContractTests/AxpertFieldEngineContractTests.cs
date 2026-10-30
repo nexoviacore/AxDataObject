@@ -309,6 +309,31 @@ public sealed class AxpertFieldEngineContractTests
     }
 
     [Fact]
+    public void Sparse_grid_submission_uses_highest_submitted_row_number()
+    {
+        var runtime = LegacyFixture.CreateRuntime(asGrid: true);
+
+        LegacyFixture.SeedRow(runtime, 3, 5m, 7m, 35m);
+
+        Assert.Equal(3, Assert.Single(runtime.Validate._sdef.Frames!).RowCount);
+        Assert.Equal("5", runtime.Validate._sdef.GetFieldValue("qty", 3));
+    }
+
+    [Fact]
+    public async Task Grid_validation_registers_each_rows_values_before_calculation()
+    {
+        var runtime = LegacyFixture.CreateRuntime(asGrid: true);
+        LegacyFixture.SeedRow(runtime, 1, 2m, 3m, 0m);
+        LegacyFixture.SeedRow(runtime, 2, 5m, 7m, 0m);
+
+        var result = await runtime.Validate.ValidateData();
+
+        Assert.Equal("Success", result.Result);
+        Assert.Equal("6.00", runtime.Validate._sdef.GetFieldValue("amount", 1));
+        Assert.Equal("35.00", runtime.Validate._sdef.GetFieldValue("amount", 2));
+    }
+
+    [Fact]
     public async Task New_record_identity_remains_zero_before_validation()
     {
         var state = CreateState();
@@ -544,15 +569,25 @@ public sealed class AxpertFieldEngineContractTests
 
         public static void Seed(AxpertFieldRuntime runtime, object qty, object rate, object amount)
         {
-            Submit(runtime.Validate, "qty", qty);
-            Submit(runtime.Validate, "rate", rate);
-            Submit(runtime.Validate, "amount", amount);
+            SeedRow(runtime, 1, qty, rate, amount);
         }
 
-        private static void Submit(Validate validate, string name, object value)
+        public static void SeedRow(
+            AxpertFieldRuntime runtime,
+            int rowNumber,
+            object qty,
+            object rate,
+            object amount)
+        {
+            Submit(runtime.Validate, "qty", rowNumber, qty);
+            Submit(runtime.Validate, "rate", rowNumber, rate);
+            Submit(runtime.Validate, "amount", rowNumber, amount);
+        }
+
+        private static void Submit(Validate validate, string name, int rowNumber, object value)
         {
             var text = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? "";
-            validate._sdef.SubmitValue(name, 1, text, "", 0, 0, 0);
+            validate._sdef.SubmitValue(name, rowNumber, text, "", 0, 0, 0);
             validate._parser.RegisterVar(name, "n", text);
         }
 
