@@ -298,7 +298,13 @@ namespace AxTstructData
                         }
                         else
                         {
-
+                            if (_validate._sdef.CancelledTrans)
+                            {
+                                result = new APIResult(false, $"The {deleteData.Action.ToLowerInvariant()} action is not allowed because this record has already been cancelled.");
+                                result.data["transid"] = deleteData.TransId;
+                                result.data["recordid"] = deleteData.RecordId;
+                                return result;
+                            }
                             if (deleteData.Action.ToUpper() == Constants.TSTRUCT_ACTIONS.DELETE.ToString())
                             {
                                 sqlCommands.AddRange(await GetTableWiseSQLCommandsForDelete(deleteData));

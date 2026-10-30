@@ -105,7 +105,8 @@ namespace AxTstructData
             if (_common._dbHelper == null)
                 await _common.OpenDBConnectionAsync();
 
-            string sql = $"SELECT {table}id FROM {table} WHERE sourceid = {parentRecId} and mapname = '{mapName}'";
+            // Ordered by id (creation order), so the n-th record matches the n-th posted source row
+            string sql = $"SELECT {table}id FROM {table} WHERE sourceid = {parentRecId} and mapname = '{mapName}' order by {table}id";
 
             var result = await _common._dbHelper.ExecuteSQLAsync(sql);
             return result;

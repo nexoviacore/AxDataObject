@@ -36,6 +36,11 @@ namespace AxTstructData
         private List<string> _transidList = new List<string>();
         private List<int> _parentList = new List<int>();
         private List<TGenMap?> _genMapList = new List<TGenMap?>();   // parallel to _transidList; null for primary trans
+        private List<int> _genMapRowList = new List<int>();         // parallel to _transidList; genmap source row to post, 0 = all rows
+        private List<int> _genMapRecordList = new List<int>();      // parallel to _transidList; genmap target record (non-grid row) to post, 0 = first
+        // queue index of a queued genmap record -> mapping and existing target ids, done once by the first record's entry
+        private Dictionary<int, (StructDef.GenMapBuffer Buffer, List<Int64> ChildRecordIds)> _genMapQueuedRecords
+            = new Dictionary<int, (StructDef.GenMapBuffer Buffer, List<Int64> ChildRecordIds)>();
         private List<Dictionary<string, object>> _saveDataResultList = new List<Dictionary<string, object>>();
         //private string _parserJson = string.Empty;
         private List<Int64> _recordIds = new List<Int64>();
@@ -351,6 +356,22 @@ namespace AxTstructData
                     return result;
                 }
 
+                if (userPermissions != null && userPermissions.data != null && userPermissions.data.Rows.Count == 1 )
+                {
+                    if(userPermissions.data.Rows[0]["recordid"]?.ToString() == string.Empty || userPermissions.data.Rows[0]["recordid"]?.ToString() == "0")
+                    {
+                        result.success = false;
+                        result.error = "No record found for the specified keyvalue. Please verify the keyvalue and try again.";
+                        return result;
+                    }
+                }
+                else //If more than one record comes, return error message
+                {
+                    result.success = false;
+                    result.error = "Multiple records found for the given keyvalue. Please enter a unique value and try again.";
+                    return result;
+                }
+
                 if (userPermissions.data.Columns.Contains("permissiontype"))
                 {
                     var userRows = userPermissions.data.AsEnumerable()
@@ -580,6 +601,8 @@ namespace AxTstructData
             _transidList.Add(transId);
             _parentList.Add(-1);
             _genMapList.Add(null);
+            _genMapRowList.Add(0);
+            _genMapRecordList.Add(0);
             var result = new APIResult();
             bool error = false;
             try
@@ -607,19 +630,6 @@ namespace AxTstructData
 
                     parentDefIndex = _parentList[transIndex];
                     TGenMap currentGenMap = _genMapList[transIndex];
-
-                    if (parentDefIndex > -1 && currentGenMap != null && !string.IsNullOrEmpty(currentGenMap.GenControlField))
-                    {
-                        _traceService.LogMessage($"Genmap ControlFieldName: {currentGenMap.GenControlField}");
-                        var cfValue = _structDefList[parentDefIndex]?.GetFieldValue(currentGenMap.GenControlField, 1);
-                        if (cfValue?.ToLower() != "t")
-                            goto SKIP_CHILD_TRANS;
-                        //continue;
-                        // Else part needs to be handled
-                        //End Else If lowercase(OldFieldValue) = 't' Then Begin
-                        //  struct.axprovider.dbm.gf.dodebug.msg('Deleting transaction as controlField value is changed from '+OldFieldValue+' to '+FieldValue);
-                        //  Result:=DeleteTrans;
-                    }
 
                     if (accessControls.ContainsKey(accessControlKey))
                     {
@@ -695,6 +705,7 @@ namespace AxTstructData
                     //parentDefIndex = _parentList[transIndex];
 
                     var sqlCommands = new List<SQLCommandBuilder>();
+                    var postedGenMapRecordIds = new List<Int64>();   // every target record posted by this genmap (per source row / per record)
 
                     if (parentDefIndex == -1)
                     {
@@ -744,6 +755,13 @@ namespace AxTstructData
                             }
                             else
                             {
+                                if (_validate._sdef.CancelledTrans)
+                                {
+                                    result = new APIResult(false, _validate._sdef.CancelRemarks);
+                                    result.data["transid"] = putData.TransId;
+                                    result.data["index"] = inputTransIndex;
+                                    break;
+                                }
                                 var config = new MapperConfiguration(cfg => cfg.CreateMap<AxPut, TStructRequestDto>());
                                 var mapper = config.CreateMapper();
                                 TStructRequestDto tstData = mapper.Map<TStructRequestDto>(putData);
@@ -781,60 +799,45 @@ namespace AxTstructData
                     {
                         string tableName = _validate._sdef.PrimaryTable;
                         string mapName = currentGenMap.Name;
-                        var parentRecId = _structDefList[parentDefIndex].LastSavedRecordid.ToString();
-
-                        if (putData.Action.ToUpper() == Constants.TSTRUCT_ACTIONS.CREATE.ToString())
-                        {
-                            putData.RecordId = 0;
-
-                        }
-                        else if (putData.Action.ToUpper() == Constants.TSTRUCT_ACTIONS.EDIT.ToString())
-                        {
-                            putData.RecordId = await GetChildTransRecordId(parentRecId, tableName, mapName);
-                        }
-
-                        var isCreate = putData.RecordId == 0;
-                        var isEdit = !isCreate;
-
-                        if (isEdit)
-                        {
-                            var getDataConfig = new MapperConfiguration(cfg => cfg.CreateMap<AxPut, AxGet>());
-                            var getDataMapper = getDataConfig.CreateMapper();
-                            AxGet getData = getDataMapper.Map<AxGet>(putData);
-                            getData.CalledFrom = "SAVEDATA";
-
-                            var loadDataResult = await _getData.LoadData(getData, null, _validate);
-
-                            if (!loadDataResult.success)
-                            {
-                                result = new APIResult(false, loadDataResult.error);
-                                result.data["transid"] = putData.TransId;
-                                result.data["index"] = inputTransIndex;
-                                break;
-                            }
-                            else
-                            {
-                                var config = new MapperConfiguration(cfg => cfg.CreateMap<AxPut, TStructRequestDto>());
-                                var mapper = config.CreateMapper();
-                                TStructRequestDto tstData = mapper.Map<TStructRequestDto>(putData);
-                                tstData.Submitdata = (Dictionary<string, Dictionary<string, Dictionary<string, string>>>)loadDataResult.data["data"];
-
-                                AddRowAction(tstData.Submitdata);
-
-                                await _validate.SubmitValueOnLoad(tstData);
-                            }
-                        }
                         var validateResult = new OperationResult();
                         var frame = _structDefList[parentDefIndex].GetFrameFromName(currentGenMap.SourceDC);
+                        var postedRows = 0;
+
                         if (frame?.FrameNo > 0)
                         {
                             var maxRow = _structDefList[parentDefIndex].GetRowCount(frame.FrameNo);
                             _validate._sdef.MapName = currentGenMap.Name;
                             _validate._sdef._parentStructDef = _structDefList[parentDefIndex];
 
+                            // Queued record of a mapping with several non-grid rows: only its source row and its record
+                            int onlyRow = _genMapRowList[transIndex];
+                            int genMapRecord = Math.Max(1, _genMapRecordList[transIndex]);
+                            int firstRow = onlyRow > 0 ? onlyRow : 1;
+                            int lastRow = onlyRow > 0 ? onlyRow : maxRow;
 
-                            for (var row = 1; row <= maxRow; row++)
+                            for (var row = firstRow; row <= lastRow; row++)
                             {
+                                if (!string.IsNullOrEmpty(currentGenMap.GenControlField))
+                                {
+                                    _traceService.LogMessage($"Genmap ControlFieldName: {currentGenMap.GenControlField}");
+                                    var cfValue = _structDefList[parentDefIndex]?.GetFieldValue(currentGenMap.GenControlField, row);
+
+                                    if (string.IsNullOrEmpty(cfValue) && row != 1)
+                                        cfValue = _structDefList[parentDefIndex]?.GetFieldValue(currentGenMap.GenControlField, 1);
+
+                                    if (cfValue?.ToLower() != "t")
+                                    {
+                                        _traceService.LogMessage($"Genmap {currentGenMap.Name} row {row} skipped: control field {currentGenMap.GenControlField} is disabled");
+                                        continue;
+                                    }
+                                    // Else part needs to be handled
+                                    //    //End Else If lowercase(OldFieldValue) = 't' Then Begin
+                                    //    //  struct.axprovider.dbm.gf.dodebug.msg('Deleting transaction as controlField value is changed from '+OldFieldValue+' to '+FieldValue);
+                                    //    //  Result:=DeleteTrans;
+                                }
+
+                                postedRows++;
+
                                 if (frame.AsGrid)
                                 {
                                     _validate._sdef.SourceId = _structDefList[parentDefIndex].GetRecordId(frame.FrameNo, row);
@@ -844,8 +847,79 @@ namespace AxTstructData
                                     _validate._sdef.SourceId = _structDefList[parentDefIndex].GetRecordId(frame.FrameNo, 1);
                                 }
 
+                                //var parentRecId = _structDefList[parentDefIndex].LastSavedRecordid.ToString();
+                                var parentRecId = _validate._sdef.SourceId.ToString();
+                                var childRecordIds = new List<Int64>();   // existing target records of this source (edit), read once
+
+                                // Queued record: mapping and existing target ids come from the first record's entry
+                                bool isQueuedRecord = _genMapQueuedRecords.TryGetValue(transIndex, out var queuedRecord);
+                                if (isQueuedRecord)
+                                    _genMapQueuedRecords.Remove(transIndex);
+
+                                if (putData.Action.ToUpper() == Constants.TSTRUCT_ACTIONS.CREATE.ToString())
+                                {
+                                    putData.RecordId = 0;
+
+                                }
+                                else if (putData.Action.ToUpper() == Constants.TSTRUCT_ACTIONS.EDIT.ToString())
+                                {
+                                    // n-th record posted from this source edits the n-th existing record; none -> create
+                                    childRecordIds = isQueuedRecord
+                                        ? queuedRecord.ChildRecordIds
+                                        : await GetChildTransRecordIds(parentRecId, tableName, mapName);
+                                    putData.RecordId = childRecordIds.Count >= genMapRecord ? childRecordIds[genMapRecord - 1] : 0;
+                                }
+
+                                var isCreate = putData.RecordId == 0;
+                                var isEdit = !isCreate;
+
+                                if (isEdit)
+                                {
+                                    var getDataConfig = new MapperConfiguration(cfg => cfg.CreateMap<AxPut, AxGet>());
+                                    var getDataMapper = getDataConfig.CreateMapper();
+                                    AxGet getData = getDataMapper.Map<AxGet>(putData);
+                                    getData.CalledFrom = "SAVEDATA";
+
+                                    var loadDataResult = await _getData.LoadData(getData, null, _validate);
+
+                                    if (!loadDataResult.success)
+                                    {
+                                        result = new APIResult(false, loadDataResult.error);
+                                        result.data["transid"] = putData.TransId;
+                                        result.data["index"] = inputTransIndex;
+                                        error = true;   // stop the child; keep the LoadData error
+                                        break;
+                                    }
+                                    else
+                                    {
+                                        var config = new MapperConfiguration(cfg => cfg.CreateMap<AxPut, TStructRequestDto>());
+                                        var mapper = config.CreateMapper();
+                                        TStructRequestDto tstData = mapper.Map<TStructRequestDto>(putData);
+                                        tstData.Submitdata = (Dictionary<string, Dictionary<string, Dictionary<string, string>>>)loadDataResult.data["data"];
+
+                                        AddRowAction(tstData.Submitdata);
+
+                                        await _validate.SubmitValueOnLoad(tstData);
+                                    }
+                                }
+
+                                // Mapping is collected first and then written to the target per record: one record normally,
+                                // one per non-grid row when the mapping fills several non-grid rows (e.g. grid -> non-grid)
+                                StructDef.GenMapBuffer genMapBuffer;
+
+                                if (isQueuedRecord)
+                                {
+                                    genMapBuffer = queuedRecord.Buffer;
+                                    _traceService.LogMessage($"Posting from {_structDefList[parentDefIndex].Struct.TransId} to {_validate._sdef.Struct.TransId}: genmap {currentGenMap.Name} record {genMapRecord} of {genMapBuffer.RecordCount}");
+                                }
+                                else
+                                {
+                                    genMapBuffer = _validate._sdef.BeginGenMapBuffer();
+
                                 var ordNo = 1;
                                 var specificRowFound = false;
+                                _traceService.LogMessage($"Posting from {_structDefList[parentDefIndex].Struct.TransId} to {_validate._sdef.Struct.TransId}");
+                                _traceService.LogMessage($"Processing genmap: {currentGenMap.Name}");
                                 foreach (var tempGenFld in currentGenMap.FieldMappings)
                                 {
                                     specificRowFound = false;
@@ -866,6 +940,26 @@ namespace AxTstructData
                                 }
 
                                 _validate._sdef.SaveGridGenMap(_structDefList[parentDefIndex], currentGenMap);
+                                _validate._sdef.EndGenMapBuffer();
+                                }
+
+                                // Several non-grid rows mapped (e.g. grid -> non-grid): each is its own target transaction.
+                                // This entry posts the first; the others are queued as genmap entries of their own (same parent,
+                                // same source row) and go through the normal genmap flow: own target, load, validate, save, result, child genmaps
+                                if (_genMapRecordList[transIndex] == 0)
+                                {
+                                    for (var record = 2; record <= genMapBuffer.RecordCount; record++)
+                                    {
+                                        _transidList.Add(currentGenMap.TargetTransId);
+                                        _parentList.Add(parentDefIndex);
+                                        _genMapList.Add(currentGenMap);
+                                        _genMapRowList.Add(row);
+                                        _genMapRecordList.Add(record);
+                                        _genMapQueuedRecords[_transidList.Count - 1] = (genMapBuffer, childRecordIds);   // reused, not mapped/read again
+                                    }
+                                }
+
+                                _validate._sdef.ApplyGenMapBuffer(genMapBuffer, genMapRecord);
 
                                 validateResult = await _validate.ValidateData();
 
@@ -874,6 +968,7 @@ namespace AxTstructData
                                     result = new APIResult(false, validateResult.Message);
                                     result.data["transid"] = putData.TransId;
                                     result.data["index"] = inputTransIndex;
+                                    error = true;
                                     break;
                                 }
 
@@ -883,9 +978,22 @@ namespace AxTstructData
                                     await GetTableWiseSQLCommandsForCreate(putData, false) :
                                     await GetTableWiseSQLCommandsForEdit(putData, false));
 
+                                postedGenMapRecordIds.Add(putData.RecordId);
                             }
                         }
 
+                        if (!error && postedRows == 0)
+                        {
+                            // No source row to post (all skipped by control field, or no source rows): nothing to save for this child,
+                            // keep the parent save successful
+                            _traceService.LogMessage($"Genmap {currentGenMap.Name} skipped: no rows to post");
+                            result.success = true;
+                            goto SKIP_CHILD_TRANS;
+                        }
+
+                        // Genmap child validation failed: stop here so the validation message is not replaced by "Not able to construct SQLs".
+                        if (error)
+                            break;
                     }
 
                     //MDMap
@@ -930,6 +1038,20 @@ namespace AxTstructData
                                 _saveDataRecordIds[putData.TransId].Add(putData.RecordId);
                             else
                                 _saveDataRecordIds[putData.TransId] = new List<Int64>() { putData.RecordId };
+
+                            // Genmap posting more than one target record (per source row / several non-grid rows): report each of them
+                            foreach (var postedRecordId in postedGenMapRecordIds.Distinct().Where(id => id > 0 && id != putData.RecordId))
+                            {
+                                _saveDataResultList.Add(new Dictionary<string, object>
+                                {
+                                    ["message"] = $"{_validate._sdef.Struct.Caption} saved successfully.",
+                                    ["recordid"] = postedRecordId,
+                                    ["transid"] = putData.TransId,
+                                    ["caption"] = _validate._sdef.Struct.Caption,
+                                    ["username"] = putDataInput.UserName
+                                });
+                                _saveDataRecordIds[putData.TransId].Add(postedRecordId);
+                            }
                         }
                         else
                         {
@@ -962,6 +1084,8 @@ namespace AxTstructData
                         _transidList.Add(childMap.TargetTransId);
                         _parentList.Add(defIndex);
                         _genMapList.Add(childMap);
+                        _genMapRowList.Add(0);
+                        _genMapRecordList.Add(0);
                     }
 
                 SKIP_CHILD_TRANS:
@@ -973,6 +1097,9 @@ namespace AxTstructData
                         transId = putDataInput.Data[inputTransIndex].TransId.ToString();
                         _transidList.Add(transId);
                         _parentList.Add(-1);
+                        _genMapList.Add(null);      // keep the parallel lists in step with _transidList
+                        _genMapRowList.Add(0);
+                        _genMapRecordList.Add(0);
                         transIndex++;
                     }
                     else
@@ -1079,20 +1206,33 @@ namespace AxTstructData
 
         private async Task<Int64> GetChildTransRecordId(string parentRecid, string table, string mapName)
         {
+            var recordIds = await GetChildTransRecordIds(parentRecid, table, mapName);
+            return recordIds.Count > 0 ? recordIds[0] : 0;
+        }
+
+        /// <summary>
+        /// Existing target records posted from the source record by the map, in creation order
+        /// (several when the mapping fills several non-grid rows; the n-th record belongs to the n-th row).
+        /// </summary>
+        private async Task<List<Int64>> GetChildTransRecordIds(string parentRecid, string table, string mapName)
+        {
             var result = await _repo.GetChildTransRecordId(parentRecid, table, mapName);
 
             if (!string.IsNullOrEmpty(result.error))
                 throw new Exception($"Error fetching Record Id for Target table ({table}): {result.error}");
 
-            string recordIdStr = "0";
+            var recordIds = new List<Int64>();
 
-            if (result != null && result.data != null && result.data.Rows.Count > 0)
+            if (result != null && result.data != null)
             {
-                recordIdStr = result.data.Rows[0][0].ToString();
+                foreach (DataRow row in result.data.Rows)
+                {
+                    Int64.TryParse(row[0]?.ToString(), out Int64 recId);
+                    recordIds.Add(recId);
+                }
             }
 
-            Int64.TryParse(recordIdStr, out Int64 RecId);
-            return RecId;
+            return recordIds;
         }
 
         private void AddRowAction(Dictionary<string, Dictionary<string, Dictionary<string, string>>> submitData)
@@ -1265,8 +1405,13 @@ namespace AxTstructData
                         value = ProcessAxpFileUploads(fieldName, value, rowNo, "INSERT");
                     }
 
-                    columnNames.Add(fieldName);
                     var dbType = _validate._sdef.GetFieldDBType(fieldName);
+
+                    // Whitespace-only numeric value is treated like an empty value (column skipped)
+                    if ((dbType == DbType.Int64 || dbType == DbType.Decimal) && string.IsNullOrWhiteSpace(value))
+                        continue;
+
+                    columnNames.Add(fieldName);
 
                     if (dbType == DbType.Date || dbType == DbType.DateTime)
                     {
@@ -1407,7 +1552,7 @@ namespace AxTstructData
                 else if (dbType == DbType.Int64)
                 {
                     setClauses.Add($"{fieldName} = {paramName}");
-                    if (string.IsNullOrEmpty(value))
+                    if (string.IsNullOrWhiteSpace(value))
                         values.Add(0);
                     else
                         values.Add(Convert.ToInt64(value));
@@ -1415,7 +1560,7 @@ namespace AxTstructData
                 else if (dbType == DbType.Decimal)
                 {
                     setClauses.Add($"{fieldName} = {paramName}");
-                    if (string.IsNullOrEmpty(value))
+                    if (string.IsNullOrWhiteSpace(value))
                         values.Add(0);
                     else
                         values.Add(Convert.ToDecimal(value));

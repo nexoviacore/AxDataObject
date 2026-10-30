@@ -41,7 +41,9 @@ namespace AxValidate.Helpers
         private readonly AxStructDefUtils _utils;
         private IDbHelper _dbHelper;
         public ARMCommon.Helpers.Utils _common;
-
+        // SQL string literals ('...' with '' escapes) are matched first and left as they are,
+        // so ':MI' in 'HH24:MI' is not taken as a parameter; '::' casts are still skipped
+        private static readonly Regex SqlParamPattern = new Regex(@"'(?:[^']|'')*'|(?<!:)([:@])(\w+)", RegexOptions.Compiled);
 
 
 
@@ -905,7 +907,8 @@ namespace AxValidate.Helpers
                     //case "integer":
                     //case "number":
                     //case "smallint":
-                    return DbType.Double;
+                    //return DbType.Double;
+                    return DbType.Decimal;
 
                 //case "l":
                 //case "bigint":
@@ -1176,13 +1179,15 @@ namespace AxValidate.Helpers
             //   ([:@])   → Matches a single ':' or '@' character (parameter prefix)
             //   (\w+)    → Captures one or more word characters (letters, digits, or underscores) as the parameter name
             //
-            Regex paramPattern = new Regex(@"(?<!:)([:@])(\w+)");
-            MatchCollection matches = paramPattern.Matches(processedSql);
+
+            MatchCollection matches = SqlParamPattern.Matches(processedSql);
 
             foreach (Match match in matches)
             {
+                if (!match.Groups[2].Success)   // string literal
+                    continue;
+
                 string paramName = match.Groups[2].Value;
-                //string paramName = match.Value;
 
                 // Skip if already added from dynamic filter
                 if (allParamNames.Contains(paramName))
@@ -1199,7 +1204,8 @@ namespace AxValidate.Helpers
                     if (string.IsNullOrEmpty(paramValue)) paramValue = "0";
                     if (IsDouble(paramValue))
                     {
-                        paramType = DbType.Double;
+                        paramType = DbType.Decimal;
+                        //paramType = DbType.Double;
                     }
                     else
                     {
@@ -1228,7 +1234,8 @@ namespace AxValidate.Helpers
             string processedSql = sqlText;
 
             // Find all dynamic filters
-            var dynamicFilterMatches = Regex.Matches(sqlText, @"{dynamicfilter\s+([^}]+)}");
+            // Case-insensitive: field SQL may be written as {DynamicFilter ...}
+            var dynamicFilterMatches = Regex.Matches(sqlText, @"{dynamicfilter\s+([^}]+)}", RegexOptions.IgnoreCase);
 
             foreach (Match match in dynamicFilterMatches)
             {
@@ -1293,35 +1300,15 @@ namespace AxValidate.Helpers
             return processedSql;
         }
 
-        //private string ConvertToParameterizedSql(string sqlText, string dbType)
-        //{
-        //    // This method now only handles standard parameters, dynamic filters are already processed
-        //    Regex paramPattern = new Regex(@"[:\@](\w+)");
-
-        //    string parameterizedSql = paramPattern.Replace(sqlText, match =>
-        //    {
-        //        string pureParamName = match.Groups[1].Value;
-
-        //        return dbType.ToLower() switch
-        //        {
-        //            "oracle" => $":{pureParamName}",
-        //            "postgres" or "postgresql" or "postgre" or "mssql" or "sqlserver" => $"@{pureParamName}",
-        //            _ => $"@{pureParamName}"
-        //        };
-        //    });
-
-        //    return parameterizedSql;
-        //}
-
         private string ConvertToParameterizedSql(string sqlText, string dbType)
         {
-            // Match parameters starting with a single ':' or '@' — but not '::'
-            Regex paramPattern = new Regex(@"(?<!:)([:@])(\w+)", RegexOptions.Compiled);
-
-            string parameterizedSql = paramPattern.Replace(sqlText, match =>
+            string parameterizedSql = SqlParamPattern.Replace(sqlText, match =>
             {
-                string pureParamName = match.Groups[2].Value; // parameter name
-                string prefix = match.Groups[1].Value;        // ':' or '@'
+                if (!match.Groups[2].Success)   // NEW: string literal, keep as is
+                    return match.Value;
+
+                string pureParamName = match.Groups[2].Value;
+                string prefix = match.Groups[1].Value;
 
                 return dbType.ToLower() switch
                 {
@@ -1333,7 +1320,6 @@ namespace AxValidate.Helpers
 
             return parameterizedSql;
         }
-
         // Helper method for safe parameter conversion (from previous solution)
         // Note: We need to handle Decimal
 
@@ -2719,12 +2705,25 @@ namespace AxValidate.Helpers
             return table != null && table.Columns.Count > 0;
         }
 
+        /// <summary>
+        /// Search column index to use for the result: Searchcol defaults to 1, so for a one-column SQL
+        /// (e.g. "select c.currencyid from currency ...") it is beyond the columns; fall back to the first column.
+        /// </summary>
+        //public int GetSearchCol(DataTable data, int searchCol)
+        //{
+        //    if (data != null && (searchCol < 0 || searchCol >= data.Columns.Count))
+        //        return 0;
+
+        //    return searchCol;
+        //}
+
         // Locate Data
         public int GetIndexOfColumn(SQLResult sqlResult, string result, TField xfld, int linkSearchCol = -1)
         {
             try
             {
                 string columnName = sqlResult.data.Columns[xfld.Searchcol].ColumnName;
+                //string columnName = sqlResult.data.Columns[GetSearchCol(sqlResult.data, xfld.Searchcol)].ColumnName;
 
                 if (linkSearchCol > -1)
                     columnName = sqlResult.data.Columns[linkSearchCol].ColumnName;
@@ -2746,24 +2745,24 @@ namespace AxValidate.Helpers
             return -1;  // Not found
         }
         // Apply Filter
-        public int GetIndexOfColumnAndRefresh(SQLResult sqlResult, string result, TField xfld)
-        {
-            string columnName = sqlResult.data.Columns[xfld.Searchcol].ColumnName;
+        //public int GetIndexOfColumnAndRefresh(SQLResult sqlResult, string result, TField xfld)
+        //{
+        //    string columnName = sqlResult.data.Columns[GetSearchCol(sqlResult.data, xfld.Searchcol)].ColumnName;
 
-            DataView dv = sqlResult.data.DefaultView;
-            dv.Sort = columnName;  // Sort needed for binary search
+        //    DataView dv = sqlResult.data.DefaultView;
+        //    dv.Sort = columnName;  // Sort needed for binary search
 
-            int viewIndex = dv.Find(result);
+        //    int viewIndex = dv.Find(result);
 
-            if (viewIndex >= 0)
-            {
-                DataRow foundRow = dv[viewIndex].Row;
-                int originalIndex = sqlResult.data.Rows.IndexOf(foundRow);
-                return originalIndex;
-            }
+        //    if (viewIndex >= 0)
+        //    {
+        //        DataRow foundRow = dv[viewIndex].Row;
+        //        int originalIndex = sqlResult.data.Rows.IndexOf(foundRow);
+        //        return originalIndex;
+        //    }
 
-            return -1;  // Not found
-        }
+        //    return -1;  // Not found
+        //}
 
 
     }

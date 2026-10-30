@@ -37,3 +37,20 @@ new behavior; this ledger documents the exceptional shared-project changes and t
 - Verification: no secrets or machine-specific values were introduced by the two reviewed appsettings diffs.
   `dotnet build --nologo -v q --no-restore -m:1` passes for ARMCommon, AxParser, AxStructDef, AxValidate,
   AxTstructData, ARMAxpertJobsWorkerService, ARMCachedSaveWorkerService, AxList, and AxUtils.
+
+## 2026-10-30 — Upstream Dev import through 5b42a46
+
+- Files: `ARM-11.4/ARM.VersionInfo.json`; `ARM-11.4/AxStructDef/StructDef.cs`;
+  `ARM-11.4/AxValidate/{Validate.cs,Helpers/ValidateHelper.cs}`;
+  `ARM-11.4/AxTstructData/Repositories/AxPutRepository.cs`; and
+  `ARM-11.4/AxTstructData/Service/{AxDeleteService.cs,AxGetService.cs,AxPutService.cs}`.
+- Reason: import upstream commits `69ec7fc` and `5b42a46`, which contain the release16 AxPut QA fixes for
+  row-aware validation, GenMap buffering/multi-record mapping, SQL parameter and value typing, cancelled
+  transactions, key-value record lookup, and attachment retrieval behavior. These shared Axpert changes cannot
+  be reproduced faithfully in an AxData-only adapter.
+- Behavioral impact: ARM adopts the upstream sparse-row, per-row parser registration, GenMap, permission lookup,
+  cancellation, and SQL conversion behavior. Reconciliation preserves the existing fail-closed parser/tax
+  guards, removes upstream trailing whitespace, and omits submitted/control values from newly added trace lines.
+- Verification: `AxStructDef`, `AxValidate`, and `AxTstructData` build without restore; the serial AxData solution
+  build passes; 158 unit, 39 integration, and 139 contract tests pass; E2E exits successfully. Two contract tests
+  cover highest-row sparse-grid submission and row-specific parser values during grid validation.

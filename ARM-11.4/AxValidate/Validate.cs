@@ -319,7 +319,7 @@ namespace AxValidate
             //{
 
             //}
-            if (xfld.SQL != null && xfld.SQLText.Trim() != "")
+            if (xfld.SQL != null && xfld.SQLText.Trim() != "" && (xfld.ModeofEntry == "select" || xfld.ModeofEntry == "accept"))
             {
                 if (xfld.DynamicParams)
                     DynamicSql = xfld.SQLText;
@@ -401,6 +401,14 @@ namespace AxValidate
                     
                     result = acceptFldValue;
 
+                    // Editable accept field: its SQL gives a suggested default, not a list. When the SQL gives no value,
+                    // keep the value already submitted (payload/loaded) instead of blanking it, as typed on the web form
+                    if (xfld.Suggestive && string.IsNullOrEmpty(acceptFldValue) && !xfld.Readonly && !string.IsNullOrEmpty(fldActualValue))
+                    {
+                        _traceService.LogMessage($"Accept field {xfld.FieldName}: SQL returned no value; keeping submitted value");
+                        result = fldActualValue;
+                    }
+
                     //if (result != "" && result.Substring(0, 2) == "++")
                     if (
                         !string.IsNullOrEmpty(result)
@@ -459,6 +467,7 @@ namespace AxValidate
                             result = _utils.GetRowValue(
                                 row,
                                 sqlResult.data.Columns[xfld.Searchcol].ColumnName,
+                                //sqlResult.data.Columns[_validateHelper.GetSearchCol(sqlResult.data, xfld.Searchcol)].ColumnName,
                                 xfld.CustType
                             );
                         }
@@ -1256,11 +1265,13 @@ namespace AxValidate
                                 if (index >= 0)
                                     row = sqlResult.data.Rows[index];
                                 else
-                                    row = sqlResult.data.Rows[0];
+                                    row = sqlResult.data.Rows.Count > 0 ? sqlResult.data.Rows[0] : null;
 
-                                string fldValue = _utils.GetRowValue(
+                                // No rows: the value is not in the list (reported as invalid below)
+                                string fldValue = row == null ? "" : _utils.GetRowValue(
                                     row,
                                     sqlResult.data.Columns[fld.Searchcol].ColumnName,
+                                //sqlResult.data.Columns[_validateHelper.GetSearchCol(sqlResult.data, fld.Searchcol)].ColumnName,
 
                                 fld.CustType
                                 );
@@ -1305,11 +1316,13 @@ namespace AxValidate
                             if (index >= 0)
                                 row = sqlResult.data.Rows[index];
                             else
-                                row = sqlResult.data.Rows[0];
+                                row = sqlResult.data.Rows.Count > 0 ? sqlResult.data.Rows[0] : null;
 
-                            string fldValue = _utils.GetRowValue(
+                            // No rows: the value is not in the list (reported as invalid below)
+                            string fldValue = row == null ? "" : _utils.GetRowValue(
                                 row,
                                 sqlResult.data.Columns[fld.Searchcol].ColumnName,
+                                //sqlResult.data.Columns[_validateHelper.GetSearchCol(sqlResult.data, fld.Searchcol)].ColumnName,
 
                                 fld.CustType
                             );
@@ -2498,6 +2511,8 @@ namespace AxValidate
                         int startFldIdx = _sdef.Frames[fidx].StartIndex;
                         int endFldIdx =
                             _sdef.Frames[fidx].StartIndex + _sdef.Frames[fidx].FieldCount;
+                        RegRow(_sdef.Frames[fidx].FrameNo, idx);
+
                         for (int fldIdx = startFldIdx; fldIdx <= endFldIdx - 1; fldIdx++)
                         {
                             TField field = _sdef.Flds[fldIdx];
@@ -2556,7 +2571,7 @@ namespace AxValidate
                                     FieldValue = fieldResult;
 
                                     _traceService.LogMessage(
-                                        $"RefreshFieldAsync completed for {field.FieldName}: '{fieldResult}'"
+                                        $"RefreshFieldAsync (Onload) completed for {field.FieldName}: '{fieldResult}'"
                                     );
 
                                     if (!string.IsNullOrEmpty(fieldResult))
@@ -2595,13 +2610,13 @@ namespace AxValidate
                                 catch (Exception ex)
                                 {
                                     validationPassed = false;
-                                    validateResultList.Add($"Validation Fail: Field '{processField}' (Row No: {rowNo}) with value '{fieldResult}'; {result}");
+                                    validateResultList.Add($"Validation Fail: Field '{processField}' (Row No: {rowNo}) with value '{fieldResult}'; {ex.Message}");
                                     _traceService.LogMessage(
-                                        $"Validation failed for field {processField}: {ErrorStr}"
+                                        $"Validation failed for field {processField}: {ex.Message}"
                                     );
                                     //result = $"Successfully processed {processedFields} fields. Details: {string.Join("; " + Environment.NewLine, validateResultList)}";
 
-                                    _traceService.LogError($"Error processing field {processField}");
+                                    _traceService.LogError($"Error processing field {processField}: {ex.Message}{Environment.NewLine}{ex.StackTrace}");
                                 }
                             }
                         }
@@ -2635,7 +2650,6 @@ namespace AxValidate
             string processField = "";
             string fieldResult = string.Empty;
             int processedFields = 0;
-
             _traceService.LogMessage($"ValidateData started for row with {_sdef.Flds?.Count} fields");
 
             // Check if Flds is null or empty
@@ -2666,6 +2680,9 @@ namespace AxValidate
                     for (int idx = 1; idx <= totalRowCount; idx++)
                     {
                         rowNo = idx;
+
+                        //if (_sdef.Frames[fidx].AsGrid)
+                            RegRow(_sdef.Frames[fidx].FrameNo, rowNo);
 
                         int startFldIdx = _sdef.Frames[fidx].StartIndex;
                         int endFldIdx =
@@ -2740,12 +2757,13 @@ namespace AxValidate
                             catch (Exception ex)
                             {
                                 validationPassed = false;
-                                validateResultList.Add($"Validation Fail: Field '{processField}' (Row No: {rowNo}) with value '{fieldResult}'; {result}");
+                                validateResultList.Add($"Validation Fail: Field '{processField}' (Row No: {rowNo}) with value '{fieldResult}'; {ex.Message}");
                                 _traceService.LogMessage(
-                                    $"Validation failed for field {processField}: {ErrorStr}"
+                                    $"Validation failed for field {processField}: {ex.Message}"
                                 );
+                                _traceService.LogError($"Error processing field {processField}: {ex.Message}{Environment.NewLine}{ex.StackTrace}");
 
-                                result.Message = $"Validation Fail: Field '{processField}' (Row No: {rowNo}) with value '{fieldResult}'; {result}";
+                                result.Message = $"Validation Fail: Field '{processField}' (Row No: {rowNo}) with value '{fieldResult}'; {ex.Message}";
 
                                 //result = $"Successfully processed {processedFields} fields. Details: {string.Join("; " + Environment.NewLine, validateResultList)}";
                             }
@@ -2846,5 +2864,35 @@ namespace AxValidate
             }
         }
 
+        /// <summary>
+        /// Registers the field values of the given row of a frame as parser variables (Delphi TValidate.RegRow),
+        /// so expressions, link fields and SQL params evaluated for that row read this row's values.
+        /// Fields with no value in this row are registered as empty.
+        /// </summary>
+        public void RegRow(int frameNo, int rowNo)
+        {
+            if (frameNo < 1 || frameNo > _sdef.Frames.Count)
+                return;
+
+            TFrame frame = _sdef.Frames[frameNo - 1];
+            _parser.RegisterVar("activerow", "n", rowNo.ToString());
+
+            for (int i = frame.StartIndex; i < frame.StartIndex + frame.FieldCount; i++)
+            {
+                TField fld = _sdef.Flds[i];
+
+                // Delphi: fd.DataRows -> FieldList entry of this field for this row
+                int k = _sdef.GetFieldIndex(fld.FieldName, rowNo);
+                if (k > -1)
+                {
+                    FieldRec rec = _sdef.FieldList[k];
+                    _parser.RegisterVar(rec.FieldName, fld.DataType, rec.Value ?? "");
+                }
+                else
+                {
+                    _parser.RegisterVar(fld.FieldName, fld.DataType, "");
+                }
+            }
+        }
     }
 }

@@ -171,6 +171,22 @@ namespace AxTstructData
                 return result;
             }
 
+            if (userPermissions != null && userPermissions.data != null && userPermissions.data.Rows.Count == 1)
+            {
+                if (userPermissions.data.Rows[0]["recordid"]?.ToString() == string.Empty || userPermissions.data.Rows[0]["recordid"]?.ToString() == "0")
+                {
+                    result.success = false;
+                    result.error = "No record found for the specified keyvalue. Please verify the keyvalue and try again.";
+                    return result;
+                }
+            }
+            else //If more than one record comes, return error message
+            {
+                result.success = false;
+                result.error = "Multiple records found for the given keyvalue. Please enter a unique value and try again.";
+                return result;
+            }
+
             if (userPermissions.data.Columns.Contains("permissiontype"))
             {
                 var userRows = userPermissions.data.AsEnumerable()
@@ -552,7 +568,20 @@ namespace AxTstructData
                     {
                         DateTime dateValue = (DateTime)dcwiseData["dc1"]?.Rows[0]["modifiedon"];
                         result.data["modifiedon"] = dateValue.ToString($"{_validate._sdef.clientDateFormat} HH:mm:ss.fff", CultureInfo.InvariantCulture);
-                    }                                        
+                    }
+
+                    _validate._sdef.CancelledTrans = dcwiseData["dc1"]?.Rows[0]["cancel"]?.ToString().ToLower() == "t" ? true : false;
+                    if (_validate._sdef.CancelledTrans)
+                    {
+                        _validate._sdef.CancelRemarks = "This transaction has been cancelled. "
+                            + dcwiseData["dc1"]?.Rows[0]["cancelremarks"]?.ToString()
+                            + " by "
+                            + result.data["modifiedby"] + " on " + result.data["modifiedon"];
+                        result.data["cancel"] = "T";
+                        result.data["cancelremarks"] = _validate._sdef.CancelRemarks;
+                    }
+
+
                 }
 
                 if (getData.CalledFrom != "SAVEDATA")

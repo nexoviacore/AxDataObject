@@ -2394,8 +2394,16 @@ namespace AxStructDef
                     }
                 }
 
-                if (tempFld.FieldValList.Count > Frames[tempFld.FrameNo - 1].RowCount)
-                    Frames[tempFld.FrameNo - 1].RowCount = tempFld.FieldValList.Count;
+                //    if (tempFld.FieldValList.Count > Frames[tempFld.FrameNo - 1].RowCount)
+                //        Frames[tempFld.FrameNo - 1].RowCount = tempFld.FieldValList.Count;
+                //}
+                //else
+                //{
+                //    Frames[tempFld.FrameNo - 1].RowCount = 1;
+                //}
+                // Grid row count = highest row number submitted (a row may not send every field)
+                if (rowNo > Frames[tempFld.FrameNo - 1].RowCount)
+                    Frames[tempFld.FrameNo - 1].RowCount = rowNo;
             }
             else
             {
@@ -4621,7 +4629,7 @@ namespace AxStructDef
                         _invalidRows.Add(s);
 
                         if (_rowExists)
-                            DeleteRow(frameNo, x);
+                            EmitGenMapDeleteRow(fld, x);
                     }
                     return;
                 }
@@ -4640,34 +4648,27 @@ namespace AxStructDef
                         _genFieldValue = fv;
                 }
 
-                // --- Save field ---
-                //SetFieldValue(
-                //     fieldName,
-                //     dataType,
-                //     saveTableName,
-                //     _genFieldValue,
-                //     "",
-                //     x,
-                //     _genIdValue,
-                //     0,
-                //     frameNo,
-                //     0,
-                //     sourceKey
-                // );
+            // --- Save field ---
+            //SetFieldValue(
+            //     fieldName,
+            //     dataType,
+            //     saveTableName,
+            //     _genFieldValue,
+            //     "",
+            //     x,
+            //     _genIdValue,
+            //     0,
+            //     frameNo,
+            //     0,
+            //     sourceKey
+            // );
 
-                SubmitValue(
-                        fieldName,
-                        x,
-                        _genFieldValue,
-                        "",
-                        _genIdValue,
-                        0,
-                        0
+            _traceService.LogMessage(
+                              $"FillSpecificRow - FieldName: {fieldName}, MappingField: {genMapField.SourceField}, RowNo: {x}"
                     );
 
-                // NOTE: Handle Parser here
-                //structDefRec.Validate.Parser.RegisterVar(fieldName, dataType[0], fieldValue);
-                AxParser.RegisterVar(fieldName, dataType[0].ToString(), _genFieldValue);
+            // NOTE: Handle Parser here (RegisterVar is done in EmitGenMapValue)
+            EmitGenMapValue(fld, x, _genFieldValue, _genIdValue);
 
                 //structObj.axprovider.dbm.gf.DoDebug.Msg(
                 //    $"Mapped {fieldName} Row = {x} value = {FieldValue} idvalue {IdValue}"
@@ -4870,15 +4871,11 @@ namespace AxStructDef
                 //    sourceKey
                 //);
 
-                SubmitValue(
-                   fieldName,
-                   r,
-                  _genFieldValueList[i],
-                   "",
-                   _genIdValueList[i],
-                   0,
-                   0
-               );
+                _traceService.LogMessage(
+                  $"FillGroupedGridToGrid - FieldName: {fieldName}, MappingField: {genMapField.SourceField}, RowNo: {r}"
+              );
+
+                EmitGenMapValue(fld, r, _genFieldValueList[i], _genIdValueList[i]);
 
                 //    SetFieldValue(
                 //    fieldName,
@@ -4899,8 +4896,6 @@ namespace AxStructDef
                 //    dataType[0],
                 //    fieldValueList[i]
                 //);
-
-                AxParser.RegisterVar(fieldName, dataType[0].ToString(), _genFieldValueList[i]);
 
                 //SourceId = _parentStructDef.GetRecordId(fld.FrameNo, i);
 
@@ -5007,23 +5002,17 @@ namespace AxStructDef
                 //     sourceKey
                 // );
 
-                SubmitValue(
-                   fieldName,
-                   r,
-                   _genFieldValue,
-                   "",
-                   _genIdValue,
-                   0,
-                   0
-               );
+                _traceService.LogMessage(
+                  $"FillGridToGrid - FieldName: {fieldName}, MappingField: {genMapField.SourceField}, RowNo: {r}"
+              );
+
+                EmitGenMapValue(fld, r, _genFieldValue, _genIdValue);
 
                 //StoreDataRec.Validate.Parser.RegisterVar(
                 //    fieldName,
                 //    dataType[0],
                 //    FieldValue
                 //);
-
-                AxParser.RegisterVar(fieldName, dataType[0].ToString(), _genFieldValue);
 
 
                 //structObj.axprovider.dbm.gf.DoDebug.Msg(
@@ -5335,21 +5324,150 @@ namespace AxStructDef
             }
 
             // [feat]: Adds rowAction "create" to each new row in genMap edit if not added
+            // (buffered mapping: done by ApplyGenMapBuffer once the rows are written)
+            if (_genMapBuffer == null)
+            {
             foreach (var frm in Frames)
             {
                 AddRowAction(frm);
             }
+            }
 
         }
+
+        #region GenMap buffer
+
+        // Delphi fills the target StoreData directly, where every frame (also non-grid) can hold several rows; each row of
+        // the non-grid frame is saved as its own record (e.g. grid -> non-grid posts one target record per source row).
+        // StructDef keeps non-grid fields on row 1 only, so the mapping is first collected here (same rows as Delphi) and
+        // then written to the target once per record: record k = row k of the non-grid frames + (record 1) the grid rows.
+
+        public enum GenMapOpKind { Value, DeleteRow }
+
+        public sealed class GenMapOp
+        {
+            public GenMapOpKind Kind;
+            public string FieldName = "";
+            public string DataType = "c";
+            public int FrameNo;
+            public bool AsGrid;
+            public int RowNo;
+            public string Value = "";
+            public Int64 IdValue;
+        }
+
+        public sealed class GenMapBuffer
+        {
+            public List<GenMapOp> Ops { get; } = new List<GenMapOp>();   // in mapping order
+
+            /// <summary>Target records: highest row written in a non-grid frame (1 when only grid rows / row 1).</summary>
+            public int RecordCount
+                => Math.Max(1, Ops.Where(o => o.Kind == GenMapOpKind.Value && !o.AsGrid).Select(o => o.RowNo).DefaultIfEmpty(1).Max());
+        }
+
+        private GenMapBuffer? _genMapBuffer;
+
+        /// <summary>
+        /// Starts collecting the mapping of one target transaction (Delphi LinkDetailToSD: FieldsAdded/RowsAdded/InvalidRows cleared).
+        /// </summary>
+        public GenMapBuffer BeginGenMapBuffer()
+        {
+            _fieldsAdded.Clear();
+            _rowsAdded.Clear();
+            _invalidRows.Clear();
+            _rowExists = false;
+            _genMapBuffer = new GenMapBuffer();
+            return _genMapBuffer;
+        }
+
+        public void EndGenMapBuffer() => _genMapBuffer = null;
+
+        private void EmitGenMapValue(TField fld, int rowNo, string value, Int64 idValue)
+        {
+            if (_genMapBuffer == null)
+            {
+                SubmitValue(fld.FieldName, rowNo, value, "", idValue, 0, 0);
+                AxParser.RegisterVar(fld.FieldName, fld.DataType[0].ToString(), value);
+                return;
+            }
+
+            _genMapBuffer.Ops.Add(new GenMapOp
+            {
+                Kind = GenMapOpKind.Value,
+                FieldName = fld.FieldName,
+                DataType = fld.DataType,
+                FrameNo = fld.FrameNo,
+                AsGrid = fld.AsGrid,
+                RowNo = rowNo,
+                Value = value,
+                IdValue = idValue
+            });
+        }
+
+        private void EmitGenMapDeleteRow(TField fld, int rowNo)
+        {
+            if (_genMapBuffer == null)
+            {
+                DeleteRow(fld.FrameNo, rowNo);
+                return;
+            }
+
+            _genMapBuffer.Ops.Add(new GenMapOp { Kind = GenMapOpKind.DeleteRow, FrameNo = fld.FrameNo, AsGrid = fld.AsGrid, RowNo = rowNo });
+        }
+
+        /// <summary>
+        /// Writes record <paramref name="recordNo"/> of the buffered mapping to this (target) structdef.
+        /// One record: every op replayed as the direct mapping did it. More records: non-grid rows go to the record of that
+        /// row (as row 1), grid rows and grid row deletes go with record 1 (all target frames hang on the frame 1 record).
+        /// </summary>
+        public void ApplyGenMapBuffer(GenMapBuffer buffer, int recordNo)
+        {
+            bool singleRecord = buffer.RecordCount == 1;
+
+            foreach (var op in buffer.Ops)
+            {
+                if (!singleRecord)
+                {
+                    if (op.AsGrid ? recordNo != 1 : op.RowNo != recordNo)
+                        continue;
+                }
+
+                int rowNo = singleRecord || op.AsGrid ? op.RowNo : 1;
+
+                if (op.Kind == GenMapOpKind.DeleteRow)
+                {
+                    DeleteRow(op.FrameNo, rowNo);
+                    continue;
+                }
+
+                SubmitValue(op.FieldName, rowNo, op.Value, "", op.IdValue, 0, 0);
+                AxParser.RegisterVar(op.FieldName, string.IsNullOrEmpty(op.DataType) ? "c" : op.DataType[0].ToString(), op.Value);
+            }
+
+            if (_traceService.IsTracingEnabled() && !singleRecord)
+                _traceService.LogMessage($"Genmap {MapName}: record {recordNo} of {buffer.RecordCount} written to target");
+
+            // [feat]: Adds rowAction "create" to each new row in genMap edit if not added
+            foreach (var frm in Frames)
+            {
+                AddRowAction(frm);
+            }
+        }
+
+        #endregion
 
         public void AddRowAction(TFrame frame)
         {
             //var frame = Frames[frameNo];
             var frameNo = frame.FrameNo; ;
 
+            // Non-grid row actions are stored on the first frame using the same table (see SetNonGridRowAction),
+            // so read from that frame; otherwise a non-grid DC sharing the header table would turn the header row into "create".
+            var actionFrameNo = frame.AsGrid ? frameNo : (GetFrame(frame.TableName)?.FrameNo ?? frameNo);
+
             for (int i = 1; i <= frame.RowCount; i++)
             {
-                var curRowAction = GetRowAction(frameNo, i); // i = row number
+                var curRowAction = GetRowAction(actionFrameNo, i); // i = row number
 
                 if (string.IsNullOrEmpty(curRowAction))
                 {
@@ -6970,7 +7088,7 @@ namespace AxStructDef
             // Process each field mapping
             for (int i = 0; i < mdMap.FieldMappings.Count; i++)
             {
-                var (columnClause, parameterClause, value, fldDbType) = FormatParams(mdMap.FieldMappings[i]);
+                var (columnClause, parameterClause, value, fldDbType) = FormatParams(mdMap.FieldMappings[i], data);
 
                 columnNames.Add(mdMap.FieldMappings[i].TargetField);
                 parameters.Add(parameterClause);
@@ -7036,7 +7154,7 @@ namespace AxStructDef
                 if (mdMap.FieldMappings[i].Operation != OperationType.Inc &&
                     mdMap.FieldMappings[i].Operation != OperationType.Dec)
                 {
-                    var (columnClause, parameterClause, value, fldDbType) = FormatParams(mdMap.FieldMappings[i]);
+                    var (columnClause, parameterClause, value, fldDbType) = FormatParams(mdMap.FieldMappings[i], mappedData);
                     columnNames.Add(columnClause);
                     parameters.Add(parameterClause);
                     values.Add(value);
@@ -7150,10 +7268,24 @@ namespace AxStructDef
         /// Creates parameter for a field
         /// </summary>
         private (string columnName, string paramValue, object value, DbType paramDbType) 
-            FormatParams(MdMapField mdField)
+            FormatParams(MdMapField mdField, DataTable targetData = null)
         {
             if (string.IsNullOrEmpty(mdField.SourceField))
                 return ("", "", null, DbType.String);
+
+            // Source key field: its DB type is the ID type (Int64) but SourceValue is the display text. Pick value and
+            // type from the target column so they match: text column -> display text, numeric column -> ID value.
+            var sourceFld = GetField(mdField.SourceField);
+            var targetColumn = (sourceFld?.SourceKey ?? false) ? GetDataColumn(targetData, mdField.TargetField) : null;
+            if (targetColumn != null)
+            {
+                if (targetColumn.DataType == typeof(string))
+                    return (mdField.SourceField, $"@{mdField.SourceField}",
+                        string.IsNullOrEmpty(mdField.SourceValue) ? DBNull.Value : mdField.SourceValue, DbType.String);
+
+                if (_typeMap.TryGetValue(targetColumn.DataType, out var targetDbType) && IsNumericType(targetDbType))
+                    return (mdField.SourceField, $"@{mdField.SourceField}", GetIDValue(sourceFld, 1), DbType.Int64);
+            }
 
             DbType fldDbType = GetFieldDBType(mdField.SourceField);
             string dataType = GetFieldDataType(mdField.SourceField);
@@ -7164,6 +7296,14 @@ namespace AxStructDef
             );
 
             return (mdField.SourceField, $"@{mdField.SourceField}", formattedValue ?? DBNull.Value, fldDbType);
+        }
+
+        private static DataColumn GetDataColumn(DataTable data, string columnName)
+        {
+            if (data == null || string.IsNullOrEmpty(columnName) || !data.Columns.Contains(columnName))
+                return null;
+
+            return data.Columns[columnName];
         }
 
         /// <summary>
@@ -7337,7 +7477,7 @@ namespace AxStructDef
                     var fileUploadLimit = transIdSpecificConfig.AsEnumerable().Where(x => x.Field<string>("props").ToLower() == "file upload limit").Select(r => r.Field<string>("propsval")).FirstOrDefault();
                     if (!string.IsNullOrEmpty(fileUploadLimit))
                         FileUploadLimit = fileUploadLimit.ToString();
-                    
+
                 }
 
                 var allFormsConfig = dbResult.data.AsEnumerable().Where(x => x.Field<string>("structname").ToLower() == "ALL Forms").Select(x => x).ToList();
@@ -7360,6 +7500,16 @@ namespace AxStructDef
         {
             if (value == null || value == DBNull.Value)
                 return value;
+
+            // Empty/whitespace can't be converted; use the internal defaults (0 for numbers, 01/01/1900 for date/datetime)
+            // instead of throwing FormatException
+            if (value is string strValue && string.IsNullOrWhiteSpace(strValue))
+            {
+                if (IsNumericType(dbType))
+                    value = "0";
+                else if (dbType == DbType.Date || dbType == DbType.DateTime)
+                    value = new DateTime(1900, 1, 1);
+            }
 
             switch (dbType)
             {
