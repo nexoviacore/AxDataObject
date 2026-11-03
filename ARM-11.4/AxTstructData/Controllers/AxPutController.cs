@@ -59,6 +59,9 @@ namespace AxTstructData
                 if (getDataResult.data != null && getDataResult.data.ContainsKey("caption"))
                     result.result.Add("caption", getDataResult.data?["caption"]?.ToString());
 
+                if (getDataResult.data != null && getDataResult.data.ContainsKey("objectid"))
+                    result.result.Add("objectid", getDataResult.data?["objectid"]?.ToString());
+
                 return BadRequest(result);
             }
             else if (getDataResult.data != null && getDataResult.data.ContainsKey("error") && !string.IsNullOrEmpty(getDataResult.data?["error"]?.ToString() ?? ""))
@@ -83,6 +86,9 @@ namespace AxTstructData
 
                 if (getDataResult.data != null && getDataResult.data.ContainsKey("caption"))
                     result.result.Add("caption", getDataResult.data?["caption"]?.ToString());
+
+                if (getDataResult.data != null && getDataResult.data.ContainsKey("objectid"))
+                    result.result.Add("objectid", getDataResult.data?["objectid"]?.ToString());
 
                 return BadRequest(result);
             }

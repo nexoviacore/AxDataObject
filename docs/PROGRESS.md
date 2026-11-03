@@ -357,3 +357,9 @@ Format:
 - Done: Existing-record Init now normalizes legacy AxGet `0` source-ID companions to nullable AxData source IDs while rejecting negative, overflow, and nonnumeric values; no ARM-11.4 change.
 - Tests: 12 focused AxGet contracts, 159 unit, and 39 integration tests pass; serial build succeeds. Full contracts retain two unrelated field-engine guard failures (`Failed_validation_expression...` first: expected Fail, actual Success).
 - Postman: not applicable; no HTTP request/response shape or AXD error code changed.
+
+## Temporary AxPut AxSave demonstration done (2026-11-03)
+- Done: Added public `callIsFromAxSave`/`objectid`, temporary tenant/user-scoped Redis hydration/projection, Redis-before-SQL create/edit flow, and ObjectId responses; normal AxPut remains unchanged when disabled.
+- Decision: This intentionally disposable ARM comparison is not the durable AxData Save design and must be removed before Phase 2 production integration.
+- Tests: 11 focused characterization checks, 159 unit tests, and 39 integration tests pass; serial AxTstructData and AxData solution builds pass without restore with existing warnings.
+- Postman: updated with disposable-schema happy and unknown-ObjectId negative requests.

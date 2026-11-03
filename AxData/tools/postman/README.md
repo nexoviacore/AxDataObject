@@ -60,6 +60,14 @@ Then run `05 Get after eviction (run after manual evict)`. Its tests assert that
 
 The main numeric run finishes with four negatives: a client `bypassPermission` attempt using the saved stale version (`409 / AXD-CONC-001`), an edit that supplies only `recordId`/`rowNo` instead of `rowId` (`400 / AXD-REQ-001`), a request with no bearer token (`401 / AXD-AUTH-001`), and an unrelated authenticated user (`403 / AXD-AUTH-002`). Neither persistence identity, positional legacy row number, nor possession of an ObjectId is mutation authority.
 
+## Temporary AxPut AxSave prototype
+
+The separate `Temporary AxPut AxSave prototype` folder demonstrates the explicitly temporary ARM flow. It is not part of the M1.5 run and must be executed only against a reviewed disposable transaction/schema because request 01 calls the real self-committing AxPut writer.
+
+Set `axPutBaseUrl`, `armSessionId`, `prototypeTransId`, and `prototypeSubmitData` in the uncommitted local environment. `prototypeSubmitData` must be the exact AxPut `SubmitData` JSON proven for that disposable transaction; do not invent field/DC shapes or commit real values. Request 01 omits `objectid`, asserts that AxPut generates and returns one, and chains it into `axSavePrototypeObjectId`. Request 02 supplies an unknown ObjectId and asserts the negative response retains it.
+
+The prototype stores its mutable projection under the ARM-generated tenant key containing the `AXSAVE` segment, with an eight-hour TTL. It deliberately writes this Redis object after validation but before SQL preparation/execution. A SQL failure can therefore leave Redis populated; inspect and delete only the exact prototype key after review. Never use a wildcard or flush Redis. Remove this folder together with the temporary AxPut flow before implementing the durable AxData Save saga.
+
 ## Maintenance rule
 
 Every slice that adds or changes an HTTP endpoint, request/response shape, or AXD error code must update this pack in the same slice. Add or revise the happy path and at least one negative assertion, preserve variable chaining for `objectId` and `version`, and keep manual external steps in this README.

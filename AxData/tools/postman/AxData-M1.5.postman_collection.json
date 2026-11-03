@@ -18,7 +18,8 @@
         { "key": "preUpdateVersion", "value": "" },
         { "key": "beforeEvictionVersion", "value": "" },
         { "key": "editableDcId", "value": "" },
-        { "key": "editableRowId", "value": "" }
+        { "key": "editableRowId", "value": "" },
+        { "key": "axSavePrototypeObjectId", "value": "" }
     ],
     "item": [
         {
@@ -473,6 +474,83 @@
                                     }
                                 }
                             ]
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Temporary AxPut AxSave prototype",
+            "description": "Disposable demonstration only. Run against a reviewed disposable transaction/schema; this deliberately writes Redis before AxPut SQL and is not the production AxSave design.",
+            "item": [
+                {
+                    "name": "01 AxSave flag creates objectid and calls AxPut",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                { "key": "token", "value": "{{bearerToken}}", "type": "string" }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"callIsFromAxSave\": true,\n  \"Roles\": [],\n  \"Data\": [\n    {\n      \"TransId\": \"{{prototypeTransId}}\",\n      \"Action\": \"create\",\n      \"SubmitData\": {{prototypeSubmitData}}\n    }\n  ]\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{axPutBaseUrl}}/api/v1/AxPut"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                    "const envelope = pm.response.json();",
+                                    "const body = envelope.result || envelope;",
+                                    "pm.test('AxSave AxPut returns objectid', () => pm.expect(body.objectid).to.be.a('string').and.not.empty);",
+                                    "pm.collectionVariables.set('axSavePrototypeObjectId', body.objectid);"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "02 Supplied unknown objectid is rejected",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                { "key": "token", "value": "{{bearerToken}}", "type": "string" }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"callIsFromAxSave\": true,\n  \"objectid\": \"missing-axsave-object\",\n  \"Roles\": [],\n  \"Data\": [\n    {\n      \"TransId\": \"{{prototypeTransId}}\",\n      \"Action\": \"create\",\n      \"SubmitData\": {{prototypeSubmitData}}\n    }\n  ]\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{axPutBaseUrl}}/api/v1/AxPut"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                                    "const envelope = pm.response.json();",
+                                    "const body = envelope.result || envelope;",
+                                    "pm.test('Rejected response retains supplied objectid', () => pm.expect(body.objectid).to.eql('missing-axsave-object'));"
+                                ]
+                            }
                         }
                     ]
                 }

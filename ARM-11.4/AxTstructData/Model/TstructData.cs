@@ -39,6 +39,10 @@
         public string AxClient_DateFormat { get; set; } = "";
         public List<string>? Roles { get; set; } = new List<string>();
         public bool MilliSecsInTimeStamp { get; set; } = false;
+        [Newtonsoft.Json.JsonProperty("callIsFromAxSave")]
+        public bool CallIsFromAxSave { get; set; } = false;
+        [Newtonsoft.Json.JsonProperty("objectid")]
+        public string? ObjectId { get; set; }
         public List<AxPut> Data { get; set; }
 
     }
