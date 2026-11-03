@@ -10,7 +10,9 @@ public sealed record StructDefHandle(
     IReadOnlyList<DataContainerDefinition> DataContainers,
     IReadOnlyList<FieldDependency> Dependencies,
     IReadOnlyList<FillGridDefinition> FillGrids,
-    StructDefRevisionInfo? RevisionInfo = null);
+    StructDefRevisionInfo? RevisionInfo = null,
+    bool RequiresCompatibilityFallback = false,
+    IReadOnlyList<FieldDependencyDiagnostic>? DependencyDiagnostics = null);
 
 public sealed record StructDefRevisionInfo(
     string ContentHash,
@@ -30,9 +32,42 @@ public sealed record FieldDefinition(string Name, bool IsReadOnly = false);
 public sealed record FieldDependency(
     string SourceContainer,
     string SourceField,
-    string TargetContainer,
+    string? TargetContainer,
     string TargetField,
-    string ScriptName);
+    FieldDependencyKind Kind = FieldDependencyKind.Expression,
+    int DeclarationOrder = 0,
+    int SourceFrameNo = 0,
+    int? TargetFrameNo = null,
+    bool SourceIsGrid = false,
+    bool TargetIsGrid = false,
+    bool TargetIsPopup = false,
+    bool IsResolved = true);
+
+public enum FieldDependencyKind
+{
+    Expression,
+    Select,
+    Fill,
+    Aggregate,
+    FillGrid,
+    DataContainer,
+    Label,
+    DependentFrame,
+    Grid
+}
+
+public sealed record FieldDependencyDiagnostic(
+    FieldDependencyDiagnosticKind Kind,
+    string Source,
+    string Target,
+    string Message);
+
+public enum FieldDependencyDiagnosticKind
+{
+    MalformedMetadata,
+    UnresolvedReference,
+    Cycle
+}
 
 public sealed record FillGridDefinition(
     string Name,

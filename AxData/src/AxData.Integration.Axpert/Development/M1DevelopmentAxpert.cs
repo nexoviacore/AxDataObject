@@ -69,7 +69,17 @@ public sealed class M1DevelopmentStructDefProvider(M1DevelopmentAxpertOptions op
                 ],
                 ["item", "rate", "qty"])
         ],
-        [new FieldDependency("dc2", "qty", "dc2", "amount", "qty-times-rate")],
+        [new FieldDependency(
+            "dc2",
+            "qty",
+            "dc2",
+            "amount",
+            FieldDependencyKind.Expression,
+            DeclarationOrder: 1,
+            SourceFrameNo: 2,
+            TargetFrameNo: 2,
+            SourceIsGrid: true,
+            TargetIsGrid: true)],
         []);
 }
 

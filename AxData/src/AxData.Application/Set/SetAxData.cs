@@ -246,7 +246,7 @@ public sealed class SetAxDataHandler(
                 for (var submissionIndex = 0; submissionIndex < submissions.Length; submissionIndex++)
                 {
                     var submission = submissions[submissionIndex];
-                    if (IsBlockedByRejectedSource(submission.Address, rejectedSources, definition))
+                    if (IsBlockedByRejectedSource(submission.Address, rejectedSources, definition, state))
                     {
                         continue;
                     }
@@ -266,7 +266,8 @@ public sealed class SetAxDataHandler(
                             .Any(candidate => !IsBlockedByRejectedSource(
                                 candidate.Address,
                                 rejectedSources,
-                                definition));
+                                definition,
+                                state));
                         if (hasEligibleContinuation)
                         {
                             var rebuilt = await operation.RebuildAsync(cancellationToken).ConfigureAwait(false);
@@ -548,14 +549,108 @@ public sealed class SetAxDataHandler(
     private static bool IsBlockedByRejectedSource(
         FieldAddress candidate,
         IReadOnlyCollection<FieldAddress> rejectedSources,
-        StructDefHandle definition) =>
-        rejectedSources.Any(rejected =>
-            string.Equals(rejected.RowId, candidate.RowId, StringComparison.OrdinalIgnoreCase) &&
-            definition.Dependencies.Any(dependency =>
-                string.Equals(dependency.SourceContainer, rejected.DataContainer, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(dependency.SourceField, rejected.FieldName, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(dependency.TargetContainer, candidate.DataContainer, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(dependency.TargetField, candidate.FieldName, StringComparison.OrdinalIgnoreCase)));
+        StructDefHandle definition,
+        AxDataState state) =>
+        rejectedSources.Any(rejected => IsReachable(rejected, candidate, definition, state));
+
+    private static bool IsReachable(
+        FieldAddress source,
+        FieldAddress candidate,
+        StructDefHandle definition,
+        AxDataState state)
+    {
+        var pending = new Queue<FieldAddress>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        pending.Enqueue(source);
+        visited.Add(AddressKey(source));
+
+        while (pending.Count > 0)
+        {
+            var current = pending.Dequeue();
+            foreach (var dependency in definition.Dependencies
+                         .Where(dependency =>
+                             dependency.IsResolved &&
+                             dependency.TargetContainer is not null &&
+                             IsOrdinaryDependency(dependency.Kind) &&
+                             string.Equals(
+                                 dependency.SourceContainer,
+                                 current.DataContainer,
+                                 StringComparison.OrdinalIgnoreCase) &&
+                             string.Equals(
+                                 dependency.SourceField,
+                                 current.FieldName,
+                                 StringComparison.OrdinalIgnoreCase))
+                         .OrderBy(dependency => dependency.DeclarationOrder))
+            {
+                if (!TryMapDependentAddress(state, current, dependency, out var target))
+                {
+                    continue;
+                }
+
+                if (AddressesEqual(target, candidate))
+                {
+                    return true;
+                }
+
+                if (visited.Add(AddressKey(target)))
+                {
+                    pending.Enqueue(target);
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryMapDependentAddress(
+        AxDataState state,
+        FieldAddress source,
+        FieldDependency dependency,
+        out FieldAddress target)
+    {
+        target = null!;
+        if (!state.DataContainers.TryGetValue(source.DataContainer, out var sourceContainer) ||
+            dependency.TargetContainer is null ||
+            !state.DataContainers.TryGetValue(dependency.TargetContainer, out var targetContainer))
+        {
+            return false;
+        }
+
+        var sourceRowIndex = sourceContainer.Rows.FindIndex(row =>
+            string.Equals(row.RowId, source.RowId, StringComparison.OrdinalIgnoreCase));
+        if (sourceRowIndex < 0)
+        {
+            return false;
+        }
+
+        var sourceRowNumber = sourceContainer.IsGrid ? sourceRowIndex + 1 : 1;
+        var targetRowIndex = dependency.TargetIsGrid ? sourceRowNumber - 1 : 0;
+        if (targetRowIndex < 0 || targetRowIndex >= targetContainer.Rows.Count ||
+            !targetContainer.Rows[targetRowIndex].Fields.ContainsKey(dependency.TargetField))
+        {
+            return false;
+        }
+
+        target = new FieldAddress(
+            targetContainer.Name,
+            targetContainer.Rows[targetRowIndex].RowId,
+            dependency.TargetField);
+        return true;
+    }
+
+    private static bool IsOrdinaryDependency(FieldDependencyKind kind) => kind is
+        FieldDependencyKind.Expression or
+        FieldDependencyKind.Select or
+        FieldDependencyKind.Fill or
+        FieldDependencyKind.Aggregate;
+
+    private static bool AddressesEqual(FieldAddress left, FieldAddress right) =>
+        string.Equals(left.DataContainer, right.DataContainer, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(left.RowId, right.RowId, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(left.FieldName, right.FieldName, StringComparison.OrdinalIgnoreCase);
+
+    private static string AddressKey(FieldAddress address) =>
+        $"{address.DataContainer}\n{address.RowId}\n{address.FieldName}";
 
     private static bool TryApplyFillGrid(
         AxDataState state,

@@ -30,7 +30,17 @@ public static class SampleStructDefFixture
                 ],
                 ["item", "rate", "qty", "amount"])
         ],
-        [new FieldDependency("dc2", "qty", "dc2", "amount", "qty-times-rate")],
+        [new FieldDependency(
+            "dc2",
+            "qty",
+            "dc2",
+            "amount",
+            FieldDependencyKind.Expression,
+            DeclarationOrder: 1,
+            SourceFrameNo: 2,
+            TargetFrameNo: 2,
+            SourceIsGrid: true,
+            TargetIsGrid: true)],
         [new FillGridDefinition("fill-lines", "dc2", ["customer"], FillGridMode.Replace)]);
 
     public static AxDataState CreateState()

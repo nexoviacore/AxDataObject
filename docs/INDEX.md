@@ -62,3 +62,11 @@ Open a file only if a slice block names it. Section numbers match the original d
 | 20-observability.md | 20. Observability implementation | 169 |
 | 21-testing.md | 21. Testing strategy | 547 |
 | 22-entry-criteria.md | 22. Implementation entry criteria | 207 |
+
+## Separate workstreams
+
+| File | Purpose |
+|------|---------|
+| `arm-tasks/README.md` | Runbook and session prompts for the ARM-first dependency workstream |
+| `arm-tasks/arm-dependency-workstream.md` | ARM-DEP-00 through ARM-DEP-04 task blocks; separate from AxData slices |
+| `arm-tasks/axdata-adoption-handoff.md` | Blocked AxData adoption tasks after ARM-DEP-04 acceptance |

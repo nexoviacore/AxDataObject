@@ -151,6 +151,55 @@ public sealed class SetAxDataTests
     }
 
     [Fact]
+    public async Task Invalid_source_skips_transitive_submitted_dependents()
+    {
+        var baseDefinition = SampleStructDefFixture.Definition;
+        var definition = baseDefinition with
+        {
+            DataContainers = baseDefinition.DataContainers
+                .Select(container => string.Equals(container.Name, "dc2", StringComparison.OrdinalIgnoreCase)
+                    ? container with { EvaluationOrder = ["item", "qty", "amount", "rate"] }
+                    : container)
+                .ToArray(),
+            Dependencies =
+            [
+                new FieldDependency(
+                    "dc2", "qty", "dc2", "amount", FieldDependencyKind.Expression,
+                    DeclarationOrder: 1, SourceFrameNo: 2, TargetFrameNo: 2,
+                    SourceIsGrid: true, TargetIsGrid: true),
+                new FieldDependency(
+                    "dc2", "amount", "dc2", "rate", FieldDependencyKind.Expression,
+                    DeclarationOrder: 2, SourceFrameNo: 2, TargetFrameNo: 2,
+                    SourceIsGrid: true, TargetIsGrid: true)
+            ]
+        };
+        var fixture = await CreateFixtureAsync(currentDefinition: definition);
+        var initialWrites = fixture.Store.WriteCount;
+        var command = new SetAxDataCommand("object-1", 1, false,
+        [
+            new SetDataContainerValue("dc2",
+            [
+                new SetRowValue("row_existing", "e",
+                [
+                    new SetFieldValue("rate", 6m),
+                    new SetFieldValue("qty", "not-a-number")
+                ])
+            ])
+        ]);
+
+        var result = await fixture.Handler.HandleAsync(command, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Single(result.Response!.Errors);
+        Assert.Equal(
+            [new FieldAddress("dc2", "row_existing", "qty")],
+            fixture.FieldEngine.EvaluatedFields);
+        Assert.Equal(4m, fixture.State.DataContainers["dc2"].Rows
+            .Single(row => row.RowId == "row_existing").Fields["rate"].Value);
+        Assert.Equal(initialWrites, fixture.Store.WriteCount);
+    }
+
+    [Fact]
     public async Task Multiple_fields_use_one_operation_and_one_completion()
     {
         var fixture = await CreateFixtureAsync();

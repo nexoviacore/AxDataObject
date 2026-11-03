@@ -150,8 +150,27 @@ public sealed class AxpertDataLoaderContractTests
         Assert.Null(result.State);
     }
 
+    [Fact]
+    public void Axget_projection_normalizes_zero_source_id_companion_to_null()
+    {
+        var payload = new Dictionary<string, Dictionary<string, Dictionary<string, object?>>>
+        {
+            ["dc1"] = new()
+            {
+                ["row1"] = new()
+                {
+                    ["customer"] = "ACME",
+                    ["customer_sourceid"] = "0"
+                }
+            }
+        };
+
+        var containers = AxpertDataSource.ProjectContainers(payload);
+
+        Assert.Null(containers[0].Rows[0].SourceIds!["customer"]);
+    }
+
     [Theory]
-    [InlineData("0")]
     [InlineData("-1")]
     [InlineData("9223372036854775808")]
     [InlineData("not-a-number")]

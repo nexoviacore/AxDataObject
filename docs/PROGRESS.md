@@ -281,3 +281,79 @@ Format:
 - Decisions: Preserved fail-closed parser/tax handling and removed submitted/control values from new trace lines; no AxData production adapter change was required.
 - Tests: AxStructDef, AxValidate, AxTstructData, and serial AxData solution builds pass; 158 unit, 39 integration, and 139 contract tests pass; E2E exits successfully.
 - Next: Continue M1.6 readiness work. Postman: not applicable (legacy ARM behavior changed, not the AxData HTTP/AXD contract).
+
+## ARM dependency workstream prepared (2026-10-30)
+- Done: Added isolated ARM-DEP-00..04 task blocks for characterization, `a58`, Validate state/cache/results, targeted execution, and AxPut integration, plus a blocked two-step AxData handoff.
+- Decisions: ARM behavior is proven first; existing AxData slice order is unchanged, final validation remains mandatory, and ARM field-value log redaction is out of scope.
+- Tests: Documentation-only planning; no product code changed and no tests run.
+- Next: Run ARM-DEP-00 in a fresh chat. Postman: not applicable.
+
+## ARM-DEP-00 done (2026-10-30)
+- Done: Added a package-free ARM characterization harness and report for Pascal `a58`, full Validate scans, cache/static state, parser failure, and AxPut parity; no production behavior changed.
+- Decisions: Preserve downstream closure semantics as evidence only; structured/text parity, unknowns, cycles, label deduplication, and grid-row meaning remain ARM-DEP-01 stop conditions.
+- Tests: 14 harness checks and serial AxTstructData build pass; exact counters are non-grid 3/3/2 and two-row grid 6/6/4 for refresh/validate/query.
+- Next: Resolve the recorded ARM-DEP-01 ambiguities before implementing dependency projection. Postman: not applicable.
+
+## ARM-DEP-01 done (2026-10-30)
+- Done: AxStructDef now projects structured/text `a58` into typed direct/reverse metadata, compatibility closure/frame state, and diagnostics/fallback status; Validate/AxPut execution is unchanged.
+- Decisions: Ordinary `e/s/f/ag` edges traverse in declaration order; `fg/dc/lbl/sf` remain distinct; unresolved targets and cycles require compatibility fallback; structured legacy `Dependents` stays Pascal-compatible.
+- Tests: 17 package-free harness checks pass; serial no-restore AxStructDef, AxValidate, and AxTstructData builds pass with pre-existing NU1701 suppressed at the command line.
+- Next: ARM-DEP-02 Validate state, cache, and result contracts. Postman: not applicable.
+
+## ARM-DEP-02 done (2026-10-30)
+- Done: Validate now owns invocation results and mutable state per runtime, exposes additive structured submission/dependency/final results, and replaces linked-fill query results per runtime/source/row/change wave without changing AxPut sequencing.
+- Decisions: Existing string/`OperationResult` methods remain compatibility wrappers; valid transaction cache entries survive until their exact source/row query is re-executed, and existing ARM field-value logging is unchanged.
+- Tests: 18 package-free dependency checks pass; serial no-restore AxStructDef, AxValidate, and AxTstructData builds pass with pre-existing NU1701 suppressed.
+- Next: ARM-DEP-03 dependency-directed refresh and validation. Postman: not applicable.
+
+## ARM-DEP-03 done (2026-10-30)
+- Done: Added additive targeted dependency refresh/validation and full-current-value validation while preserving load, `ValidateData`, AxPut, and GenMap compatibility behavior.
+- Decisions: Traverse resolved `e/s/f/ag` edges breadth-first; stop on unchanged value/source ID or failed validation; unsupported metadata/row mappings use warned compatibility fallback; ARM field-value logging is unchanged.
+- Tests: 25 package-free dependency checks pass; serial no-restore AxStructDef, AxValidate, and AxTstructData builds pass with pre-existing NU1701 suppressed.
+- Next: ARM-DEP-04 AxPut integration and ARM regression. Postman: not applicable.
+
+## ARM-DEP-04 done (2026-10-30)
+- Done: AxPut create/edit/GenMap now run targeted dependency work and mandatory cache-aware final validation before SQL; no AxData code or public contract changed.
+- Decisions: Submission/GenMap value operations supply roots, deletes do not; exact runtime/source/row query results may be reused, and `AXV-DEP-W001` makes compatibility fallback trace-observable. ARM field-value logging is unchanged.
+- Tests: 31 ARM checks and serial AxStructDef/AxValidate/AxTstructData builds pass; serial AxData build plus 158 unit, 39 integration, and 139 contract tests pass.
+- Next: Use the recorded stable ARM contract for the separately approved AxData handoff. Postman: not applicable.
+
+## AXD-DEP-01 done (2026-10-30)
+- Done: AxData now projects authoritative ARM direct dependency kinds, declaration order, frame/grid/popup scope, resolution state, diagnostics, fallback status, and metadata-derived evaluation order; the Cexp/Deps heuristic is removed.
+- Decisions: Application owns dependency DTOs; resolved ordinary edges define stable topological field order, while ARM diagnostics and compatibility fallback remain authoritative. No ARM-11.4 change.
+- Tests: Serial no-restore build passes; 158 unit, 39 integration, and 143 contract tests pass; the empty E2E project exits successfully.
+- Next: Plan AXD-DEP-02 consumption of targeted ARM validation. Postman: not applicable.
+
+## AXD-DEP-02 done (2026-10-30)
+- Done: Set now consumes ARM targeted refresh/validation with exact frame/row roots, safe structured errors, compatibility fallback, reject-safe rebuild, and transitive ordinary-edge blocking; no ARM-11.4 change.
+- Decisions: One runtime/hydration/readback and the operation-wide gate remain; full Save validation stays separate. Controlled 10-field work fell from 10 to 0 full sweeps and 40 to 10 refreshes; SQL stayed 0 and field-stage latency was 56.538 ms versus 30.805 ms.
+- Tests: AxData build passes without rebuilding locked ARM references; 159 unit, 39 integration, and 145 contract tests pass; E2E exits successfully; measured gate wait was 68.342 ms.
+- Next: Continue remaining M1.6 readiness work. Postman: not applicable.
+
+## ARM-DEP-04 create initialization fix done (2026-11-02)
+- Done: New AxPut/GenMap runtimes now run one full initialization refresh; hydrated edits stay targeted, with a one-pass fallback when a required parent row is not initialized.
+- Decision: Match Delphi parent-bound presence semantics; do not retry business validation failures or repeat final validation after a successful compatibility pass.
+- Tests: 32 ARM checks, 159 unit, 39 integration, and 147 contract tests pass in Release without restore.
+- Postman: not applicable; no HTTP request/response shape or AXD error code changed.
+
+## ARM-DEP-04 parser/selection follow-up done (2026-11-02)
+- Done: Decimal `abs` works, absent direct optional variables preserve the existing field without stale parser reads, and targeted select roots restore normalized source IDs before edit SQL.
+- Decision: Match working Delphi optional-variable behavior narrowly; compound/other parser failures remain fail-closed.
+- Tests: 32 ARM checks, 159 unit, 39 integration, and 150 contract tests pass in Release without restore.
+- Postman: not applicable; no HTTP request/response shape or AXD error code changed.
+
+## ARM-DEP-04 targeted grid-row binding fix done (2026-11-02)
+- Done: Targeted roots and dependents now register their exact grid row before parser/query evaluation, preventing row 2 values from contaminating row 1 GenMap validation.
+- Decision: Restore Delphi `RegRow` parity without adding a full-refresh fallback or widening the dependency traversal.
+- Tests: focused two-row regression, 32 ARM checks, 159 unit, 39 integration, and 151 contract tests pass; serial build succeeds with existing warnings only.
+- Postman: not applicable; no HTTP request/response shape or AXD error code changed.
+
+## Validate parser guards restored (2026-11-02)
+- Done: Restored all five fail-closed evaluation guards and the narrow missing-direct-variable compatibility branch after a local edit removed them.
+- Tests: 8 focused regressions, 32 ARM checks, 151 contract, 159 unit, and 39 integration tests pass; serial build succeeds with existing warnings only.
+- Postman: not applicable; no HTTP request/response shape or AXD error code changed.
+
+## AxGet zero source-ID normalization fix done (2026-11-02)
+- Done: Existing-record Init now normalizes legacy AxGet `0` source-ID companions to nullable AxData source IDs while rejecting negative, overflow, and nonnumeric values; no ARM-11.4 change.
+- Tests: 12 focused AxGet contracts, 159 unit, and 39 integration tests pass; serial build succeeds. Full contracts retain two unrelated field-engine guard failures (`Failed_validation_expression...` first: expected Fail, actual Success).
+- Postman: not applicable; no HTTP request/response shape or AXD error code changed.

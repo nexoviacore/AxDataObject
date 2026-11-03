@@ -1,0 +1,17 @@
+<root>
+  <branch cat="field">
+    <a1>branch</a1>
+    <a58>
+      <f>branchid,source_state,prefix,sgstoutputtax,cgstoutputtax,igstoutputtax,vatoutputtax</f>
+      <s>rate</s>
+    </a58>
+  </branch>
+  <branchid cat="field"><a1>branchid</a1></branchid>
+  <source_state cat="field"><a1>source_state</a1></source_state>
+  <prefix cat="field"><a1>prefix</a1></prefix>
+  <sgstoutputtax cat="field"><a1>sgstoutputtax</a1></sgstoutputtax>
+  <cgstoutputtax cat="field"><a1>cgstoutputtax</a1></cgstoutputtax>
+  <igstoutputtax cat="field"><a1>igstoutputtax</a1></igstoutputtax>
+  <vatoutputtax cat="field"><a1>vatoutputtax</a1></vatoutputtax>
+  <rate cat="field"><a1>rate</a1></rate>
+</root>

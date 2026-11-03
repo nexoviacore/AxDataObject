@@ -27,7 +27,9 @@ public sealed record AxpertStructDefSnapshot(
     string? UpdatedOn = null,
     string? LegacyVersionNo = null,
     bool RunTimeStruct = false,
-    bool RunTimeMode = false);
+    bool RunTimeMode = false,
+    bool RequiresCompatibilityFallback = false,
+    IReadOnlyList<FieldDependencyDiagnostic>? DependencyDiagnostics = null);
 
 public sealed class AxpertStructDefSource(IAxpertRuntimeContextFactory contextFactory) : IAxpertStructDefSource
 {
@@ -87,18 +89,21 @@ public sealed class AxpertStructDefSource(IAxpertRuntimeContextFactory contextFa
             return null;
         }
 
+        var dependencyProjection = ProjectDependencyMetadata(definition.DependencyMetadata);
         var first = rowResult.data.Rows[0];
         return new AxpertStructDefSnapshot(
             tenantId,
             transId,
             contentHash,
-            ProjectContainers(definition),
-            ProjectDependencies(definition),
+            ProjectContainers(definition, dependencyProjection.Dependencies),
+            dependencyProjection.Dependencies,
             ProjectFillGrids(definition),
             Text(first, "updatedon"),
             definition.Struct?.VersionNo,
             definition.Struct?.RunTimeStruct ?? Flag(first, "runtimetstruct"),
-            definition.Struct?.RunTimeMode ?? Flag(first, "runtimemod"));
+            definition.Struct?.RunTimeMode ?? Flag(first, "runtimemod"),
+            dependencyProjection.RequiresCompatibilityFallback,
+            dependencyProjection.Diagnostics);
     }
 
     internal static string? ComputeContentHash(SQLResult result)
@@ -123,7 +128,9 @@ public sealed class AxpertStructDefSource(IAxpertRuntimeContextFactory contextFa
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 
-    private static IReadOnlyList<DataContainerDefinition> ProjectContainers(LegacyStructDef definition) =>
+    private static IReadOnlyList<DataContainerDefinition> ProjectContainers(
+        LegacyStructDef definition,
+        IReadOnlyList<FieldDependency> dependencies) =>
         definition.Frames!
             .OrderBy(frame => frame.FrameNo)
             .Select(frame =>
@@ -138,41 +145,155 @@ public sealed class AxpertStructDefSource(IAxpertRuntimeContextFactory contextFa
                     fields.Select(field => new FieldDefinition(
                         field.FieldName,
                         frame.ReadOnly || field.Readonly)).ToArray(),
-                    fields.Select(field => field.FieldName).ToArray());
+                    DeriveEvaluationOrder(
+                        frame.FrameNo,
+                        fields.Select(field => field.FieldName).ToArray(),
+                        dependencies));
             })
             .ToArray();
 
-    private static IReadOnlyList<FieldDependency> ProjectDependencies(LegacyStructDef definition)
+    internal static DependencyProjection ProjectDependencyMetadata(TDependencyMetadata? metadata)
     {
-        var fields = definition.Flds!;
-        var dependencies = new List<FieldDependency>();
-        foreach (var target in fields.Where(field => !string.IsNullOrWhiteSpace(field.Cexp)))
+        if (metadata is null)
         {
-            var declaredSources = target.Deps.Where(name => !string.IsNullOrWhiteSpace(name)).ToArray();
-            var sources = declaredSources.Length > 0
-                ? fields.Where(field => declaredSources.Contains(
-                    field.FieldName,
-                    StringComparer.OrdinalIgnoreCase))
-                : fields.Where(field => ReferencesField(target.Cexp, field.FieldName));
-            foreach (var source in sources)
+            return new DependencyProjection(
+                [],
+                true,
+                [new FieldDependencyDiagnostic(
+                    FieldDependencyDiagnosticKind.MalformedMetadata,
+                    string.Empty,
+                    string.Empty,
+                    "Authoritative ARM dependency metadata is unavailable.")]);
+        }
+
+        var dependencies = metadata.Edges
+            .OrderBy(edge => edge.DeclarationOrder)
+            .Select(edge => new FieldDependency(
+                $"dc{edge.SourceFrameNo}",
+                edge.Source,
+                edge.TargetFrameNo is int targetFrameNo ? $"dc{targetFrameNo}" : null,
+                edge.Target,
+                MapDependencyKind(edge.Kind),
+                edge.DeclarationOrder,
+                edge.SourceFrameNo,
+                edge.TargetFrameNo,
+                edge.SourceIsGrid,
+                edge.TargetIsGrid,
+                edge.TargetIsPopup,
+                edge.IsResolved))
+            .ToArray();
+        var diagnostics = metadata.Diagnostics
+            .Select(diagnostic => new FieldDependencyDiagnostic(
+                MapDiagnosticKind(diagnostic.Kind),
+                diagnostic.Source,
+                diagnostic.Target,
+                diagnostic.Message))
+            .ToArray();
+
+        return new DependencyProjection(
+            dependencies,
+            metadata.RequiresCompatibilityFallback,
+            diagnostics);
+    }
+
+    internal static IReadOnlyList<string> DeriveEvaluationOrder(
+        int frameNo,
+        IReadOnlyList<string> fieldsInDisplayOrder,
+        IReadOnlyList<FieldDependency> dependencies)
+    {
+        var comparer = StringComparer.OrdinalIgnoreCase;
+        var fieldOrder = fieldsInDisplayOrder
+            .Select((field, index) => (field, index))
+            .ToDictionary(item => item.field, item => item.index, comparer);
+        var ordinaryEdges = dependencies
+            .Where(dependency =>
+                dependency.IsResolved &&
+                dependency.SourceFrameNo == frameNo &&
+                dependency.TargetFrameNo == frameNo &&
+                IsOrdinary(dependency.Kind) &&
+                fieldOrder.ContainsKey(dependency.SourceField) &&
+                fieldOrder.ContainsKey(dependency.TargetField))
+            .OrderBy(dependency => dependency.DeclarationOrder)
+            .ToArray();
+        var outgoing = fieldsInDisplayOrder.ToDictionary(
+            field => field,
+            _ => new List<FieldDependency>(),
+            comparer);
+        var indegree = fieldsInDisplayOrder.ToDictionary(field => field, _ => 0, comparer);
+        var metadataOrder = fieldsInDisplayOrder.ToDictionary(field => field, _ => int.MaxValue, comparer);
+
+        foreach (var edge in ordinaryEdges)
+        {
+            if (outgoing[edge.SourceField].Any(existing =>
+                    comparer.Equals(existing.TargetField, edge.TargetField)))
             {
-                dependencies.Add(new FieldDependency(
-                    $"dc{source.FrameNo}",
-                    source.FieldName,
-                    $"dc{target.FrameNo}",
-                    target.FieldName,
-                    target.Cexp));
+                continue;
+            }
+
+            outgoing[edge.SourceField].Add(edge);
+            indegree[edge.TargetField]++;
+            metadataOrder[edge.SourceField] = Math.Min(metadataOrder[edge.SourceField], edge.DeclarationOrder);
+            metadataOrder[edge.TargetField] = Math.Min(metadataOrder[edge.TargetField], edge.DeclarationOrder);
+        }
+
+        var ready = fieldsInDisplayOrder
+            .Where(field => indegree[field] == 0)
+            .ToList();
+        var result = new List<string>(fieldsInDisplayOrder.Count);
+        while (ready.Count > 0)
+        {
+            ready.Sort((left, right) =>
+            {
+                var metadataComparison = metadataOrder[left].CompareTo(metadataOrder[right]);
+                return metadataComparison != 0
+                    ? metadataComparison
+                    : fieldOrder[left].CompareTo(fieldOrder[right]);
+            });
+            var source = ready[0];
+            ready.RemoveAt(0);
+            result.Add(source);
+
+            foreach (var edge in outgoing[source].OrderBy(edge => edge.DeclarationOrder))
+            {
+                indegree[edge.TargetField]--;
+                if (indegree[edge.TargetField] == 0)
+                {
+                    ready.Add(edge.TargetField);
+                }
             }
         }
 
-        return dependencies;
+        result.AddRange(fieldsInDisplayOrder.Where(field => !result.Contains(field, comparer)));
+        return result;
     }
 
-    private static bool ReferencesField(string expression, string fieldName) =>
-        Regex.IsMatch(
-            expression,
-            $"(?<![A-Za-z0-9_]){Regex.Escape(fieldName)}(?![A-Za-z0-9_])",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static bool IsOrdinary(FieldDependencyKind kind) => kind is
+        FieldDependencyKind.Expression or
+        FieldDependencyKind.Select or
+        FieldDependencyKind.Fill or
+        FieldDependencyKind.Aggregate;
+
+    private static FieldDependencyKind MapDependencyKind(TDependencyKind kind) => kind switch
+    {
+        TDependencyKind.Expression => FieldDependencyKind.Expression,
+        TDependencyKind.Select => FieldDependencyKind.Select,
+        TDependencyKind.Fill => FieldDependencyKind.Fill,
+        TDependencyKind.Aggregate => FieldDependencyKind.Aggregate,
+        TDependencyKind.FillGrid => FieldDependencyKind.FillGrid,
+        TDependencyKind.DataContainer => FieldDependencyKind.DataContainer,
+        TDependencyKind.Label => FieldDependencyKind.Label,
+        TDependencyKind.DependentFrame => FieldDependencyKind.DependentFrame,
+        TDependencyKind.Grid => FieldDependencyKind.Grid,
+        _ => throw new InvalidOperationException("The ARM dependency kind is unsupported.")
+    };
+
+    private static FieldDependencyDiagnosticKind MapDiagnosticKind(TDependencyDiagnosticKind kind) => kind switch
+    {
+        TDependencyDiagnosticKind.MalformedMetadata => FieldDependencyDiagnosticKind.MalformedMetadata,
+        TDependencyDiagnosticKind.UnresolvedReference => FieldDependencyDiagnosticKind.UnresolvedReference,
+        TDependencyDiagnosticKind.Cycle => FieldDependencyDiagnosticKind.Cycle,
+        _ => throw new InvalidOperationException("The ARM dependency diagnostic kind is unsupported.")
+    };
 
     private static IReadOnlyList<FillGridDefinition> ProjectFillGrids(LegacyStructDef definition) =>
         definition.Fgs!
@@ -233,4 +354,9 @@ public sealed class AxpertStructDefSource(IAxpertRuntimeContextFactory contextFa
         string.Equals(Text(row, column), "Y", StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeSchema(string value) => value.Split('~', 2)[0];
+
+    internal sealed record DependencyProjection(
+        IReadOnlyList<FieldDependency> Dependencies,
+        bool RequiresCompatibilityFallback,
+        IReadOnlyList<FieldDependencyDiagnostic> Diagnostics);
 }

@@ -1,0 +1,34 @@
+<root>
+  <a cat="field"><a1>a</a1><a58><f>b,c</f></a58></a>
+  <b cat="field"><a1>b</a1><a58><s>d</s></a58></b>
+  <c cat="field"><a1>c</a1><a58><e>D</e></a58></c>
+  <d cat="field"><a1>d</a1></d>
+
+  <duplicate cat="field"><a1>duplicate</a1><a58><e>target</e><s>TARGET</s></a58></duplicate>
+  <target cat="field"><a1>target</a1></target>
+
+  <unknown cat="field"><a1>unknown</a1><a58><f>missing</f></a58></unknown>
+  <cycle_a cat="field"><a1>cycle_a</a1><a58><f>cycle_b</f></a58></cycle_a>
+  <cycle_b cat="field"><a1>cycle_b</a1><a58><f>cycle_a</f></a58></cycle_b>
+
+  <special cat="field">
+    <a1>special</a1>
+    <a58>
+      <ag>aggregate_target</ag>
+      <fg>lookup_grid</fg>
+      <dc>2</dc>
+      <lbl>total,total</lbl>
+      <sf>2,3</sf>
+    </a58>
+  </special>
+  <aggregate_target cat="field"><a1>aggregate_target</a1></aggregate_target>
+
+  <legacy cat="field"><a1>legacy</a1><a58>elegacy_target,slegacy_target,d2,ggrid_target</a58></legacy>
+  <legacy_target cat="field"><a1>legacy_target</a1></legacy_target>
+
+  <grid_source cat="field"><a1>grid_source</a1><a58><f>grid_target,popup_target</f></a58></grid_source>
+  <grid_target cat="field"><a1>grid_target</a1></grid_target>
+  <popup_target cat="field"><a1>popup_target</a1></popup_target>
+
+  <no_dependencies cat="field"><a1>no_dependencies</a1></no_dependencies>
+</root>

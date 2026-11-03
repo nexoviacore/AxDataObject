@@ -24,32 +24,25 @@ namespace AxValidate
         public List<string> errorList;
         private bool onDataLoad;
         private TStringList ParentList { get; set; }
-        private static List<string> ErrorLog;
+        private readonly List<string> ErrorLog;
         public string DynamicSql { get; set; }
         public bool dependCall { get; set; }
         private string ErrorStr { get; set; }
-        private string WarningMsg { get; set; }
-        private bool IsError { get; set; }
-        private bool DeleteRowOnError { get; set; }
         private Int64 idValue;
-        private static string sName;
-        private static dynamic connection;
-        private static System.ComponentModel.IComponent owner;
         public AxStructDefUtils _utils;
         private string FieldValue;
         private bool Validation; // placeholder (Delphi had global flags)
         private bool Loading;
-        private static IConfiguration _config;
         private bool nonDynamicFilterSQL;
-        private static string transid;
         private ValidateHelper _validateHelper;
-        private static int LinkSearchCol;
-        private static int actualRowNo;
-        private static bool forPickList;
+        private int LinkSearchCol;
+        private int actualRowNo;
+        private bool forPickList;
         private readonly IConfiguration _configuration;
         private IARMLogTraceService _traceService;
-        private Dictionary<string, SQLResult> fillSqlResultDict;
-        private string keyName;
+        private readonly Guid validationRuntimeId;
+        private long changeWave;
+        private readonly Dictionary<QueryResultCacheKey, QueryResultCacheEntry> fillSqlResultDict;
         public string MatchErrorStr;
         public string _appName;
         public string _connectionString;
@@ -78,9 +71,6 @@ namespace AxValidate
             // 4. Error and logging setup
             ErrorLog = new List<string>();
             ErrorStr = string.Empty;
-            WarningMsg = string.Empty;
-            IsError = true;
-            DeleteRowOnError = false;
             // 5. Helper objects
 
             ParentList = new TStringList();
@@ -89,7 +79,8 @@ namespace AxValidate
             validateResultList = new List<string>();
             errorList = new List<string>();
             validationPassed = true;
-            fillSqlResultDict = new Dictionary<string, SQLResult>();
+            validationRuntimeId = Guid.NewGuid();
+            fillSqlResultDict = new Dictionary<QueryResultCacheKey, QueryResultCacheEntry>();
 
             // 7. Flags
             Validation = true;
@@ -101,6 +92,18 @@ namespace AxValidate
             nonDynamicFilterSQL = false;
             FieldValue = "";
             onDataLoad = false;
+        }
+
+        private readonly record struct QueryResultCacheKey(
+            Guid RuntimeId,
+            string SourceField,
+            int RowNo
+        );
+
+        private sealed class QueryResultCacheEntry
+        {
+            public long ChangeWave { get; init; }
+            public SQLResult Result { get; init; }
         }
 
         public async Task<bool> InitValidateAsync(string pName = "")
@@ -185,6 +188,835 @@ namespace AxValidate
         public List<string> GetErrorLog()
         {
             return ErrorLog;
+        }
+
+        private void BeginValidationInvocation()
+        {
+            validationPassed = true;
+            validateResultList = new List<string>();
+            errorList = new List<string>();
+            ErrorLog.Clear();
+            ErrorStr = string.Empty;
+            changeWave++;
+        }
+
+        private QueryResultCacheKey GetQueryResultCacheKey(string sourceField, int rowNo)
+        {
+            return new QueryResultCacheKey(
+                validationRuntimeId,
+                sourceField.Trim().ToLowerInvariant(),
+                rowNo
+            );
+        }
+
+        private void InvalidateQueryResult(string sourceField, int rowNo, long invalidationWave)
+        {
+            QueryResultCacheKey cacheKey = GetQueryResultCacheKey(sourceField, rowNo);
+            if (fillSqlResultDict.TryGetValue(cacheKey, out QueryResultCacheEntry entry)
+                && entry.ChangeWave <= invalidationWave)
+            {
+                fillSqlResultDict.Remove(cacheKey);
+            }
+        }
+
+        private void StoreQueryResult(string sourceField, int rowNo, SQLResult result)
+        {
+            QueryResultCacheKey cacheKey = GetQueryResultCacheKey(sourceField, rowNo);
+            fillSqlResultDict[cacheKey] = new QueryResultCacheEntry
+            {
+                ChangeWave = changeWave,
+                Result = result
+            };
+        }
+
+        private bool TryGetQueryResult(string sourceField, int rowNo, out SQLResult result)
+        {
+            if (fillSqlResultDict.TryGetValue(
+                GetQueryResultCacheKey(sourceField, rowNo),
+                out QueryResultCacheEntry entry
+            ))
+            {
+                result = entry.Result;
+                return true;
+            }
+
+            result = null;
+            return false;
+        }
+
+        private static ValidationAddress GetValidationAddress(TField field, int rowNo)
+        {
+            return new ValidationAddress
+            {
+                DataContainer = $"dc{field.FrameNo}",
+                FrameNo = field.FrameNo,
+                RowNo = rowNo,
+                FieldName = field.FieldName
+            };
+        }
+
+        private static void AddValidationEntry(
+            ValidationInvocationResult invocation,
+            TField field,
+            int rowNo,
+            ValidationResultCategory category,
+            ValidationResultSeverity severity,
+            string code,
+            string message
+        )
+        {
+            invocation?.Add(new ValidationResultEntry
+            {
+                Address = GetValidationAddress(field, rowNo),
+                Category = category,
+                Severity = severity,
+                Code = code,
+                Message = message
+            });
+        }
+
+        private sealed class FieldExecutionState
+        {
+            public string Value { get; init; } = string.Empty;
+            public long IdValue { get; init; }
+        }
+
+        private sealed class ValidationPreparationResult
+        {
+            public bool Success { get; init; }
+            public string Message { get; init; } = string.Empty;
+
+            public static ValidationPreparationResult Passed()
+            {
+                return new ValidationPreparationResult { Success = true };
+            }
+
+            public static ValidationPreparationResult Failed(string message)
+            {
+                return new ValidationPreparationResult
+                {
+                    Success = false,
+                    Message = message
+                };
+            }
+        }
+
+        private sealed class ValidationWorkItem
+        {
+            public TField Field { get; init; }
+            public int RowNo { get; init; }
+        }
+
+        private FieldExecutionState GetFieldExecutionState(TField field, int rowNo)
+        {
+            int fieldIndex = _sdef.GetFieldIndex(field.FieldName, rowNo);
+            if (fieldIndex < 0)
+            {
+                return new FieldExecutionState
+                {
+                    Value = _sdef.GetFieldValue(field, rowNo) ?? string.Empty
+                };
+            }
+
+            FieldRec record = (FieldRec)_sdef.FieldList[fieldIndex];
+            return new FieldExecutionState
+            {
+                Value = record.Value ?? string.Empty,
+                IdValue = record.IdValue
+            };
+        }
+
+        private static string GetValidationWorkKey(TField field, int rowNo)
+        {
+            return $"{field.FrameNo}|{rowNo}|{field.FieldName.Trim().ToLowerInvariant()}";
+        }
+
+        private bool TryResolveValidationAddress(
+            ValidationAddress address,
+            out ValidationWorkItem workItem,
+            out string error
+        )
+        {
+            workItem = null;
+            error = string.Empty;
+
+            if (address == null || string.IsNullOrWhiteSpace(address.FieldName))
+            {
+                error = "Changed field address must include a field name.";
+                return false;
+            }
+
+            TField field = _sdef.GetField(address.FieldName);
+            if (field == null)
+            {
+                error = $"Changed field '{address.FieldName}' is not present in the structure.";
+                return false;
+            }
+
+            if (address.FrameNo != 0 && address.FrameNo != field.FrameNo)
+            {
+                error = $"Changed field '{field.FieldName}' does not belong to frame {address.FrameNo}.";
+                return false;
+            }
+
+            string expectedDataContainer = $"dc{field.FrameNo}";
+            if (!string.IsNullOrWhiteSpace(address.DataContainer)
+                && !string.Equals(
+                    address.DataContainer,
+                    expectedDataContainer,
+                    StringComparison.OrdinalIgnoreCase
+                ))
+            {
+                error = $"Changed field '{field.FieldName}' does not belong to {address.DataContainer}.";
+                return false;
+            }
+
+            TFrame frame = _sdef.Frames.FirstOrDefault(item => item.FrameNo == field.FrameNo);
+            if (frame == null)
+            {
+                error = $"Frame {field.FrameNo} for changed field '{field.FieldName}' is unavailable.";
+                return false;
+            }
+
+            int rowNo = address.RowNo <= 0 ? 1 : address.RowNo;
+            if (!frame.AsGrid && rowNo != 1)
+            {
+                error = $"Non-grid field '{field.FieldName}' must use row 1.";
+                return false;
+            }
+
+            if (frame.AsGrid && rowNo > _sdef.GetRowCount(frame.FrameNo))
+            {
+                error = $"Grid row {rowNo} for changed field '{field.FieldName}' is unavailable.";
+                return false;
+            }
+
+            workItem = new ValidationWorkItem
+            {
+                Field = field,
+                RowNo = rowNo
+            };
+            return true;
+        }
+
+        private static bool IsOrdinaryDependency(TDependencyKind kind)
+        {
+            return kind is TDependencyKind.Expression
+                or TDependencyKind.Select
+                or TDependencyKind.Fill
+                or TDependencyKind.Aggregate;
+        }
+
+        private bool IsUnavailableDirectVariableExpression(string expression)
+        {
+            string variableName = expression?.Trim() ?? string.Empty;
+            return Regex.IsMatch(variableName, @"^[A-Za-z_][A-Za-z0-9_]*$")
+                && !_parser.VarList.Contains(variableName, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static bool RequiresRootSelectionResolution(TField field)
+        {
+            return field.TxtSelection
+                || (field.ModeofEntry == "select"
+                    && field.SQL != null
+                    && !string.IsNullOrWhiteSpace(field.SQLText));
+        }
+
+        private bool HasUnavailableDependencyParent(
+            ValidationWorkItem item,
+            out string reason
+        )
+        {
+            reason = string.Empty;
+            foreach (TDependencyEdge edge in _sdef.GetDependencyParents(item.Field.FieldName))
+            {
+                if (!IsOrdinaryDependency(edge.Kind))
+                    continue;
+
+                if (!edge.IsResolved)
+                {
+                    reason = $"Dependency parent '{edge.Source}' for '{item.Field.FieldName}' is unresolved.";
+                    return true;
+                }
+
+                TField parent = _sdef.GetField(edge.Source);
+                if (parent == null)
+                {
+                    reason = $"Dependency parent '{edge.Source}' for '{item.Field.FieldName}' is unavailable.";
+                    return true;
+                }
+
+                int parentRowNo;
+                if (!parent.AsGrid)
+                {
+                    parentRowNo = 1;
+                }
+                else if (item.Field.AsGrid && parent.FrameNo == item.Field.FrameNo)
+                {
+                    parentRowNo = item.RowNo;
+                }
+                else
+                {
+                    reason = $"Dependency parent '{parent.FieldName}' for '{item.Field.FieldName}' has an unsupported row mapping.";
+                    return true;
+                }
+
+                // Pascal FieldParentsBound treats a service parent as bound once its row value
+                // exists in StoreData, even when the compatible value is empty or numeric zero.
+                if (_sdef.GetFieldIndex(parent.FieldName, parentRowNo) < 0)
+                {
+                    reason = $"Dependency parent '{parent.FieldName}' for '{item.Field.FieldName}' has not been initialized.";
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool RequiresTargetedCompatibilityFallback(
+            IReadOnlyList<ValidationWorkItem> roots,
+            out string reason
+        )
+        {
+            reason = string.Empty;
+            if (_sdef.DependencyMetadata == null)
+                return false;
+
+            if (_sdef.DependencyMetadata.RequiresCompatibilityFallback)
+            {
+                reason = "Dependency metadata contains an unresolved reference, malformed entry, or cycle.";
+                return true;
+            }
+
+            Queue<ValidationWorkItem> pending = new();
+            HashSet<string> visited = new(StringComparer.OrdinalIgnoreCase);
+            foreach (ValidationWorkItem root in roots)
+            {
+                if (HasUnavailableDependencyParent(root, out reason))
+                    return true;
+
+                if (visited.Add(GetValidationWorkKey(root.Field, root.RowNo)))
+                    pending.Enqueue(root);
+            }
+
+            while (pending.Count > 0)
+            {
+                ValidationWorkItem source = pending.Dequeue();
+                foreach (TDependencyEdge edge in _sdef.GetDirectDependencies(source.Field.FieldName))
+                {
+                    if (!edge.IsResolved || !IsOrdinaryDependency(edge.Kind))
+                    {
+                        reason = $"Dependency '{source.Field.FieldName}' to '{edge.Target}' requires compatibility execution.";
+                        return true;
+                    }
+
+                    TField target = _sdef.GetField(edge.Target);
+                    if (target == null)
+                    {
+                        reason = $"Dependency target '{edge.Target}' is unavailable.";
+                        return true;
+                    }
+
+                    TFrame targetFrame = _sdef.Frames.FirstOrDefault(
+                        frame => frame.FrameNo == target.FrameNo
+                    );
+                    if (targetFrame == null
+                        || targetFrame.Popup
+                        || (targetFrame.AsGrid
+                            && (!source.Field.AsGrid || source.Field.FrameNo != target.FrameNo)))
+                    {
+                        reason = $"Dependency target '{target.FieldName}' has an unsupported row mapping.";
+                        return true;
+                    }
+
+                    int targetRowNo = target.AsGrid ? source.RowNo : 1;
+                    ValidationWorkItem targetWork = new()
+                    {
+                        Field = target,
+                        RowNo = targetRowNo
+                    };
+                    if (HasUnavailableDependencyParent(targetWork, out reason))
+                        return true;
+
+                    if (visited.Add(GetValidationWorkKey(target, targetRowNo)))
+                        pending.Enqueue(targetWork);
+                }
+            }
+
+            return false;
+        }
+
+        private async Task<ValidationPreparationResult> PrepareCurrentValidationDataAsync(
+            TField field,
+            int rowNo,
+            string currentValue,
+            bool reusePreparedQueryResult
+        )
+        {
+            sqlResult = null;
+            DynamicSql = string.Empty;
+
+            if (field.FromList)
+            {
+                sqlResult = new SQLResult();
+                sqlResult.data = _utils.AddCsvValuesToDataTable(
+                    sqlResult.data,
+                    field.fromListValues
+                );
+                return ValidationPreparationResult.Passed();
+            }
+
+            bool needsCurrentQuery = !string.IsNullOrEmpty(currentValue)
+                && (field.TxtSelection
+                || (field.ModeofEntry == "select"
+                    && field.SQL != null
+                    && !string.IsNullOrWhiteSpace(field.SQLText)));
+            if (!needsCurrentQuery)
+                return ValidationPreparationResult.Passed();
+
+            if (reusePreparedQueryResult
+                && TryGetQueryResult(field.FieldName, rowNo, out SQLResult preparedResult))
+            {
+                sqlResult = preparedResult;
+                if (sqlResult == null
+                    || sqlResult.data == null
+                    || !string.IsNullOrEmpty(sqlResult.error))
+                {
+                    return ValidationPreparationResult.Failed(
+                        $"Current selection data is unavailable for '{field.FieldName}'."
+                    );
+                }
+
+                if (!string.IsNullOrEmpty(currentValue) && sqlResult.data.Rows.Count == 0)
+                {
+                    return ValidationPreparationResult.Failed(
+                        $"Current selection is invalid for '{field.FieldName}'."
+                    );
+                }
+
+                return ValidationPreparationResult.Passed();
+            }
+
+            if (field.TxtSelection)
+            {
+                InvalidateQueryResult(field.FieldName, rowNo, changeWave);
+                sqlResult = await _validateHelper.ValidatePickList(
+                    field,
+                    currentValue,
+                    rowNo,
+                    ErrorStr,
+                    actualRowNo,
+                    forPickList,
+                    nonDynamicFilterSQL
+                );
+            }
+            else
+            {
+                DynamicSql = field.DynamicParams ? field.SQLText : string.Empty;
+                InvalidateQueryResult(field.FieldName, rowNo, changeWave);
+                sqlResult = await _validateHelper.QueryOpen(
+                    field,
+                    rowNo,
+                    field.FieldName,
+                    currentValue,
+                    forPickList,
+                    nonDynamicFilterSQL,
+                    DynamicSql,
+                    string.Empty
+                );
+                if (sqlResult?.data != null && field.FilterCols.Count > 0)
+                    _validateHelper.FilterCDS(field, sqlResult, rowNo);
+            }
+
+            if (sqlResult == null
+                || sqlResult.data == null
+                || !string.IsNullOrEmpty(sqlResult.error))
+            {
+                InvalidateQueryResult(field.FieldName, rowNo, changeWave);
+                return ValidationPreparationResult.Failed(
+                    $"Current selection data is unavailable for '{field.FieldName}'."
+                );
+            }
+
+            StoreQueryResult(field.FieldName, rowNo, sqlResult);
+            if (!string.IsNullOrEmpty(currentValue) && sqlResult.data.Rows.Count == 0)
+            {
+                return ValidationPreparationResult.Failed(
+                    $"Current selection is invalid for '{field.FieldName}'."
+                );
+            }
+
+            return ValidationPreparationResult.Passed();
+        }
+
+        private async Task<bool> ValidateCurrentFieldAsync(
+            ValidationInvocationResult invocation,
+            TField field,
+            int rowNo,
+            ValidationResultCategory category,
+            string errorCode,
+            string successCode,
+            bool prepareCurrentData,
+            bool reusePreparedQueryResult = false
+        )
+        {
+            FieldExecutionState state = GetFieldExecutionState(field, rowNo);
+            FieldValue = state.Value;
+            idValue = state.IdValue;
+            ErrorStr = string.Empty;
+
+            if (prepareCurrentData)
+            {
+                ValidationPreparationResult preparation;
+                try
+                {
+                    preparation = await PrepareCurrentValidationDataAsync(
+                        field,
+                        rowNo,
+                        state.Value,
+                        reusePreparedQueryResult
+                    );
+                }
+                catch (Exception ex)
+                {
+                    preparation = ValidationPreparationResult.Failed(
+                        $"Unable to obtain current validation data for '{field.FieldName}': {ex.Message}"
+                    );
+                }
+
+                if (!preparation.Success)
+                {
+                    validationPassed = false;
+                    validateResultList.Add(preparation.Message);
+                    AddValidationEntry(
+                        invocation,
+                        field,
+                        rowNo,
+                        category,
+                        ValidationResultSeverity.Error,
+                        errorCode,
+                        preparation.Message
+                    );
+                    return false;
+                }
+
+                state = GetFieldExecutionState(field, rowNo);
+                FieldValue = state.Value;
+                idValue = state.IdValue;
+            }
+
+            bool valid;
+            try
+            {
+                valid = await RapidValidateDataCore(
+                    field,
+                    rowNo,
+                    string.IsNullOrEmpty(FieldValue),
+                    invocation
+                );
+            }
+            catch (Exception ex)
+            {
+                ErrorStr = $"Validation failed for '{field.FieldName}': {ex.Message}";
+                valid = false;
+            }
+
+            if (!valid)
+            {
+                validationPassed = false;
+                string message = string.IsNullOrEmpty(ErrorStr)
+                    ? $"Validation failed for '{field.FieldName}'."
+                    : ErrorStr;
+                validateResultList.Add(message);
+                AddValidationEntry(
+                    invocation,
+                    field,
+                    rowNo,
+                    category,
+                    ValidationResultSeverity.Error,
+                    errorCode,
+                    message
+                );
+                return false;
+            }
+
+            AddValidationEntry(
+                invocation,
+                field,
+                rowNo,
+                category,
+                ValidationResultSeverity.Processed,
+                successCode,
+                "Field validation completed."
+            );
+            return true;
+        }
+
+        private async Task<ValidationInvocationResult> UseCompatibilityValidationAsync(
+            string reason,
+            IEnumerable<ValidationResultEntry> addressErrors
+        )
+        {
+            ValidationInvocationResult invocation = await ValidateDataDetailed();
+            invocation.Add(new ValidationResultEntry
+            {
+                Category = ValidationResultCategory.Dependency,
+                Severity = ValidationResultSeverity.Warning,
+                Code = "AXV-DEP-W001",
+                Message = reason
+            });
+            foreach (ValidationResultEntry error in addressErrors)
+                invocation.Add(error);
+
+            validationPassed = invocation.Success;
+            return invocation;
+        }
+
+        public async Task<ValidationInvocationResult> RefreshAndValidateChangesAsync(
+            IReadOnlyList<ValidationAddress> changedFields
+        )
+        {
+            List<ValidationResultEntry> addressErrors = new();
+            List<ValidationWorkItem> roots = new();
+            HashSet<string> rootKeys = new(StringComparer.OrdinalIgnoreCase);
+
+            if (changedFields == null || changedFields.Count == 0)
+            {
+                ValidationInvocationResult emptyInvocation = new();
+                emptyInvocation.Add(new ValidationResultEntry
+                {
+                    Category = ValidationResultCategory.Dependency,
+                    Severity = ValidationResultSeverity.Error,
+                    Code = "AXV-DEP-001",
+                    Message = "At least one changed field address is required."
+                });
+                emptyInvocation.LegacyMessage = "At least one changed field address is required.";
+                validationPassed = false;
+                return emptyInvocation;
+            }
+
+            foreach (ValidationAddress address in changedFields)
+            {
+                if (!TryResolveValidationAddress(address, out ValidationWorkItem root, out string error))
+                {
+                    addressErrors.Add(new ValidationResultEntry
+                    {
+                        Address = address ?? new ValidationAddress(),
+                        Category = ValidationResultCategory.Dependency,
+                        Severity = ValidationResultSeverity.Error,
+                        Code = "AXV-DEP-003",
+                        Message = error
+                    });
+                    continue;
+                }
+
+                if (rootKeys.Add(GetValidationWorkKey(root.Field, root.RowNo)))
+                    roots.Add(root);
+            }
+
+            if (RequiresTargetedCompatibilityFallback(roots, out string fallbackReason))
+            {
+                return await UseCompatibilityValidationAsync(fallbackReason, addressErrors);
+            }
+
+            BeginValidationInvocation();
+            ValidationInvocationResult invocation = new();
+            foreach (ValidationResultEntry error in addressErrors)
+                invocation.Add(error);
+
+            Queue<ValidationWorkItem> pending = new();
+            HashSet<string> processed = new(StringComparer.OrdinalIgnoreCase);
+            foreach (ValidationWorkItem root in roots)
+            {
+                processed.Add(GetValidationWorkKey(root.Field, root.RowNo));
+                RegRow(root.Field.FrameNo, root.RowNo);
+                bool selectionResolved = false;
+                if (RequiresRootSelectionResolution(root.Field))
+                {
+                    try
+                    {
+                        FieldValue = await RefreshFieldAsync(root.Field, root.RowNo);
+                        if (sqlResult != null && !string.IsNullOrEmpty(sqlResult.error))
+                        {
+                            throw new InvalidOperationException(
+                                $"Selection query failed for '{root.Field.FieldName}'."
+                            );
+                        }
+
+                        FieldExecutionState resolved = GetFieldExecutionState(
+                            root.Field,
+                            root.RowNo
+                        );
+                        idValue = resolved.IdValue;
+                        selectionResolved = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        validationPassed = false;
+                        string message = $"Submitted selection refresh failed for '{root.Field.FieldName}': {ex.Message}";
+                        validateResultList.Add(message);
+                        AddValidationEntry(
+                            invocation,
+                            root.Field,
+                            root.RowNo,
+                            ValidationResultCategory.Dependency,
+                            ValidationResultSeverity.Error,
+                            "AXV-DEP-006",
+                            message
+                        );
+                        continue;
+                    }
+                }
+
+                if (await ValidateCurrentFieldAsync(
+                    invocation,
+                    root.Field,
+                    root.RowNo,
+                    ValidationResultCategory.FinalValidation,
+                    "AXV-VAL-002",
+                    "AXV-VAL-000",
+                    !selectionResolved
+                ))
+                {
+                    pending.Enqueue(root);
+                }
+            }
+
+            while (pending.Count > 0)
+            {
+                ValidationWorkItem source = pending.Dequeue();
+                foreach (TDependencyEdge edge in _sdef.GetDirectDependencies(source.Field.FieldName))
+                {
+                    TField target = _sdef.GetField(edge.Target);
+                    int targetRowNo = target.AsGrid ? source.RowNo : 1;
+                    string targetKey = GetValidationWorkKey(target, targetRowNo);
+                    if (!processed.Add(targetKey))
+                        continue;
+
+                    RegRow(target.FrameNo, targetRowNo);
+                    FieldExecutionState before = GetFieldExecutionState(target, targetRowNo);
+                    string refreshResult;
+                    try
+                    {
+                        refreshResult = await RefreshFieldAsync(target, targetRowNo);
+                        if (sqlResult != null && !string.IsNullOrEmpty(sqlResult.error))
+                            throw new InvalidOperationException(
+                                $"Dependency query failed for '{target.FieldName}'."
+                            );
+                    }
+                    catch (Exception ex)
+                    {
+                        validationPassed = false;
+                        string message = $"Dependency refresh failed for '{target.FieldName}': {ex.Message}";
+                        validateResultList.Add(message);
+                        AddValidationEntry(
+                            invocation,
+                            target,
+                            targetRowNo,
+                            ValidationResultCategory.Dependency,
+                            ValidationResultSeverity.Error,
+                            "AXV-DEP-004",
+                            message
+                        );
+                        continue;
+                    }
+
+                    FieldValue = refreshResult;
+                    FieldExecutionState after = GetFieldExecutionState(target, targetRowNo);
+                    idValue = after.IdValue;
+                    if (!await ValidateCurrentFieldAsync(
+                        invocation,
+                        target,
+                        targetRowNo,
+                        ValidationResultCategory.Dependency,
+                        "AXV-DEP-005",
+                        "AXV-DEP-000",
+                        false
+                    ))
+                    {
+                        continue;
+                    }
+
+                    bool changed = !string.Equals(
+                        before.Value,
+                        after.Value,
+                        StringComparison.Ordinal
+                    ) || before.IdValue != after.IdValue;
+                    if (changed)
+                    {
+                        pending.Enqueue(new ValidationWorkItem
+                        {
+                            Field = target,
+                            RowNo = targetRowNo
+                        });
+                    }
+                }
+            }
+
+            invocation.LegacyMessage = string.Join(";", validateResultList);
+            validationPassed = invocation.Success;
+            return invocation;
+        }
+
+        public Task<ValidationInvocationResult> ValidateCurrentValuesAsync()
+        {
+            return ValidateCurrentValuesAsync(false);
+        }
+
+        public async Task<ValidationInvocationResult> ValidateCurrentValuesAsync(
+            bool reusePreparedQueryResults
+        )
+        {
+            BeginValidationInvocation();
+            ValidationInvocationResult invocation = new();
+            int processedFields = 0;
+
+            if (_sdef.Flds == null || _sdef.Flds.Count == 0)
+            {
+                invocation.Add(new ValidationResultEntry
+                {
+                    Category = ValidationResultCategory.FinalValidation,
+                    Severity = ValidationResultSeverity.Error,
+                    Code = "AXV-VAL-001",
+                    Message = "No fields to validate."
+                });
+                invocation.LegacyMessage = "No fields to validate.";
+                validationPassed = false;
+                return invocation;
+            }
+
+            foreach (TFrame frame in _sdef.Frames)
+            {
+                int totalRowCount = frame.AsGrid ? _sdef.GetRowCount(frame.FrameNo) : 1;
+                for (int rowNo = 1; rowNo <= totalRowCount; rowNo++)
+                {
+                    RegRow(frame.FrameNo, rowNo);
+                    int startFieldIndex = frame.StartIndex;
+                    int endFieldIndex = frame.StartIndex + frame.FieldCount;
+                    for (int fieldIndex = startFieldIndex; fieldIndex < endFieldIndex; fieldIndex++)
+                    {
+                        TField field = _sdef.Flds[fieldIndex];
+                        processedFields++;
+                        await ValidateCurrentFieldAsync(
+                            invocation,
+                            field,
+                            rowNo,
+                            ValidationResultCategory.FinalValidation,
+                            "AXV-VAL-005",
+                            "AXV-VAL-000",
+                            true,
+                            reusePreparedQueryResults
+                        );
+                    }
+                }
+            }
+
+            invocation.LegacyMessage = processedFields > 0
+                ? string.Join(";", validateResultList)
+                : "No values were submitted";
+            validationPassed = invocation.Success;
+            onDataLoad = false;
+            return invocation;
         }
 
         public async Task<string> RefreshFieldAsync(TField xfld, int rowNo)
@@ -277,11 +1109,11 @@ namespace AxValidate
                             //_traceService.LogMessage("Evaluating - " + xfld.Cexp);
                             _traceService.LogMessage("Evaluating - " + xfld.Cexp);
 
-                            if (!_parser.Evaluate(xfld.Cexp))
-                                throw new InvalidOperationException($"Unable to evaluate expression for {xfld.FieldName}.");
-
+                            if (_parser.Evaluate(xfld.Cexp))
+                            {
                             result = _parser.Value;
                             result = result.Trim('"'); // Note: Parser returns quoted string this needs to be fixed in Parser
+                            }
                         }
 
                         if (!xfld.Cl_multiselect) // This Condition (Cl_multiselect) is added to avoid multiselect field refresh
@@ -327,13 +1159,12 @@ namespace AxValidate
                     DynamicSql = "";
                 if (xfld.TxtSelection)
                 {
+                    InvalidateQueryResult(xfld.FieldName, rowNo, changeWave);
                     if (result == "" && !string.IsNullOrEmpty(xfld.Cexp))
                     {
                         _traceService.LogMessage("Evaluating - " + xfld.Cexp);
 
-                        if (!_parser.Evaluate(xfld.Cexp))
-                            throw new InvalidOperationException($"Unable to evaluate expression for {xfld.FieldName}.");
-
+                        if (_parser.Evaluate(xfld.Cexp))
                         result = _parser.Value.ToString();
                     }
                     if (result != "")
@@ -356,13 +1187,8 @@ namespace AxValidate
                         _sdef.SubmitValue(xfld.FieldName, rowNo, result, "", idValue, 0, 0);
                         _parser.RegisterVar(xfld.FieldName, xfld.DataType[0].ToString(), result);
                     }
-                    keyName = $"{xfld.FieldName} + {rowNo}";
-
-                    if (!fillSqlResultDict.ContainsKey(keyName))
-                    {
-                        fillSqlResultDict.Add(keyName, sqlResult);
-
-                    }
+                    if (sqlResult != null)
+                        StoreQueryResult(xfld.FieldName, rowNo, sqlResult);
                 }
                 else if (xfld.ModeofEntry == "accept")
                 {
@@ -428,6 +1254,7 @@ namespace AxValidate
                         DynamicSql = xfld.SQLText;
                     else
                         DynamicSql = "";
+                    InvalidateQueryResult(xfld.FieldName, rowNo, changeWave);
                     sqlResult = await _validateHelper.QueryOpen(
                         xfld,
                         rowNo,
@@ -446,9 +1273,7 @@ namespace AxValidate
                     if (result == "" && !string.IsNullOrEmpty(xfld.Cexp))
                         {
                         _traceService.LogMessage("Evaluating - " + xfld.Cexp);
-                        if (!_parser.Evaluate(xfld.Cexp))
-                            throw new InvalidOperationException($"Unable to evaluate expression for {xfld.FieldName}.");
-
+                        if (_parser.Evaluate(xfld.Cexp))
                         result = _parser.Value.ToString();
 
                     }
@@ -501,12 +1326,7 @@ namespace AxValidate
                     _sdef.SubmitValue(xfld.FieldName, rowNo, result, "", idValue, 0, 0);
                     _parser.RegisterVar(xfld.FieldName, xfld.DataType[0].ToString(), result);
 
-                    keyName = $"{xfld.FieldName} + {rowNo}";
-
-                    if (!fillSqlResultDict.ContainsKey(keyName))
-                    {
-                        fillSqlResultDict.Add(keyName, sqlResult);
-                    }
+                    StoreQueryResult(xfld.FieldName, rowNo, sqlResult);
                 }
             }
             else if (xfld.ModeofEntry == "fill")
@@ -543,9 +1363,7 @@ namespace AxValidate
 
 
 
-                keyName = $"{xfld.LinkField} + {rowNo}";
-
-                if (fillSqlResultDict.TryGetValue(keyName, out sqlResult!)) { }
+                if (TryGetQueryResult(xfld.LinkField, rowNo, out sqlResult)) { }
                 else
                 {
                     if (sqlResult != null && sqlResult.data != null)
@@ -645,6 +1463,7 @@ namespace AxValidate
                     {
                         // Query executed successfully and returned at least one row (DataTable is "active")
                         //sqlResult = await _validateHelper.QueryOpen(xfld, rowNo, "0", _sdef.GetFieldValue(xfld.LinkField, rowNo), forPickList, nonDynamicFilterSQL, DynamicSql);
+                        InvalidateQueryResult(linkFld.FieldName, rowNo, changeWave);
                         sqlResult = await _validateHelper.QueryOpen(
                             linkFld,
                             rowNo,
@@ -655,6 +1474,7 @@ namespace AxValidate
                             DynamicSql,
                             ""
                         );
+                        StoreQueryResult(linkFld.FieldName, rowNo, sqlResult);
                     }
 
                     if (sqlResult.data != null)
@@ -811,11 +1631,8 @@ namespace AxValidate
                 }
                 _sdef.SubmitValue(xfld.FieldName, rowNo, result, "", 0, 0, 0);
                 _parser.RegisterVar(xfld.FieldName, xfld.DataType[0].ToString(), result);
-                keyName = $"{xfld.LinkField} + {rowNo}";
-                if (!fillSqlResultDict.ContainsKey(keyName) && sqlResult != null)
-                {
-                    fillSqlResultDict.Add(keyName, sqlResult);
-                }
+                if (sqlResult != null)
+                    StoreQueryResult(xfld.LinkField, rowNo, sqlResult);
             }
             else if (xfld.ModeofEntry == "autogenerate")
             {
@@ -848,12 +1665,12 @@ namespace AxValidate
                 {
                     _traceService.LogMessage("Evaluating - " + xfld.Cexp);
 
-                    if (!_parser.Evaluate(xfld.Cexp))
-                        throw new InvalidOperationException($"Unable to evaluate expression for {xfld.FieldName}.");
-
-                    result = _parser.Value.ToString();
-                    result = result.Trim('"'); // Note: This Needs to be handled in parser
-                    _validateHelper.SetUsedQuotedStrProp(xfld);
+                    if (_parser.Evaluate(xfld.Cexp))
+                    {
+                        result = _parser.Value.ToString();
+                        result = result.Trim('"'); // Note: This Needs to be handled in parser
+                        _validateHelper.SetUsedQuotedStrProp(xfld);
+                    }
                     if (xfld.DataType != "n")
                     {
                         _sdef.SubmitValue(xfld.FieldName, rowNo, result, "", 0, 0, 0);
@@ -1014,7 +1831,17 @@ namespace AxValidate
             return result;
         }
 
-        public async Task<bool> RapidValidateData(TField fld, int rowNo, bool fieldEmpty)
+        public Task<bool> RapidValidateData(TField fld, int rowNo, bool fieldEmpty)
+        {
+            return RapidValidateDataCore(fld, rowNo, fieldEmpty, null);
+        }
+
+        private async Task<bool> RapidValidateDataCore(
+            TField fld,
+            int rowNo,
+            bool fieldEmpty,
+            ValidationInvocationResult invocation
+        )
         {
             bool result = true;
             bool deleteRowOnError = false;
@@ -1059,14 +1886,7 @@ namespace AxValidate
                 if (!fld.Cvalexp.IsNullOrEmpty())
                 {
                     _traceService.LogMessage($"Evaluating - {fld.Cvalexp}");
-                    if (!_parser.Evaluate(fld.Cvalexp))
-                    {
-                        ErrorStr =
-                            $"Unable to evaluate validation expression for {_validateHelper.GetFldPrompt(fld, rowNo, actualRowNo)}.";
-                        LogError(ErrorStr, rowNo);
-                        return false;
-                    }
-
+                    _parser.Evaluate(fld.Cvalexp);
                     string m = _parser.Value.ToString();
                     if (m.ToLower() != "t" && !string.IsNullOrEmpty(m))
                     {
@@ -1078,6 +1898,15 @@ namespace AxValidate
                             warningMsg =
                                 $"{_validateHelper.GetFldPrompt(fld, rowNo, actualRowNo)} {m}";
                             LogError($"Warning: {warningMsg}", rowNo, fieldValue);
+                            AddValidationEntry(
+                                invocation,
+                                fld,
+                                rowNo,
+                                ValidationResultCategory.FinalValidation,
+                                ValidationResultSeverity.Warning,
+                                "AXV-VAL-W001",
+                                warningMsg
+                            );
                         }
 
                         if (m.ToLower() == "f")
@@ -1459,6 +2288,25 @@ namespace AxValidate
 
         public async Task<string> SubmitValueOnLoad(TStructRequestDto dataJson)
         {
+            ValidationInvocationResult details = await SubmitValueOnLoadDetailed(dataJson);
+            return details.LegacyMessage;
+        }
+
+        public async Task<ValidationInvocationResult> SubmitValueOnLoadDetailed(
+            TStructRequestDto dataJson
+        )
+        {
+            BeginValidationInvocation();
+            ValidationInvocationResult invocation = new();
+            invocation.LegacyMessage = await SubmitValueOnLoadCore(dataJson, invocation);
+            return invocation;
+        }
+
+        private async Task<string> SubmitValueOnLoadCore(
+            TStructRequestDto dataJson,
+            ValidationInvocationResult invocation
+        )
+        {
             try
             {
                 // Add null checks for critical dependencies
@@ -1484,6 +2332,13 @@ namespace AxValidate
                 if (dataJson.Submitdata == null)
                 {
                     _traceService.LogMessage("Invalid data structure: missing submitdata");
+                    invocation.Add(new ValidationResultEntry
+                    {
+                        Category = ValidationResultCategory.Submission,
+                        Severity = ValidationResultSeverity.Error,
+                        Code = "AXV-SUB-001",
+                        Message = "Invalid data structure: missing submitdata"
+                    });
                     return "Invalid data structure: missing submitdata";
                 }
 
@@ -1676,6 +2531,15 @@ namespace AxValidate
                                 _parser.RegisterVar(varName, varType, fieldValue);
 
                                 processedFields++;
+                                AddValidationEntry(
+                                    invocation,
+                                    fp,
+                                    rowNo,
+                                    ValidationResultCategory.Submission,
+                                    ValidationResultSeverity.Processed,
+                                    "AXV-SUB-000",
+                                    "Field baseline submitted."
+                                );
                                 _traceService.LogMessage(
                                     $"Successfully processed field '{fieldName}' = '{fieldValue}'"
                                 );
@@ -1687,6 +2551,19 @@ namespace AxValidate
                                 );
                                 // Optionally add to results list if you have one
                                 validateResultList.Add($"Error processing field {fieldName}: {fieldEx.Message}");
+                                TField failedField = _sdef.GetField(fieldName);
+                                if (failedField != null)
+                                {
+                                    AddValidationEntry(
+                                        invocation,
+                                        failedField,
+                                        rowNo,
+                                        ValidationResultCategory.Submission,
+                                        ValidationResultSeverity.Error,
+                                        "AXV-SUB-002",
+                                        $"Error processing field {fieldName}: {fieldEx.Message}"
+                                    );
+                                }
                             }
                         }
                         // End of INNER LOOP (Fields within a row)
@@ -1714,6 +2591,13 @@ namespace AxValidate
             {
                 _traceService.LogError($"Error in Submitting Fields to StructDef; Error: {ex.Message}");
                 validateResultList.Add($"Error in Submitting Fields to StructDef: {ex.Message}");
+                invocation.Add(new ValidationResultEntry
+                {
+                    Category = ValidationResultCategory.Submission,
+                    Severity = ValidationResultSeverity.Error,
+                    Code = "AXV-SUB-003",
+                    Message = $"Error in Submitting Fields to StructDef: {ex.Message}"
+                });
                 return $"Error: {ex.Message}";
             }
         }
@@ -1750,6 +2634,23 @@ namespace AxValidate
 
         public async Task<string> SubmitValue(TStructRequestDto dataJson)
         {
+            ValidationInvocationResult details = await SubmitValueDetailed(dataJson);
+            return details.LegacyMessage;
+        }
+
+        public async Task<ValidationInvocationResult> SubmitValueDetailed(TStructRequestDto dataJson)
+        {
+            BeginValidationInvocation();
+            ValidationInvocationResult invocation = new();
+            invocation.LegacyMessage = await SubmitValueCore(dataJson, invocation);
+            return invocation;
+        }
+
+        private async Task<string> SubmitValueCore(
+            TStructRequestDto dataJson,
+            ValidationInvocationResult invocation
+        )
+        {
             try
             {
                 // Add null checks for critical dependencies
@@ -1776,6 +2677,13 @@ namespace AxValidate
                 if (dataJson.Submitdata == null)
                 {
                     _traceService.LogMessage("Invalid data structure: missing submitdata");
+                    invocation.Add(new ValidationResultEntry
+                    {
+                        Category = ValidationResultCategory.Submission,
+                        Severity = ValidationResultSeverity.Error,
+                        Code = "AXV-SUB-001",
+                        Message = "Invalid data structure: missing submitdata"
+                    });
                     return "Invalid data structure: missing submitdata";
                 }
 
@@ -2008,6 +2916,15 @@ namespace AxValidate
                                 _parser.RegisterVar(varName, varType, fieldValue);
 
                                 processedFields++;
+                                AddValidationEntry(
+                                    invocation,
+                                    fp,
+                                    rowNo,
+                                    ValidationResultCategory.Submission,
+                                    ValidationResultSeverity.Processed,
+                                    "AXV-SUB-000",
+                                    "Field value submitted."
+                                );
                                 _traceService.LogMessage(
                                     $"Successfully processed field '{fieldName}' = '{fieldValue}'"
                                 );
@@ -2023,6 +2940,19 @@ namespace AxValidate
                                 // Optionally add to results list if you have one
                                 validateResultList.Add($"Error processing field {fieldName}: {fieldEx.Message}");
                                 errorList.Add($"Error submitting field {fieldName} with value '{fieldValue}': {fieldEx.Message}");
+                                TField failedField = _sdef.GetField(fieldName);
+                                if (failedField != null)
+                                {
+                                    AddValidationEntry(
+                                        invocation,
+                                        failedField,
+                                        rowNo,
+                                        ValidationResultCategory.Submission,
+                                        ValidationResultSeverity.Error,
+                                        "AXV-SUB-002",
+                                        $"Error processing field {fieldName}: {fieldEx.Message}"
+                                    );
+                                }
                             }
                         }
                         // End of INNER LOOP (Fields within a row)
@@ -2080,6 +3010,13 @@ namespace AxValidate
             {
                 _traceService.LogError($"Error in Submitting Fields to StructDef; Error: {ex.Message}");
                 validateResultList.Add($"Error in Submitting Fields to StructDef: {ex.Message}");
+                invocation.Add(new ValidationResultEntry
+                {
+                    Category = ValidationResultCategory.Submission,
+                    Severity = ValidationResultSeverity.Error,
+                    Code = "AXV-SUB-003",
+                    Message = $"Error in Submitting Fields to StructDef: {ex.Message}"
+                });
                 return $"Error: {ex.Message}";
             }
         }
@@ -2358,6 +3295,7 @@ namespace AxValidate
 
         public async Task<string> RefreshField()
         {
+            BeginValidationInvocation();
             string result = string.Empty;
             int fieldCount = 0;
             string processField = "";
@@ -2477,6 +3415,7 @@ namespace AxValidate
 
         public async Task<string> RefreshFieldsOnLoad()
         {
+            BeginValidationInvocation();
             string result = string.Empty;
 
             string processField = "";
@@ -2646,7 +3585,19 @@ namespace AxValidate
 
         public async Task<OperationResult> ValidateData()
         {
-            OperationResult result = new OperationResult();
+            ValidationInvocationResult details = await ValidateDataDetailed();
+            return new OperationResult
+            {
+                Result = details.Success ? "Success" : "Fail",
+                Message = details.LegacyMessage,
+                Details = details
+            };
+        }
+
+        public async Task<ValidationInvocationResult> ValidateDataDetailed()
+        {
+            BeginValidationInvocation();
+            ValidationInvocationResult invocation = new();
             string processField = "";
             string fieldResult = string.Empty;
             int processedFields = 0;
@@ -2656,9 +3607,17 @@ namespace AxValidate
             if (_sdef.Flds == null || _sdef.Flds.Count == 0)
             {
                 _traceService.LogMessage("No fields found in StructDef.Flds");
-                result.Result = "Fail";
-                result.Message = "No fields to refresh";
-                return result;
+                invocation.Add(new ValidationResultEntry
+                {
+                    Category = ValidationResultCategory.FinalValidation,
+                    Severity = ValidationResultSeverity.Error,
+                    Code = "AXV-VAL-001",
+                    Message = "No fields to refresh"
+                });
+                validationPassed = false;
+                onDataLoad = false;
+                invocation.LegacyMessage = "No fields to refresh";
+                return invocation;
             }
 
             for (int fidx = 0; fidx < _sdef.Frames.Count; fidx++)
@@ -2690,6 +3649,8 @@ namespace AxValidate
                         for (int fldIdx = startFldIdx; fldIdx <= endFldIdx - 1; fldIdx++)
                         {
                             TField field = _sdef.Flds[fldIdx];
+                            ValidationResultCategory currentCategory =
+                                ValidationResultCategory.Dependency;
 
                             try
                             {
@@ -2708,6 +3669,7 @@ namespace AxValidate
                                 // Assigning the current Value
                                 fieldResult = _sdef.GetFieldValue(field, rowNo);
 
+                                int dependencyErrorStart = validateResultList.Count;
                                 fieldResult = await RefreshFieldAsync(field, rowNo);
 
                                 FieldValue = fieldResult;
@@ -2716,19 +3678,31 @@ namespace AxValidate
                                     $"RefreshFieldAsync completed for {field.FieldName}: '{fieldResult}'"
                                 );
 
-                                //if (!string.IsNullOrEmpty(fieldResult))
-                                //{
-                                //    result.Message = fieldResult;
-                                //}
+                                foreach (string dependencyError in validateResultList
+                                    .Skip(dependencyErrorStart)
+                                    .ToList())
+                                {
+                                    AddValidationEntry(
+                                        invocation,
+                                        field,
+                                        rowNo,
+                                        ValidationResultCategory.Dependency,
+                                        ValidationResultSeverity.Error,
+                                        "AXV-DEP-002",
+                                        dependencyError
+                                    );
+                                }
 
                                 // Perform validation for the current field
+                                currentCategory = ValidationResultCategory.FinalValidation;
                                 _traceService.LogMessage(
                                     $"Calling RapidValidateData for {field.FieldName}"
                                 );
-                                bool validationResult = await RapidValidateData(
+                                bool validationResult = await RapidValidateDataCore(
                                     field,
                                     rowNo,
-                                    string.IsNullOrEmpty(fieldResult)
+                                    string.IsNullOrEmpty(fieldResult),
+                                    invocation
                                 );
 
                                 _traceService.LogMessage(
@@ -2740,32 +3714,55 @@ namespace AxValidate
                                     _traceService.LogMessage(
                                         $"Validation failed for field {field.FieldName}: {ErrorStr}"
                                     );
-                                    validateResultList.Add($"Validation Fail: Field '{field.FieldName}' (Row No: {rowNo}) with value '{fieldResult}'; {ErrorStr}");
-
-                                    result.Message = $"Validation Fail: Field '{field.FieldName}' (Row No: {rowNo}) with value '{fieldResult}'; {ErrorStr}";
+                                    string message =
+                                        $"Validation Fail: Field '{field.FieldName}' (Row No: {rowNo}); {ErrorStr}";
+                                    validateResultList.Add(message);
+                                    AddValidationEntry(
+                                        invocation,
+                                        field,
+                                        rowNo,
+                                        ValidationResultCategory.FinalValidation,
+                                        ValidationResultSeverity.Error,
+                                        "AXV-VAL-002",
+                                        message
+                                    );
                                     validationPassed = false;
                                 }
                                 else
                                 {
                                     _traceService.LogMessage($"Validation Success: Field '{field.FieldName}' (Row No: {rowNo}) with value '{fieldResult}' is Valid.");
-                                    //result.Message = string.Join(
-                                    //    "; " + Environment.NewLine,
-                                    //    validateResultList
-                                    //);
+                                    AddValidationEntry(
+                                        invocation,
+                                        field,
+                                        rowNo,
+                                        ValidationResultCategory.FinalValidation,
+                                        ValidationResultSeverity.Processed,
+                                        "AXV-VAL-000",
+                                        "Field validation completed."
+                                    );
                                 }
                             }
                             catch (Exception ex)
                             {
                                 validationPassed = false;
-                                validateResultList.Add($"Validation Fail: Field '{processField}' (Row No: {rowNo}) with value '{fieldResult}'; {ex.Message}");
+                                string message =
+                                    $"Validation Fail: Field '{processField}' (Row No: {rowNo}); {ex.Message}";
+                                validateResultList.Add(message);
+                                AddValidationEntry(
+                                    invocation,
+                                    field,
+                                    rowNo,
+                                    currentCategory,
+                                    ValidationResultSeverity.Error,
+                                    currentCategory == ValidationResultCategory.Dependency
+                                        ? "AXV-DEP-001"
+                                        : "AXV-VAL-003",
+                                    message
+                                );
                                 _traceService.LogMessage(
                                     $"Validation failed for field {processField}: {ex.Message}"
                                 );
                                 _traceService.LogError($"Error processing field {processField}: {ex.Message}{Environment.NewLine}{ex.StackTrace}");
-
-                                result.Message = $"Validation Fail: Field '{processField}' (Row No: {rowNo}) with value '{fieldResult}'; {ex.Message}";
-
-                                //result = $"Successfully processed {processedFields} fields. Details: {string.Join("; " + Environment.NewLine, validateResultList)}";
                             }
                         }
                     }
@@ -2775,40 +3772,34 @@ namespace AxValidate
                 catch (Exception ex)
                 {
                     validationPassed = false;
-                    validateResultList.Add($"Error processing field {processField}");
+                    string message = $"Error processing field {processField}";
+                    validateResultList.Add(message);
+                    invocation.Add(new ValidationResultEntry
+                    {
+                        Address = new ValidationAddress
+                        {
+                            DataContainer = $"dc{_sdef.Frames[fidx].FrameNo}",
+                            FrameNo = _sdef.Frames[fidx].FrameNo,
+                            FieldName = processField
+                        },
+                        Category = ValidationResultCategory.FinalValidation,
+                        Severity = ValidationResultSeverity.Error,
+                        Code = "AXV-VAL-004",
+                        Message = message
+                    });
                     _traceService.LogError($"Error processing field {processField}: Error: {ex.Message}");
-                    result.Message = $"Error processing field {processField}";
-                    //result = $"Successfully processed {processedFields} fields. Details: {string.Join("; " + Environment.NewLine, validateResultList)}";
                 }
             }
 
             _traceService.LogMessage(
-                $"RefreshField completed for row  Processed {processedFields} fields. Final result: {result}"
+                $"RefreshField completed for row  Processed {processedFields} fields. Success: {invocation.Success}"
             );
-
-            if (processedFields > 0)
-            {
-
-
-                if (!validationPassed)
-                {
-                    result.Result = "Fail";
-                }
-                else
-                {
-                    result.Result = "Success";
-                }
-
-                result.Message = string.Join(";", validateResultList);
-
-                return result;
-            }
-            else
-            {
-                result.Result = "Success";
-                result.Message = "No values were submitted";
-                return result;
-            }
+            validationPassed = invocation.Success;
+            onDataLoad = false;
+            invocation.LegacyMessage = processedFields > 0
+                ? string.Join(";", validateResultList)
+                : "No values were submitted";
+            return invocation;
         }
 
         public async Task<

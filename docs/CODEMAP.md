@@ -18,7 +18,7 @@ src/AxData.Application/Init/InitializeAxData.cs: authorized new/existing transac
 src/AxData.Application/Query/QueryAxData.cs: tenant-scoped permission-filtered complete/selective query projection with exact-StructDef fail-closed validation
 src/AxData.Application/Set/SetAxData.cs: authorized Set orchestration, exact-StructDef validation, row actions, locking, version checks, and single CAS persistence
 src/AxData.Application/Authorization: pure tenant, actor-relation, operation-permission, and editability authorization policy
-src/AxData.Application/Ports/Axpert: Axpert-neutral StructDef (including evaluation order), load, field evaluation, FillGrid, and transaction-writer contracts
+src/AxData.Application/Ports/Axpert: Axpert-neutral StructDef (including authoritative dependency metadata and evaluation order), load, field evaluation, FillGrid, and transaction-writer contracts
 src/AxData.Application/Ports: tenant-scoped state store, trusted user context, clock, and ObjectId generation contracts
 src/AxData.Application/Ports/Identity/AxpertSession.cs: trusted live ARM session resolution contract with internal site metadata
 src/AxData.Application/Ports/Observability/OperationalLogging.cs: infrastructure-neutral safe event schema, levels, detail modes, and sink port
@@ -42,7 +42,7 @@ src/AxData.Infrastructure/Sql: ARMCommon-backed snapshot writes, three-provider 
 src/AxData.Integration.Axpert: adapters for StructDef/Validate/Parser/AxGet/AxPut
 src/AxData.Integration.Axpert/AxpertRecordKeyMapping.cs: consistent business-key and record-ID mapping for legacy permission/AxGet calls
 src/AxData.Integration.Axpert/StructDef/AxpertStructDefProvider.cs: immutable versioned StructDef provider and tenant-aware cache over an authoritative Axpert source
-src/AxData.Integration.Axpert/StructDef/AxpertStructDefSource.cs: tenant-scoped current tstructs loader, raw-props SHA-256 revision, cache-bypassed StructDef projection
+src/AxData.Integration.Axpert/StructDef/AxpertStructDefSource.cs: tenant-scoped current tstructs loader, raw-props SHA-256 revision, and authoritative ARM dependency projection
 src/AxData.Integration.Axpert/Runtime/AxpertRuntimeContextFactory.cs: scoped trusted review session, tenant/schema validation, and Axpert Utils initialization
 src/AxData.Integration.Axpert/Runtime/AxpertSessionResolver.cs: live per-request ARM Redis session, tenant schema, user, role, and SITENO resolution
 src/AxData.Integration.Axpert/Runtime/ProductionAxpertRuntimeContextFactory.cs: authenticated session-backed production Utils runtime for real adapters

@@ -353,11 +353,10 @@ namespace AxParserApp
             }
             return string.Empty;
         }
-        private int PAbs(object param)
+        private decimal PAbs(object param)
         {
-            int x = Convert.ToInt32(param);
-            int abs = Math.Abs(x);
-            return abs;
+            decimal value = Convert.ToDecimal(param, CultureInfo.InvariantCulture);
+            return Math.Abs(value);
         }
         // private string IfFun(object val1, object val2, object val3)
         // {

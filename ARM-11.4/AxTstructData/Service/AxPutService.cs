@@ -591,6 +591,126 @@ namespace AxTstructData
             return new APIResult(true, $"Structure loaded successfully for transid {putData.TransId}");
         }
 
+        private static IReadOnlyList<ValidationAddress> GetSubmittedFieldAddresses(
+            ValidationInvocationResult submissionResult
+        )
+        {
+            return submissionResult.ProcessedFields
+                .Where(entry => entry.Category == ValidationResultCategory.Submission)
+                .Select(entry => entry.Address)
+                .ToList();
+        }
+
+        private static IReadOnlyList<ValidationAddress> GetGenMapFieldAddresses(
+            StructDef.GenMapBuffer buffer,
+            int recordNo
+        )
+        {
+            bool singleRecord = buffer.RecordCount == 1;
+            List<ValidationAddress> addresses = new();
+            HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+
+            foreach (StructDef.GenMapOp operation in buffer.Ops)
+            {
+                if (operation.Kind != StructDef.GenMapOpKind.Value)
+                    continue;
+
+                if (!singleRecord
+                    && (operation.AsGrid ? recordNo != 1 : operation.RowNo != recordNo))
+                {
+                    continue;
+                }
+
+                int rowNo = singleRecord || operation.AsGrid ? operation.RowNo : 1;
+                string key = $"{operation.FrameNo}|{rowNo}|{operation.FieldName}";
+                if (!seen.Add(key))
+                    continue;
+
+                addresses.Add(new ValidationAddress
+                {
+                    DataContainer = $"dc{operation.FrameNo}",
+                    FrameNo = operation.FrameNo,
+                    RowNo = rowNo,
+                    FieldName = operation.FieldName
+                });
+            }
+
+            return addresses;
+        }
+
+        private static string GetValidationMessage(ValidationInvocationResult result)
+        {
+            if (!string.IsNullOrWhiteSpace(result.LegacyMessage))
+                return result.LegacyMessage;
+
+            return string.Join(";", result.Errors.Select(entry => entry.Message));
+        }
+
+        private async Task<OperationResult> ValidateForPersistence(
+            IReadOnlyList<ValidationAddress> changedFields,
+            bool requiresInitializationRefresh = false
+        )
+        {
+            if (requiresInitializationRefresh)
+            {
+                ValidationInvocationResult initializationResult =
+                    await _validate.ValidateDataDetailed();
+                return new OperationResult
+                {
+                    Result = initializationResult.Success ? "Success" : "Fail",
+                    Message = GetValidationMessage(initializationResult),
+                    Details = initializationResult
+                };
+            }
+
+            if (changedFields.Count > 0)
+            {
+                ValidationInvocationResult dependencyResult =
+                    await _validate.RefreshAndValidateChangesAsync(changedFields);
+
+                List<ValidationResultEntry> compatibilityWarnings = dependencyResult.Warnings
+                    .Where(entry => entry.Code == "AXV-DEP-W001")
+                    .ToList();
+                foreach (ValidationResultEntry warning in compatibilityWarnings)
+                {
+                    _traceService.LogMessage(
+                        $"AxPut dependency compatibility fallback: {warning.Message}"
+                    );
+                }
+
+                if (!dependencyResult.Success)
+                {
+                    return new OperationResult
+                    {
+                        Result = "Fail",
+                        Message = GetValidationMessage(dependencyResult),
+                        Details = dependencyResult
+                    };
+                }
+
+                // Compatibility execution already performs the complete refresh-and-validation pass.
+                // Do not immediately repeat full current-value validation over the same runtime state.
+                if (compatibilityWarnings.Count > 0)
+                {
+                    return new OperationResult
+                    {
+                        Result = "Success",
+                        Message = GetValidationMessage(dependencyResult),
+                        Details = dependencyResult
+                    };
+                }
+            }
+
+            ValidationInvocationResult finalResult =
+                await _validate.ValidateCurrentValuesAsync(reusePreparedQueryResults: true);
+            return new OperationResult
+            {
+                Result = finalResult.Success ? "Success" : "Fail",
+                Message = GetValidationMessage(finalResult),
+                Details = finalResult
+            };
+        }
+
         private async Task<APIResult> SaveData(AxPutInput putDataInput)
         {
             int inputTransIndex = 0;
@@ -714,16 +834,19 @@ namespace AxTstructData
                             var config = new MapperConfiguration(cfg => cfg.CreateMap<AxPut, TStructRequestDto>());
                             var mapper = config.CreateMapper();
                             TStructRequestDto tstData = mapper.Map<TStructRequestDto>(putData);
-                            var submitValueResult = await _validate.SubmitValue(tstData);
-                            if (submitValueResult.StartsWith("Error"))
+                            var submitValueResult = await _validate.SubmitValueDetailed(tstData);
+                            if (!submitValueResult.Success)
                             {
-                                result = new APIResult(false, submitValueResult);
+                                result = new APIResult(false, GetValidationMessage(submitValueResult));
                                 result.data["transid"] = putData.TransId;
                                 result.data["index"] = inputTransIndex;
                                 break;
                             }
 
-                            var validateResult = await _validate.ValidateData();
+                            var validateResult = await ValidateForPersistence(
+                                GetSubmittedFieldAddresses(submitValueResult),
+                                requiresInitializationRefresh: true
+                            );
 
                             if (validateResult.Result == "Fail")
                             {
@@ -770,16 +893,18 @@ namespace AxTstructData
 
                                 ReconcileSubmittedRecordIds(putData);
                                 tstData.Submitdata = putData.SubmitData;
-                                var submitValueResult = await _validate.SubmitValue(tstData);
-                                if (submitValueResult.StartsWith("Error"))
+                                var submitValueResult = await _validate.SubmitValueDetailed(tstData);
+                                if (!submitValueResult.Success)
                                 {
-                                    result = new APIResult(false, submitValueResult);
+                                    result = new APIResult(false, GetValidationMessage(submitValueResult));
                                     result.data["transid"] = putData.TransId;
                                     result.data["index"] = inputTransIndex;
                                     break;
                                 }
 
-                                var validateResult = await _validate.ValidateData();
+                                var validateResult = await ValidateForPersistence(
+                                    GetSubmittedFieldAddresses(submitValueResult)
+                                );
 
                                 if (validateResult.Result == "Fail")
                                 {
@@ -961,7 +1086,10 @@ namespace AxTstructData
 
                                 _validate._sdef.ApplyGenMapBuffer(genMapBuffer, genMapRecord);
 
-                                validateResult = await _validate.ValidateData();
+                                validateResult = await ValidateForPersistence(
+                                    GetGenMapFieldAddresses(genMapBuffer, genMapRecord),
+                                    requiresInitializationRefresh: isCreate
+                                );
 
                                 if (validateResult.Result == "Fail")
                                 {

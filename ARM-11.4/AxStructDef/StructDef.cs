@@ -116,6 +116,8 @@ namespace AxStructDef
         [JsonProperty(Order = -4)] public List<TIframe>? Iframes { get; set; }
         [JsonProperty(Order = -3)] public TTemp Temp { get; set; }
         [JsonProperty(Order = -2)] public TAxpConfig AxpConfig { get; set; }
+        [JsonProperty(Order = -1, NullValueHandling = NullValueHandling.Ignore)]
+        public TDependencyMetadata? DependencyMetadata { get; private set; }
         public List<TPopgrid>? PopGrids { get; private set; }
         public string AutoGen_Prefix { get; set; }
         public string AutoGen_Lastno { get; set; }
@@ -515,6 +517,7 @@ namespace AxStructDef
             //    PrimaryFields = PrimaryFields.Substring(1);
 
             InitializeFldLookup();
+            BuildDependencyMetadata(fXML);
 
             //GetTableList();
             //UpdateHasGridParents();
@@ -536,6 +539,500 @@ namespace AxStructDef
             //LDSAutoGenDigitFld = LDSGetField(Transid, "ldsautogendigits");
 
             GetTstructSpecificDevOptions(Struct.TransId).GetAwaiter().GetResult();
+        }
+
+        private void BuildDependencyMetadata(XmlDocument document)
+        {
+            DependencyMetadata = null;
+            ParentList.Clear();
+
+            foreach (TField field in Flds ?? [])
+            {
+                field.Deps.Clear();
+                field.Dependents.Clear();
+                field.DependentTypes = string.Empty;
+                field.DepFrames = string.Empty;
+                field.HasGridParents = false;
+            }
+
+            if (!GetDependants || document.DocumentElement == null)
+                return;
+
+            TDependencyMetadata metadata = new();
+            int declarationOrder = 0;
+            bool hasDependencyNodes = false;
+
+            foreach (XmlNode fieldNode in document.DocumentElement.ChildNodes)
+            {
+                if (!string.Equals(fieldNode.Attributes?["cat"]?.Value, "field", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                XmlNode? dependencyNode = fieldNode.SelectSingleNode(Consts.xml_Deps);
+                if (dependencyNode == null)
+                    continue;
+
+                hasDependencyNodes = true;
+                string sourceName = GetNodeValue(fieldNode, Consts.xml_Name).Trim();
+                TField? sourceField = GetField(sourceName);
+                if (sourceField == null)
+                {
+                    AddDependencyDiagnostic(
+                        metadata,
+                        TDependencyDiagnosticKind.MalformedMetadata,
+                        sourceName,
+                        string.Empty,
+                        "Dependency source field is not present in the loaded structure."
+                    );
+                    continue;
+                }
+
+                List<XmlNode> structuredChildren = dependencyNode.ChildNodes
+                    .Cast<XmlNode>()
+                    .Where(node => node.NodeType == XmlNodeType.Element)
+                    .ToList();
+
+                if (structuredChildren.Count == 0)
+                {
+                    ParseLegacyDependencyText(
+                        metadata,
+                        sourceField,
+                        dependencyNode.InnerText,
+                        ref declarationOrder
+                    );
+                    continue;
+                }
+
+                foreach (XmlNode child in structuredChildren)
+                {
+                    string tag = child.Name.Trim().ToLowerInvariant();
+                    if (!TryGetStructuredDependencyKind(tag, out TDependencyKind kind))
+                    {
+                        AddDependencyDiagnostic(
+                            metadata,
+                            TDependencyDiagnosticKind.MalformedMetadata,
+                            sourceField.FieldName,
+                            tag,
+                            "Unsupported structured dependency tag."
+                        );
+                        continue;
+                    }
+
+                    foreach (string target in SplitDependencyValues(child.InnerText))
+                        AddDependencyEdge(metadata, sourceField, target, kind, ref declarationOrder);
+                }
+            }
+
+            if (!hasDependencyNodes)
+                return;
+
+            DetectDependencyCycles(metadata);
+            ApplyDependencyCompatibility(metadata);
+            DependencyMetadata = metadata;
+        }
+
+        private void ParseLegacyDependencyText(
+            TDependencyMetadata metadata,
+            TField sourceField,
+            string dependencyText,
+            ref int declarationOrder
+        )
+        {
+            foreach (string token in SplitDependencyValues(dependencyText))
+            {
+                if (token.Length < 2 || !TryGetLegacyDependencyKind(token[0], out TDependencyKind kind))
+                {
+                    AddDependencyDiagnostic(
+                        metadata,
+                        TDependencyDiagnosticKind.MalformedMetadata,
+                        sourceField.FieldName,
+                        token,
+                        "Malformed legacy dependency token."
+                    );
+                    continue;
+                }
+
+                string target = token[1..].Trim();
+                if (target.Length == 0)
+                {
+                    AddDependencyDiagnostic(
+                        metadata,
+                        TDependencyDiagnosticKind.MalformedMetadata,
+                        sourceField.FieldName,
+                        token,
+                        "Legacy dependency target is empty."
+                    );
+                    continue;
+                }
+
+                AddLegacyDependent(sourceField, target, token[0]);
+                AddDependencyEdge(metadata, sourceField, target, kind, ref declarationOrder);
+            }
+        }
+
+        private void AddDependencyEdge(
+            TDependencyMetadata metadata,
+            TField sourceField,
+            string targetValue,
+            TDependencyKind kind,
+            ref int declarationOrder
+        )
+        {
+            string target = targetValue.Trim();
+            int currentOrder = declarationOrder++;
+            if (target.Length == 0)
+            {
+                AddDependencyDiagnostic(
+                    metadata,
+                    TDependencyDiagnosticKind.MalformedMetadata,
+                    sourceField.FieldName,
+                    targetValue,
+                    "Dependency target is empty."
+                );
+                return;
+            }
+
+            TDependencyEdge? existing = metadata.Edges.FirstOrDefault(edge =>
+                string.Equals(edge.Source, sourceField.FieldName, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(edge.Target, target, StringComparison.OrdinalIgnoreCase)
+                && (IsOrdinaryFieldDependency(edge.Kind) == IsOrdinaryFieldDependency(kind))
+                && (IsOrdinaryFieldDependency(kind) || edge.Kind == kind)
+            );
+
+            if (existing != null)
+            {
+                if (existing.Kind == TDependencyKind.Expression && kind == TDependencyKind.Select)
+                    existing.Kind = TDependencyKind.Select;
+                return;
+            }
+
+            TField? targetField = null;
+            TFrame? targetFrame = null;
+            TFg? fillGrid = null;
+            bool isResolved;
+
+            if (IsOrdinaryFieldDependency(kind) || kind == TDependencyKind.Grid)
+            {
+                targetField = GetField(target);
+                targetFrame = targetField == null ? null : GetFrameByNumber(targetField.FrameNo);
+                isResolved = targetField != null;
+            }
+            else if (kind == TDependencyKind.FillGrid)
+            {
+                fillGrid = Fgs?.FirstOrDefault(item =>
+                    string.Equals(item.Fname, target, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(item.Name, target, StringComparison.OrdinalIgnoreCase)
+                );
+                if (fillGrid != null && TryConvertFrameNumber(fillGrid.TargetFrame, out int fillGridFrameNo))
+                    targetFrame = GetFrameByNumber(fillGridFrameNo);
+                isResolved = fillGrid != null;
+            }
+            else if (kind is TDependencyKind.DataContainer or TDependencyKind.DependentFrame)
+            {
+                targetFrame = ResolveFrame(target);
+                isResolved = targetFrame != null;
+            }
+            else
+            {
+                isResolved = kind == TDependencyKind.Label;
+            }
+
+            TDependencyEdge edge = new()
+            {
+                Source = sourceField.FieldName,
+                Target = target,
+                Kind = kind,
+                DeclarationOrder = currentOrder,
+                SourceFrameNo = sourceField.FrameNo,
+                TargetFrameNo = targetField?.FrameNo ?? targetFrame?.FrameNo,
+                SourceIsGrid = sourceField.AsGrid,
+                TargetIsGrid = targetField?.AsGrid ?? targetFrame?.AsGrid ?? false,
+                TargetIsPopup = targetFrame?.Popup ?? false,
+                IsResolved = isResolved
+            };
+            metadata.Edges.Add(edge);
+
+            if (!isResolved)
+            {
+                AddDependencyDiagnostic(
+                    metadata,
+                    TDependencyDiagnosticKind.UnresolvedReference,
+                    sourceField.FieldName,
+                    target,
+                    $"Unresolved {kind} dependency target."
+                );
+            }
+        }
+
+        private void ApplyDependencyCompatibility(TDependencyMetadata metadata)
+        {
+            foreach (TDependencyEdge edge in metadata.Edges.OrderBy(item => item.DeclarationOrder))
+            {
+                if (IsOrdinaryFieldDependency(edge.Kind))
+                {
+                    AddReverseParent(edge.Target, edge.Source);
+                    if (edge.IsResolved)
+                    {
+                        TField? targetField = GetField(edge.Target);
+                        if (targetField != null
+                            && ((edge.SourceIsGrid && edge.SourceFrameNo == edge.TargetFrameNo)
+                                || edge.TargetIsPopup))
+                        {
+                            targetField.HasGridParents = true;
+                        }
+                    }
+                }
+                else if (edge.Kind == TDependencyKind.DataContainer)
+                {
+                    string dcName = edge.Target.StartsWith("dc", StringComparison.OrdinalIgnoreCase)
+                        ? edge.Target
+                        : "dc" + edge.Target;
+                    AddReverseParent(dcName, edge.Source);
+                }
+            }
+
+            foreach (TField field in Flds ?? [])
+            {
+                List<string> frameTargets = metadata.GetOutgoing(field.FieldName)
+                    .Where(edge => edge.Kind == TDependencyKind.DependentFrame)
+                    .Select(edge => edge.Target)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                field.DepFrames = string.Join(",", frameTargets);
+
+                HashSet<string> visitedFields = new(StringComparer.OrdinalIgnoreCase)
+                {
+                    field.FieldName
+                };
+                HashSet<string> compatibilityValues = new(StringComparer.OrdinalIgnoreCase);
+                Queue<string> pending = new();
+                pending.Enqueue(field.FieldName);
+
+                while (pending.Count > 0)
+                {
+                    string source = pending.Dequeue();
+                    foreach (TDependencyEdge edge in metadata.GetOutgoing(source))
+                    {
+                        string? compatibilityValue = GetCompatibilityDependencyValue(edge);
+                        bool returnsToSource = IsOrdinaryFieldDependency(edge.Kind)
+                            && string.Equals(edge.Target, field.FieldName, StringComparison.OrdinalIgnoreCase);
+                        if (!returnsToSource
+                            && compatibilityValue != null
+                            && compatibilityValues.Add(compatibilityValue))
+                        {
+                            field.Deps.Add(compatibilityValue);
+                        }
+
+                        if (IsOrdinaryFieldDependency(edge.Kind)
+                            && edge.IsResolved
+                            && visitedFields.Add(edge.Target))
+                        {
+                            pending.Enqueue(edge.Target);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void DetectDependencyCycles(TDependencyMetadata metadata)
+        {
+            foreach (TDependencyEdge edge in metadata.Edges
+                .Where(item => item.IsResolved && IsOrdinaryFieldDependency(item.Kind)))
+            {
+                if (!HasDependencyPath(metadata, edge.Target, edge.Source))
+                    continue;
+
+                bool alreadyReported = metadata.Diagnostics.Any(diagnostic =>
+                    diagnostic.Kind == TDependencyDiagnosticKind.Cycle
+                    && string.Equals(diagnostic.Source, edge.Source, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(diagnostic.Target, edge.Target, StringComparison.OrdinalIgnoreCase)
+                );
+                if (!alreadyReported)
+                {
+                    AddDependencyDiagnostic(
+                        metadata,
+                        TDependencyDiagnosticKind.Cycle,
+                        edge.Source,
+                        edge.Target,
+                        "Dependency cycle requires compatibility fallback."
+                    );
+                }
+            }
+        }
+
+        private bool HasDependencyPath(TDependencyMetadata metadata, string start, string target)
+        {
+            Queue<string> pending = new();
+            HashSet<string> visited = new(StringComparer.OrdinalIgnoreCase);
+            pending.Enqueue(start);
+
+            while (pending.Count > 0)
+            {
+                string current = pending.Dequeue();
+                if (!visited.Add(current))
+                    continue;
+                if (string.Equals(current, target, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                foreach (TDependencyEdge edge in metadata.GetOutgoing(current)
+                    .Where(item => item.IsResolved && IsOrdinaryFieldDependency(item.Kind)))
+                {
+                    pending.Enqueue(edge.Target);
+                }
+            }
+
+            return false;
+        }
+
+        private void AddDependencyDiagnostic(
+            TDependencyMetadata metadata,
+            TDependencyDiagnosticKind kind,
+            string source,
+            string target,
+            string message
+        )
+        {
+            metadata.Diagnostics.Add(new TDependencyDiagnostic
+            {
+                Kind = kind,
+                Source = source,
+                Target = target,
+                Message = message
+            });
+            metadata.RequiresCompatibilityFallback = true;
+        }
+
+        private void AddReverseParent(string target, string source)
+        {
+            int index = ParentList.FindIndex(value =>
+            {
+                int separator = value.IndexOf('=');
+                string name = separator < 0 ? value : value[..separator];
+                return string.Equals(name, target, StringComparison.OrdinalIgnoreCase);
+            });
+
+            if (index < 0)
+            {
+                ParentList.Add(target + "=" + source);
+                return;
+            }
+
+            string[] parts = ParentList[index].Split('=', 2);
+            List<string> parents = parts.Length == 2
+                ? SplitDependencyValues(parts[1]).ToList()
+                : new List<string>();
+            if (!parents.Contains(source, StringComparer.OrdinalIgnoreCase))
+                parents.Add(source);
+            ParentList[index] = parts[0] + "=" + string.Join(",", parents);
+        }
+
+        private static void AddLegacyDependent(TField field, string target, char typeCode)
+        {
+            int index = field.Dependents.FindIndex(value =>
+                string.Equals(value, target, StringComparison.OrdinalIgnoreCase)
+            );
+            if (index < 0)
+            {
+                field.Dependents.Add(target);
+                field.DependentTypes += char.ToLowerInvariant(typeCode);
+                return;
+            }
+
+            if (field.DependentTypes.Length > index
+                && field.DependentTypes[index] == 'e'
+                && char.ToLowerInvariant(typeCode) == 's')
+            {
+                char[] types = field.DependentTypes.ToCharArray();
+                types[index] = 's';
+                field.DependentTypes = new string(types);
+            }
+        }
+
+        private TFrame? ResolveFrame(string target)
+        {
+            string frameValue = target.StartsWith("dc", StringComparison.OrdinalIgnoreCase)
+                ? target[2..]
+                : target;
+            return int.TryParse(frameValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int frameNo)
+                ? GetFrameByNumber(frameNo)
+                : null;
+        }
+
+        private TFrame? GetFrameByNumber(int frameNo)
+        {
+            return Frames?.FirstOrDefault(frame => frame.FrameNo == frameNo);
+        }
+
+        private static bool TryConvertFrameNumber(double value, out int frameNo)
+        {
+            if (value <= 0 || value > int.MaxValue || Math.Truncate(value) != value)
+            {
+                frameNo = 0;
+                return false;
+            }
+
+            frameNo = (int)value;
+            return true;
+        }
+
+        private static IEnumerable<string> SplitDependencyValues(string value)
+        {
+            return (value ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(item => item.Length > 0);
+        }
+
+        private static string? GetCompatibilityDependencyValue(TDependencyEdge edge)
+        {
+            if (IsOrdinaryFieldDependency(edge.Kind))
+                return edge.Target;
+
+            return edge.Kind switch
+            {
+                TDependencyKind.FillGrid => "#" + edge.Target,
+                TDependencyKind.DataContainer => "$" + edge.Target,
+                TDependencyKind.Label => "~" + edge.Target,
+                _ => null
+            };
+        }
+
+        private static bool IsOrdinaryFieldDependency(TDependencyKind kind)
+        {
+            return kind is TDependencyKind.Expression
+                or TDependencyKind.Select
+                or TDependencyKind.Fill
+                or TDependencyKind.Aggregate;
+        }
+
+        private static bool TryGetStructuredDependencyKind(string tag, out TDependencyKind kind)
+        {
+            kind = tag switch
+            {
+                "e" => TDependencyKind.Expression,
+                "s" => TDependencyKind.Select,
+                "f" => TDependencyKind.Fill,
+                "ag" => TDependencyKind.Aggregate,
+                "fg" => TDependencyKind.FillGrid,
+                "dc" => TDependencyKind.DataContainer,
+                "lbl" => TDependencyKind.Label,
+                "sf" => TDependencyKind.DependentFrame,
+                _ => default
+            };
+            return tag is "e" or "s" or "f" or "ag" or "fg" or "dc" or "lbl" or "sf";
+        }
+
+        private static bool TryGetLegacyDependencyKind(char typeCode, out TDependencyKind kind)
+        {
+            kind = char.ToLowerInvariant(typeCode) switch
+            {
+                'e' => TDependencyKind.Expression,
+                's' => TDependencyKind.Select,
+                'f' => TDependencyKind.Fill,
+                'a' => TDependencyKind.Aggregate,
+                'd' => TDependencyKind.DependentFrame,
+                'g' => TDependencyKind.Grid,
+                _ => default
+            };
+            return char.ToLowerInvariant(typeCode) is 'e' or 's' or 'f' or 'a' or 'd' or 'g';
         }
 
         private void XLoadStruct(XmlDocument rootNode)
@@ -2015,6 +2512,16 @@ namespace AxStructDef
             InitializeFldLookup();
             _fieldLookup.TryGetValue(fieldName, out var field);
             return field;
+        }
+
+        public IReadOnlyList<TDependencyEdge> GetDirectDependencies(string sourceFieldName)
+        {
+            return DependencyMetadata?.GetOutgoing(sourceFieldName) ?? Array.Empty<TDependencyEdge>();
+        }
+
+        public IReadOnlyList<TDependencyEdge> GetDependencyParents(string targetName)
+        {
+            return DependencyMetadata?.GetParents(targetName) ?? Array.Empty<TDependencyEdge>();
         }
 
         /// <param name="fieldName">Field name to update value for</param>

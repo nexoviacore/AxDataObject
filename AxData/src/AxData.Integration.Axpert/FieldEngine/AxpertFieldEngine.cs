@@ -4,6 +4,7 @@ using AxData.Application.Ports.Axpert;
 using AxData.Domain.Errors;
 using AxData.Domain.Model;
 using AxStructDef.Models;
+using AxValidate.Dto;
 
 namespace AxData.Integration.Axpert.FieldEngine;
 
@@ -342,11 +343,62 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
                 target.Row.PersistedRecordId.GetValueOrDefault());
             parser.RegisterVar(target.LegacyField.FieldName, target.LegacyField.DataType, submittedText);
 
-            var validation = await validate.ValidateData().ConfigureAwait(false);
+            var validation = await validate.RefreshAndValidateChangesAsync(
+            [
+                new ValidationAddress
+                {
+                    DataContainer = address.DataContainer,
+                    FrameNo = target.LegacyField.FrameNo,
+                    RowNo = target.RowNumber,
+                    FieldName = target.LegacyField.FieldName
+                }
+            ]).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            return string.Equals(validation.Result, "Success", StringComparison.OrdinalIgnoreCase)
-                ? FieldEvaluationResult.Success()
-                : Failure(address, "Axpert rejected the submitted field value.");
+            if (validation.Success)
+            {
+                return FieldEvaluationResult.Success();
+            }
+
+            var errors = validation.Errors
+                .Select(error => new FieldEvaluationError(
+                    MapValidationAddress(state, runtime, error.Address, address),
+                    AxDataErrors.ValidationFailed.Code,
+                    "Axpert rejected the submitted field value."))
+                .ToArray();
+            return errors.Length == 0
+                ? Failure(address, "Axpert rejected the submitted field value.")
+                : new FieldEvaluationResult(false, [], errors);
+        }
+
+        private static FieldAddress MapValidationAddress(
+            AxDataState state,
+            AxpertFieldRuntime runtime,
+            ValidationAddress validationAddress,
+            FieldAddress fallback)
+        {
+            var container = state.DataContainers.Values.SingleOrDefault(candidate =>
+                string.Equals(candidate.Name, validationAddress.DataContainer, StringComparison.OrdinalIgnoreCase));
+            if (container is null && validationAddress.FrameNo > 0)
+            {
+                container = state.DataContainers.Values.SingleOrDefault(candidate =>
+                    runtime.TryGetFrameNumber(candidate.Name, out var frameNumber) &&
+                    frameNumber == validationAddress.FrameNo);
+            }
+
+            var rowIndex = container?.IsGrid == true ? validationAddress.RowNo - 1 : 0;
+            if (container is null ||
+                rowIndex < 0 ||
+                rowIndex >= container.Rows.Count ||
+                string.IsNullOrWhiteSpace(validationAddress.FieldName) ||
+                !container.Rows[rowIndex].Fields.ContainsKey(validationAddress.FieldName))
+            {
+                return fallback;
+            }
+
+            return new FieldAddress(
+                container.Name,
+                container.Rows[rowIndex].RowId,
+                validationAddress.FieldName);
         }
 
         private static FieldEvaluationResult ReadBack(

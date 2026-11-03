@@ -54,3 +54,67 @@ new behavior; this ledger documents the exceptional shared-project changes and t
 - Verification: `AxStructDef`, `AxValidate`, and `AxTstructData` build without restore; the serial AxData solution
   build passes; 158 unit, 39 integration, and 139 contract tests pass; E2E exits successfully. Two contract tests
   cover highest-row sparse-grid submission and row-specific parser values during grid validation.
+
+## 2026-10-30 — ARM-DEP-00 characterization harness
+
+- Files: `ARM-11.4/AxDependency.Characterization/Invoke-Characterization.ps1`.
+- Reason: freeze current StructDef dependency projection, Validate scanning/cache/static-state behavior, parser failure ordering, and AxPut parity before shared ARM dependency changes. This behavior must be proven in ARM and cannot be characterized through an AxData adapter.
+- Behavioral impact: none. The additive package-free harness reads source files and runs deterministic characterization models; no production project references it.
+- Verification: the harness passes 14 checks without restore and records exact controlled counters and ARM-DEP-01 stop conditions in `docs/reports/ARM-DEP-00-characterization.md`; the serial AxTstructData build passes with zero errors (existing warnings remain).
+
+## 2026-10-30 — ARM-DEP-01 AxStructDef `a58` metadata
+
+- Files: `ARM-11.4/AxStructDef/{StructDef.cs,Models/TDependencyMetadata.cs}` and
+  `ARM-11.4/AxDependency.Characterization/{Invoke-Characterization.ps1,fixtures/ARM-DEP-01-branch.xml,fixtures/ARM-DEP-01-graph-cases.xml}`.
+- Reason: AxStructDef owned the `a58` XML constant and legacy dependency members but did not project them during structure loading; ARM callers require authoritative metadata before dependency-directed Validate work can begin.
+- Behavioral impact: structure loading now exposes additive typed direct/reverse dependency queries, stable downstream compatibility closures, frame metadata, and diagnostics/fallback status. Existing public members remain; Validate and AxPut execution order are unchanged.
+- Verification: the package-free harness passes 17 checks, including the supplied `branch`, structured/text forms, order/deduplication, chain/diamond/cycle/unknown, special tags, frames, and no-`a58`; serial no-restore AxStructDef, AxValidate, and AxTstructData builds pass with pre-existing NU1701 suppressed at the command line.
+
+## 2026-10-30 — ARM-DEP-02 Validate state, cache, and result contracts
+
+- Files: `ARM-11.4/AxValidate/{Validate.cs,Dto/OperationResult.cs,Dto/ValidationAddress.cs,Dto/ValidationInvocationResult.cs}` and `ARM-11.4/AxDependency.Characterization/Invoke-Characterization.ps1`.
+- Reason: mutable static/error state and an add-once linked-fill SQL cache made repeated and concurrent ARM validation unsafe; these shared runtime defects affect ARM callers directly and cannot be corrected by an AxData adapter.
+- Behavioral impact: validation and submission invocations now expose additive structured results while existing string/`OperationResult` APIs remain wrappers; query results are invalidated and replaced per runtime/source/row/change wave, mutable execution state is instance-owned, and AxPut create/edit/GenMap sequencing is unchanged. Existing ARM field-value logging is unchanged.
+- Verification: the package-free dependency harness passes 18 checks covering repeated calls, state isolation, cache replacement/reuse/failure, row/runtime boundaries, structured categories, parser failure ordering, and AxPut parity; serial no-restore AxStructDef, AxValidate, and AxTstructData builds pass with pre-existing NU1701 suppressed at the command line.
+
+## 2026-10-30 — ARM-DEP-03 dependency-directed refresh and validation
+
+- Files: `ARM-11.4/AxValidate/Validate.cs` and `ARM-11.4/AxDependency.Characterization/Invoke-Characterization.ps1`.
+- Reason: Validate had authoritative ordered dependency metadata and runtime-safe state, but its only refresh/validation path still scanned every frame, row, and field. Targeted execution must remain inside ARM because it uses Validate's private parser, linked-query cache, source IDs, and mutable StructDef values.
+- Behavioral impact: additive targeted and full-current-value APIs validate submitted roots, refresh only reachable ordinary dependents in stable breadth-first order, deduplicate diamonds, stop unchanged/failed paths, apply proven row rules, and use warned compatibility fallback for unsupported metadata or row mappings. Existing `ValidateData`, load refresh, AxPut/GenMap sequencing, and ARM field-value logging are unchanged.
+- Verification: the package-free dependency harness passes 25 checks covering branch/query counters, chain/diamond order, unchanged stops, failure isolation, row rules, fallback, full validation, parser/SQL failure guards, compatibility entry points, and AxPut parity; serial no-restore AxStructDef, AxValidate, and AxTstructData builds pass with pre-existing NU1701 suppressed.
+
+## 2026-10-30 — ARM-DEP-04 AxPut integration
+
+- Files: `ARM-11.4/AxTstructData/Service/AxPutService.cs`, `ARM-11.4/AxValidate/Validate.cs`, and `ARM-11.4/AxDependency.Characterization/Invoke-Characterization.ps1`.
+- Reason: current ARM AxPut create/edit/GenMap flows still invoked compatibility full-scan validation and did not consume the accepted targeted dependency API. This production orchestration and its runtime query cache cannot be changed through an AxData adapter.
+- Behavioral impact: successful submission or mapping now runs targeted dependency refresh/validation and mandatory full current-value validation before SQL construction. AxPut uses an additive cache-aware final-validation overload; the existing parameterless API, public AxPut contract, persistence semantics, and existing ARM field-value logging are unchanged. Compatibility fallback is trace-observable through `AXV-DEP-W001`.
+- Verification: 31 package-free ARM checks pass, including create/edit, independent transactions, parent/GenMap and queued records, deleted rows, failure boundaries, state isolation, untouched invalid data, fallback, and sparse counter/persistence parity. Serial no-restore AxStructDef, AxValidate, and AxTstructData builds pass; the serial AxData build and 158 unit, 39 integration, and 139 contract tests pass unchanged. Full evidence and the stable handoff contract are in `docs/reports/ARM-DEP-04-verification.md`.
+
+## 2026-11-02 — ARM-DEP-04 create initialization and parent-bound fallback fix
+
+- Files: `ARM-11.4/AxTstructData/Service/AxPutService.cs`, `ARM-11.4/AxValidate/Validate.cs`, and `ARM-11.4/AxDependency.Characterization/Invoke-Characterization.ps1`.
+- Reason: direct AxPut create was sent through the hydrated-edit targeted path, so session-derived parents such as `company` could remain uninitialized before customer/item linked queries. The working legacy path first performed a full initialization refresh. This shared ARM orchestration/state check cannot be reproduced by an AxData adapter.
+- Behavioral impact: create and new-record GenMap run exactly one full initialization refresh/validation; hydrated edits remain targeted plus final validation. Missing or unsupported required parent rows select one compatibility full pass, while business validation failures are not retried and a completed fallback is not followed by a second full scan.
+- Verification: 32 package-free ARM checks, 159 unit tests, 39 integration tests, and 147 contract tests pass in Release without restore. Focused contracts prove session-derived parent initialization and the parent-bound fallback; `git diff --check` passes. Postman collection changes are not applicable because the HTTP contract and AXD codes are unchanged.
+
+## 2026-11-02 — ARM-DEP-04 parser and targeted selection follow-up
+
+- Files: `ARM-11.4/AxParserApp/AxParser.cs`, `ARM-11.4/AxValidate/Validate.cs`, and `ARM-11.4/AxDependency.Characterization/Invoke-Characterization.ps1`.
+- Reason: the create full pass exposed legacy optional-variable and decimal-`abs` behavior, while targeted edit validated customer text without restoring its normalized source ID and generated `customer = 0`. These shared parser/Validate defects cannot be corrected in an AxData-only adapter.
+- Behavioral impact: `abs` accepts decimal operands; a missing direct optional variable such as `m_einvoice` keeps the field's pre-evaluation value without reading stale parser output, while other expression failures remain fail-closed. Targeted select roots now refresh once to resolve their source ID before validation.
+- Verification: 32 ARM characterization checks, 159 unit, 39 integration, and 150 contract tests pass in Release without restore. Focused contracts cover decimal `abs`, safe missing-direct-variable behavior, and source-ID restoration. Postman is not applicable because no HTTP or AXD contract changed.
+
+## 2026-11-02 — ARM-DEP-04 targeted grid-row binding fix
+
+- Files: `ARM-11.4/AxValidate/Validate.cs` and `AxData/tests/AxData.ContractTests/AxpertFieldEngineContractTests.cs`.
+- Reason: targeted validation refreshed grid roots and dependents without first registering their row in the parser. A generated `vchtr` edit consequently evaluated row 1 `subledgername` with row 2 `controlaccount` and `mg_accountid`; this shared Validate state transition cannot be corrected by an AxData adapter.
+- Behavioral impact: each targeted root and queued dependent now calls the existing Delphi-parity `RegRow` operation before refresh/evaluation. Targeted scope, dependency order, fallback rules, and final validation are unchanged; no full refresh was added.
+- Verification: the focused two-row targeted regression, all 151 contract tests, 159 unit tests, 39 integration tests, and all 32 ARM characterization checks pass without restore; the serial contract-project build succeeds with existing warnings only. Postman is not applicable because no HTTP or AXD contract changed.
+
+## 2026-11-02 — Restore Validate parser failure guards
+
+- Files: `ARM-11.4/AxValidate/Validate.cs`.
+- Reason: a later local edit changed all five guarded parser evaluations back to success-only branches, orphaning the optional-variable compatibility helper and allowing failed expressions to continue with prior state.
+- Behavioral impact: general expression and validation failures again fail closed before `Parser.Value` is read; only an absent direct optional variable such as `m_einvoice` preserves the field's pre-evaluation value. The dependency, refresh, and row-binding fixes are unchanged.
+- Verification: 8 focused regressions, 32 ARM characterization checks, 151 contract tests, 159 unit tests, and 39 integration tests pass without restore; the serial contract-project build succeeds with existing warnings only. Postman is not applicable because no HTTP or AXD contract changed.

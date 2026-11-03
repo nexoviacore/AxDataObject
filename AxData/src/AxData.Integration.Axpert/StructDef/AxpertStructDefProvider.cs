@@ -94,7 +94,9 @@ public sealed class AxpertStructDefProvider(IAxpertStructDefSource source) : ISt
                 snapshot.UpdatedOn,
                 snapshot.LegacyVersionNo,
                 snapshot.RunTimeStruct,
-                snapshot.RunTimeMode));
+                snapshot.RunTimeMode),
+            snapshot.RequiresCompatibilityFallback,
+            snapshot.DependencyDiagnostics?.ToArray() ?? []);
 
     private static void ValidateIdentity(string tenantId, string transId)
     {

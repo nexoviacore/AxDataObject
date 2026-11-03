@@ -210,7 +210,10 @@ public sealed class FakeAxpertFieldEngine(StructDefHandle definition) : IAxpertF
                      string.Equals(dependency.SourceContainer, field.DataContainer, StringComparison.OrdinalIgnoreCase) &&
                      string.Equals(dependency.SourceField, field.FieldName, StringComparison.OrdinalIgnoreCase)))
         {
-            if (!string.Equals(dependency.ScriptName, "qty-times-rate", StringComparison.Ordinal))
+            if (!dependency.IsResolved ||
+                dependency.TargetContainer is null ||
+                !string.Equals(dependency.SourceField, "qty", StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(dependency.TargetField, "amount", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }

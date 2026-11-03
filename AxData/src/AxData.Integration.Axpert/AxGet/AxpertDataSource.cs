@@ -149,12 +149,12 @@ public sealed class AxpertDataSource(
                                 NumberStyles.Integer,
                                 CultureInfo.InvariantCulture,
                                 out var parsedSourceId) ||
-                            parsedSourceId <= 0)
+                            parsedSourceId < 0)
                         {
                             throw new InvalidOperationException("AxGet returned an invalid source-ID companion.");
                         }
 
-                        sourceId = parsedSourceId;
+                        sourceId = parsedSourceId == 0 ? null : parsedSourceId;
                     }
 
                     sourceIds.Add(actualFieldName, sourceId);
