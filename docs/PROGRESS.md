@@ -400,3 +400,9 @@ Format:
 - Decisions: AxPut publishes lifecycle snapshots through the existing tenant stream; a persistent tenant-scoped closure marker prevents older SQL snapshots from recovering destroyed objects. No ARM SQL/validation/transaction-order change.
 - Tests: Serial build, 26 focused contracts, 60 focused unit, 9 Redis lifecycle/race, 162 full unit, and 42 integration tests pass; E2E exits successfully. The user-verified disposable PostgreSQL Postman retained/destroyed review passes; full contracts retain two pre-existing parser-guard failures.
 - Next: Complete P1D-03, then P2-05 core HTTP and real-provider review. Postman: updated.
+
+## P1D-03 local verification accepted; CI pending (2026-11-06)
+- Done: Added the Redis 6.2+ restart/redelivery harness and self-hosted workflow; the local `axdtf` existing/new-state chain passes FillGrid, persistence, eviction, recovery, and D28 on Memurai/PostgreSQL.
+- Decision: The user approved a P2-05 prerequisite waiver because repository Settings are unavailable; CI remains unexecuted and is still required before M1.6 closure.
+- Tests: Serial no-restore build, 9 Redis integration cases, Postman JSON, diff/secret checks, and the full local P1C-04 walkthrough pass.
+- Next: P2-05 core HTTP and real-provider review; run `.github/workflows/axdata-e2e.yml` when an administrator supplies the runner. Postman: not applicable.

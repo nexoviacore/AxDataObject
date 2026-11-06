@@ -484,11 +484,11 @@
             ]
         },
         {
-            "name": "P2-04 AxPut lifecycle finalization",
-            "description": "Run only against a reviewed disposable transaction/schema. Covers retained and destroyed Save finalization, one visible version advance, stale-version rejection, legacy response compatibility, and transaction rollback.",
+            "name": "P2-05 AxPut core HTTP and provider review",
+            "description": "Run only against a reviewed disposable transaction/schema. Covers create values/{}, stored-state and overlay edits, header/body version matching, retained/destroyed finalization, stale and StructDef conflicts, validation, rollback, response omission, and legacy response compatibility.",
             "item": [
                 {
-                    "name": "01 Missing objectid generates ULID",
+                    "name": "01 Create with values generates ULID",
                     "request": {
                         "auth": {
                             "type": "bearer",
@@ -527,6 +527,48 @@
                                     "pm.test('Known version is numeric and retained state is reported', () => { pm.expect(body.version).to.be.a('number'); pm.expect(body.dataObjectRetained).to.eql(true); });",
                                     "pm.collectionVariables.set('axPutObjectId', body.objectid);",
                                     "if (typeof body.version === 'number') pm.collectionVariables.set('axPutVersion', body.version);"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "01b Create with empty SubmitData succeeds",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{ARMToken}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"Roles\": [],\n  \"Data\": [\n    {\n      \"TransId\": \"{{prototypeTransId}}\",\n      \"Action\": \"create\",\n      \"SubmitData\": {}\n    }\n  ]\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{axPutBaseUrl}}/api/v1/AxPut"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                    "const envelope = pm.response.json();",
+                                    "const body = envelope.result || envelope;",
+                                    "pm.test('Empty SubmitData still returns saved object state', () => { pm.expect(body.objectid).to.match(/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/); pm.expect(body.version).to.be.a('number'); pm.expect(body.dataObjectRetained).to.eql(true); });"
                                 ]
                             }
                         }
@@ -650,6 +692,43 @@
                                     "pm.test('Save advances exactly one version', () => pm.expect(body.version).to.eql(Number(pm.collectionVariables.get('axPutExistingVersion')) + 1));",
                                     "pm.test('Finalized state is retained without pending cleanup', () => { pm.expect(body.dataObjectRetained).to.eql(true); pm.expect(body).not.to.have.property('dataObjectFinalizationPending'); });",
                                     "pm.collectionVariables.set('axPutObjectId', body.objectid);",
+                                    "pm.collectionVariables.set('axPutVersion', body.version);"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "04b Existing object overlay edit uses matching header and body version",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                { "key": "token", "value": "{{ARMToken}}", "type": "string" }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" },
+                            { "key": "If-Match", "value": "\"{{axPutVersion}}\"" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"Roles\": [],\n  \"objectid\": \"{{axPutExistingObjectId}}\",\n  \"expectedVersion\": {{axPutVersion}},\n  \"Data\": [\n    {\n      \"TransId\": \"{{prototypeTransId}}\",\n      \"Action\": \"edit\",\n      \"SubmitData\": {{prototypeOverlaySubmitData}}\n    }\n  ]\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{axPutBaseUrl}}/api/v1/AxPut"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                    "const envelope = pm.response.json();",
+                                    "const body = envelope.result || envelope;",
+                                    "pm.test('Matching If-Match and expectedVersion overlay advances once', () => { pm.expect(body.objectid).to.eql(pm.collectionVariables.get('axPutExistingObjectId')); pm.expect(body.version).to.eql(Number(pm.collectionVariables.get('axPutVersion')) + 1); pm.expect(body.dataObjectRetained).to.eql(true); });",
                                     "pm.collectionVariables.set('axPutVersion', body.version);"
                                 ]
                             }
@@ -783,6 +862,77 @@
                                     "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
                                     "const body = (pm.response.json().result || pm.response.json());",
                                     "pm.test('Invalid overlay code, retained version, and retained state', () => { pm.expect(body.errorcode).to.eql('AXD-REQ-001'); pm.expect(body.version).to.eql(Number(pm.collectionVariables.get('axPutNegativeVersion'))); pm.expect(body.dataObjectRetained).to.eql(true); });"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "07b Business validation failure retains object",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                { "key": "token", "value": "{{ARMToken}}", "type": "string" }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" },
+                            { "key": "If-Match", "value": "\"{{axPutNegativeVersion}}\"" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"Roles\": [],\n  \"objectid\": \"{{axPutNegativeObjectId}}\",\n  \"Data\": [\n    {\n      \"TransId\": \"{{prototypeTransId}}\",\n      \"Action\": \"edit\",\n      \"SubmitData\": {{prototypeValidationSubmitData}}\n    }\n  ]\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{axPutBaseUrl}}/api/v1/AxPut"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                                    "const body = (pm.response.json().result || pm.response.json());",
+                                    "pm.test('Validation failure returns current retained state', () => { pm.expect(body.errorcode).to.eql('AXD-REQ-001'); pm.expect(body.version).to.eql(Number(pm.collectionVariables.get('axPutNegativeVersion'))); pm.expect(body.dataObjectRetained).to.eql(true); });"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "07c StructDef mismatch after manual hash change",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                { "key": "token", "value": "{{ARMToken}}", "type": "string" }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" },
+                            { "key": "If-Match", "value": "\"{{axPutNegativeVersion}}\"" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"Roles\": [],\n  \"objectid\": \"{{axPutNegativeObjectId}}\"\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{axPutBaseUrl}}/api/v1/AxPut",
+                        "description": "Run only after replacing this object's stored StructDef hash as described in README.md."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                                    "const body = (pm.response.json().result || pm.response.json());",
+                                    "pm.test('StructDef conflict returns current retained version', () => { pm.expect(body.errorcode).to.eql('AXD-CONC-003'); pm.expect(body.version).to.eql(Number(pm.collectionVariables.get('axPutNegativeVersion'))); pm.expect(body.dataObjectRetained).to.eql(true); });"
                                 ]
                             }
                         }
