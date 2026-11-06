@@ -8,7 +8,9 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 $axPut = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'ARM-11.4\AxTstructData\Service\AxPutService.cs')
 $axPutModel = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'ARM-11.4\AxTstructData\Model\TstructData.cs')
 $controller = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'ARM-11.4\AxTstructData\Controllers\AxPutController.cs')
-$dataObject = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'ARM-11.4\AxTstructData\Model\AxSaveDataObject.cs')
+$project = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'ARM-11.4\AxTstructData\AxTstructData.csproj')
+$dataObjectStore = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'ARM-11.4\AxTstructData\Service\AxPutDataObjectStore.cs')
+$dataObjectProjection = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'ARM-11.4\AxTstructData\Service\AxPutDataObjectProjection.cs')
 $passed = 0
 
 function Assert-True {
@@ -22,39 +24,73 @@ function Assert-Contains {
     Assert-True -Condition $Text.Contains($Expected, [StringComparison]::Ordinal) -Message $Message
 }
 
+function Assert-Excludes {
+    param([string]$Text, [string]$Unexpected, [string]$Message)
+    Assert-True -Condition (-not $Text.Contains($Unexpected, [StringComparison]::OrdinalIgnoreCase)) -Message $Message
+}
+
 try {
-    Assert-Contains $axPutModel '[Newtonsoft.Json.JsonProperty("callIsFromAxSave")]' 'AxSave caller flag is missing from AxPutInput.'
-    Assert-Contains $axPutModel 'public bool CallIsFromAxSave { get; set; } = false;' 'AxSave caller flag default changed.'
-    Assert-Contains $axPutModel '[Newtonsoft.Json.JsonProperty("objectid")]' 'AxSave objectid is missing from AxPutInput.'
-    Assert-Contains $dataObject 'Dictionary<string, Dictionary<string, Dictionary<string, string>>> Data' 'AxSave DataObject does not retain DC/row/field values.'
+    Assert-Excludes $axPutModel ('callIsFrom' + 'AxSave') 'The disposable AxSave request flag still exists.'
+    Assert-Excludes $axPut ('AX' + 'SAVE') 'The disposable Redis key path still exists.'
+    Assert-Excludes $axPut ('AxSave' + 'DataObject') 'The disposable Redis projection still exists.'
+    Assert-Contains $project 'AxData.Contracts.csproj' 'AxTstructData does not reference the neutral shared contract.'
+    Assert-Contains $axPutModel '[Newtonsoft.Json.JsonProperty("objectid")]' 'objectid is missing from AxPutInput.'
+    Assert-Contains $axPutModel '[Newtonsoft.Json.JsonProperty("retainDataObject")]' 'retainDataObject is missing from AxPutInput.'
+    Assert-Contains $axPutModel '[Newtonsoft.Json.JsonProperty("expectedVersion")]' 'expectedVersion is missing from AxPutInput.'
+    Assert-Contains $controller 'Request.Headers.IfMatch.ToString()' 'AxPut does not capture the complete If-Match value.'
+    Assert-Contains $controller 'TryGetValue("version"' 'AxPut failure responses do not preserve known versions.'
+    Assert-Contains $controller 'TryGetValue("errorcode"' 'AxPut failure responses do not preserve AXD error codes.'
+    Assert-Contains $controller 'TryGetValue("httpstatus"' 'AxPut failure responses do not preserve ObjectId HTTP status.'
 
-    $idCheck = $axPut.IndexOf('_axSaveObjectIdSupplied = putData.CallIsFromAxSave', [StringComparison]::Ordinal)
-    $idCreate = $axPut.IndexOf('putData.ObjectId = Guid.NewGuid().ToString("N")', $idCheck, [StringComparison]::Ordinal)
-    $saveCall = $axPut.IndexOf('result = await SaveTstructData(putData)', $idCreate, [StringComparison]::Ordinal)
-    Assert-True ($idCheck -ge 0 -and $idCreate -gt $idCheck -and $saveCall -gt $idCreate) 'Missing objectid is not generated before AxPut SaveData.'
+    $session = $axPut.IndexOf('await _common.ValidateSession(putData.ARMSessionId)', [StringComparison]::Ordinal)
+    $identity = $axPut.IndexOf('putData.Project = _common._sessionVars', $session, [StringComparison]::Ordinal)
+    $contract = $axPut.IndexOf('PrepareObjectContract(putData, objectIdWasSupplied)', $identity, [StringComparison]::Ordinal)
+    $save = $axPut.IndexOf('result = await SaveTstructData(putData)', $contract, [StringComparison]::Ordinal)
+    Assert-True ($session -ge 0 -and $identity -gt $session -and $contract -gt $identity -and $save -gt $contract) 'AxPut does not preserve session→trusted identity→contract→Save order.'
 
-    $saveDataStart = $axPut.IndexOf('private async Task<APIResult> SaveData(', [StringComparison]::Ordinal)
-    $objectLoad = $axPut.IndexOf('axSaveDataObject = await LoadAxSaveDataObjectAsync', $saveDataStart, [StringComparison]::Ordinal)
-    Assert-True ($objectLoad -gt $saveDataStart) 'Supplied objectid does not load its Redis DataObject.'
+    Assert-Contains $axPut 'AxPutObjectContractRules.Resolve(' 'AxPut does not consume the shared request rules.'
+    Assert-Contains $axPut 'if (knownVersion is long version)' 'AxPut can no longer omit an unknown version.'
+    Assert-Contains $axPut 'result.data["objectid"] = putData.ObjectId;' 'AxPut does not return the supplied/generated ObjectId.'
+    Assert-Contains $dataObjectStore 'AXD:{{{tenantId.ToUpperInvariant()}}}:{objectId.ToUpperInvariant()}' 'AxPut does not use the shared tenant-scoped DataObject key.'
+    Assert-Contains $dataObjectStore 'HashGetEntriesAsync(' 'AxPut does not read the shared DataObject payload fields.'
+    Assert-Excludes $dataObjectStore 'HashSetAsync' 'P2-03 writes shared DataObject state before P2-04 finalization.'
+    Assert-Excludes $dataObjectStore 'StringSetAsync' 'P2-03 writes shared DataObject state before P2-04 finalization.'
+    Assert-Contains $axPut 'AxPutDataObjectProjection.CheckLoadedState(' 'AxPut does not check the stored actor relation.'
+    Assert-Contains $axPut 'AxPutDataObjectProjection.CheckExpectedVersion(' 'AxPut does not reject stale ObjectId saves.'
+    Assert-Contains $axPut 'AxPutDataObjectProjection.CheckStructDefVersion(' 'AxPut does not compare the stored StructDef hash.'
+    Assert-Contains $axPut 'await HydrateAndOverlayDataObjectAsync(putData)' 'AxPut does not hydrate and overlay stored ObjectId state.'
+    Assert-Contains $axPut 'requiresInitializationRefresh: _dataObjectContext?.Snapshot is null' 'Generated ObjectIds no longer run default/autogenerated initialization.'
+    Assert-Contains $dataObjectProjection '["axp_recid"]' 'DataObject hydration does not restore persisted row identity.'
+    Assert-Contains $dataObjectProjection '["axrow_action"]' 'DataObject hydration does not restore row action.'
+    Assert-Contains $axPut 'ObjectId runtime hydration' 'ObjectId trace no longer records hydrated state.'
+    Assert-Contains $axPut 'ObjectId payload overlay' 'ObjectId trace no longer records overlay field values.'
+    Assert-Contains $axPut 'result.data["dataObjectRetained"] = true;' 'Known ObjectId state does not report actual P2-03 retention.'
+    Assert-Contains $controller 'TryGetValue("dataObjectRetained"' 'AxPut failure responses do not preserve retention state.'
+    Assert-Contains $dataObjectProjection 'CaptureRecordIdMappings(' 'AxPut does not map returned record IDs to stable row identities.'
 
-    $createInitialize = $axPut.IndexOf('await InitializeStructDefFromAxSaveDataObjectAsync', $objectLoad, [StringComparison]::Ordinal)
-    $createSubmit = $axPut.IndexOf('await _validate.SubmitValueDetailed(tstData)', $createInitialize, [StringComparison]::Ordinal)
+    $loadObject = $axPut.IndexOf('await _dataObjectStore.LoadAsync(tenantId, putData.ObjectId!)', $contract, [StringComparison]::Ordinal)
+    $actorRelation = $axPut.IndexOf('AxPutDataObjectProjection.CheckLoadedState(', $loadObject, [StringComparison]::Ordinal)
+    Assert-True ($loadObject -gt $contract -and $actorRelation -gt $loadObject) 'AxPut does not preserve contract→tenant load→actor relation order.'
+
+    $createSubmit = $axPut.IndexOf('await _validate.SubmitValueDetailed(tstData)', $save, [StringComparison]::Ordinal)
     $createValidate = $axPut.IndexOf('await ValidateForPersistence(', $createSubmit, [StringComparison]::Ordinal)
-    $createRedis = $axPut.IndexOf('await SaveAxSaveDataObjectAsync(putDataInput, putData)', $createValidate, [StringComparison]::Ordinal)
-    $createSql = $axPut.IndexOf('GetTableWiseSQLCommandsForCreate(putData)', $createRedis, [StringComparison]::Ordinal)
-    Assert-True ($createInitialize -gt $objectLoad -and $createSubmit -gt $createInitialize -and $createValidate -gt $createSubmit -and $createRedis -gt $createValidate -and $createSql -gt $createRedis) 'AxSave create order is not object→payload→refresh/validation→Redis→SQL.'
+    $createSql = $axPut.IndexOf('GetTableWiseSQLCommandsForCreate(putData)', $createValidate, [StringComparison]::Ordinal)
+    Assert-True ($createSubmit -gt $save -and $createValidate -gt $createSubmit -and $createSql -gt $createValidate) 'AxPut create submission/validation/SQL order changed.'
 
-    $editStart = $axPut.IndexOf('Constants.TSTRUCT_ACTIONS.EDIT.ToString()', $createSql, [StringComparison]::Ordinal)
-    $editInitialize = $axPut.IndexOf('await InitializeStructDefFromAxSaveDataObjectAsync', $editStart, [StringComparison]::Ordinal)
-    $editSubmit = $axPut.IndexOf('await _validate.SubmitValueDetailed(tstData)', $editInitialize, [StringComparison]::Ordinal)
+    $editLoad = $axPut.IndexOf('await _getData.LoadData(getData, null, _validate)', $createSql, [StringComparison]::Ordinal)
+    $editSubmit = $axPut.IndexOf('await _validate.SubmitValueDetailed(tstData)', $editLoad, [StringComparison]::Ordinal)
     $editValidate = $axPut.IndexOf('await ValidateForPersistence(', $editSubmit, [StringComparison]::Ordinal)
-    $editRedis = $axPut.IndexOf('await SaveAxSaveDataObjectAsync(putDataInput, putData)', $editValidate, [StringComparison]::Ordinal)
-    $editSql = $axPut.IndexOf('GetTableWiseSQLCommandsForEdit(putData)', $editRedis, [StringComparison]::Ordinal)
-    Assert-True ($editInitialize -gt $editStart -and $editSubmit -gt $editInitialize -and $editValidate -gt $editSubmit -and $editRedis -gt $editValidate -and $editSql -gt $editRedis) 'AxSave edit order is not object→payload→refresh/validation→Redis→SQL.'
+    $editSql = $axPut.IndexOf('GetTableWiseSQLCommandsForEdit(putData)', $editValidate, [StringComparison]::Ordinal)
+    Assert-True ($editLoad -gt $createSql -and $editSubmit -gt $editLoad -and $editValidate -gt $editSubmit -and $editSql -gt $editValidate) 'AxPut edit load/submission/validation/SQL order changed.'
 
-    Assert-Contains $axPut 'result.data["objectid"] = putData.ObjectId;' 'AxPut does not return objectid for AxSave calls.'
-    Assert-Contains $controller 'getDataResult.data.ContainsKey("objectid")' 'AxPut HTTP errors do not preserve objectid.'
-    Assert-True ($createRedis -lt $createSql -and $editRedis -lt $editSql) 'The temporary Redis-before-SQL behavior changed; the intended inconsistency demonstration would no longer be valid.'
+    $mdMap = $axPut.IndexOf('sqlCommands.AddRange(await _validate._sdef.DoMDMapAsync())', $editSql, [StringComparison]::Ordinal)
+    $captureMappings = $axPut.IndexOf('AxPutDataObjectProjection.CaptureRecordIdMappings(', $mdMap, [StringComparison]::Ordinal)
+    $executeSql = $axPut.IndexOf('await _repo.ExecuteSaveDataSQLCommands(putData, sqlCommands)', $captureMappings, [StringComparison]::Ordinal)
+    $attachments = $axPut.IndexOf('SaveImagesAndAttachments(putDataInput, putData)', $executeSql, [StringComparison]::Ordinal)
+    $queueChildren = $axPut.IndexOf('foreach (var childMap in _validate._sdef.GetChildGenMaps())', $attachments, [StringComparison]::Ordinal)
+    $commit = $axPut.IndexOf('_common._dbHelper.CommitTransaction()', $queueChildren, [StringComparison]::Ordinal)
+    $publishMappings = $axPut.IndexOf('_dataObjectContext.CommittedRecordIdMappings = _pendingRecordIdMappings', $commit, [StringComparison]::Ordinal)
+    Assert-True ($mdMap -gt $editSql -and $captureMappings -gt $mdMap -and $executeSql -gt $captureMappings -and $attachments -gt $executeSql -and $queueChildren -gt $attachments -and $commit -gt $queueChildren -and $publishMappings -gt $commit) 'AxPut no longer preserves MdMap→mapping capture→SQL→attachments→child queue→commit→mapping publication order.'
 
     Write-Output "SUMMARY passed=$passed failed=0"
     exit 0

@@ -3,6 +3,8 @@ using ARMCommon.Interface;
 using ARMCommon.Model;
 using Newtonsoft.Json;
 using System.Data;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace AxTstructData
 {
@@ -90,6 +92,56 @@ namespace AxTstructData
             }
 
 
+        }
+
+        public async Task<string?> GetStructDefVersionAsync(string transId)
+        {
+            if (_common._dbHelper == null)
+                await _common.OpenDBConnectionAsync();
+
+            SQLResult result = await _common._dbHelper.ExecuteSQLAsync(
+                "SELECT props FROM tstructs WHERE LOWER(name) = @name ORDER BY blobno",
+                ["@name"],
+                [DbType.String],
+                [transId.ToLowerInvariant()]);
+            if (!string.IsNullOrWhiteSpace(result.error) ||
+                result.data.Rows.Count == 0 ||
+                !result.data.Columns.Contains("props"))
+            {
+                return null;
+            }
+
+            using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            foreach (DataRow row in result.data.Rows)
+            {
+                byte[]? bytes = ToBytes(row["props"]);
+                if (bytes is null)
+                    return null;
+                hash.AppendData(bytes);
+            }
+
+            return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+        }
+
+        private static byte[]? ToBytes(object value)
+        {
+            if (value is null or DBNull)
+                return null;
+            if (value is byte[] bytes)
+                return bytes;
+            if (value is string text && text.StartsWith("\\x", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    return Convert.FromHexString(text[2..]);
+                }
+                catch (FormatException)
+                {
+                    return null;
+                }
+            }
+
+            return value is string raw ? Encoding.UTF8.GetBytes(raw) : null;
         }
 
         public async Task<SQLResult> ExecuteDCWiseSQLs(Int64 recordId, string sql)

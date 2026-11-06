@@ -99,6 +99,16 @@ public sealed class SetAxDataHandler(
             return SetAxDataResult.Failure(AxDataErrors.ObjectExpired);
         }
 
+        if (state.Status == AxDataLifecycleStatus.Closed)
+        {
+            return SetAxDataResult.Failure(AxDataErrors.ObjectNotFound);
+        }
+
+        if (state.Status is AxDataLifecycleStatus.Saving or AxDataLifecycleStatus.Saved)
+        {
+            return SetAxDataResult.Failure(AxDataErrors.ActiveConflict, state.Version);
+        }
+
         var authorizationStarted = Stopwatch.GetTimestamp();
         var permission = await authorizationProvider.GetSetPermissionAsync(
             actor.TenantId,
@@ -163,6 +173,17 @@ public sealed class SetAxDataHandler(
             }
 
             state = recovery.State!;
+        }
+
+
+        if (state.Status == AxDataLifecycleStatus.Closed)
+        {
+            return SetAxDataResult.Failure(AxDataErrors.ObjectNotFound);
+        }
+
+        if (state.Status is AxDataLifecycleStatus.Saving or AxDataLifecycleStatus.Saved)
+        {
+            return SetAxDataResult.Failure(AxDataErrors.ActiveConflict, state.Version);
         }
 
         if (state.Version != command.ExpectedVersion)

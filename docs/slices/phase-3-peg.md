@@ -24,7 +24,7 @@ Done when (you run): stale workflow version returns 409; two concurrent approval
 Effort: Deep, line-by-line review | After: P3-02, P1-07
 Read: technical/07-authorization.md, technical/06.8-peg-tasks.md, architecture/12-security.md
 Do first: tests: approve an unassigned task; cross-tenant task; a client-sent bypass flag.
-Build: task-based access (ObjectId alone never selects a task); approver gets Get and assigned-task actions only; recall by initiator or admin; the internal final-approval Save bypass reachable only from trusted server code.
+Build: task-based access (ObjectId alone never selects a task); approver gets Get and assigned-task actions only; recall by initiator or admin; final-approval Save is reachable only through a narrow trusted AxPut client, never a client-supplied bypass flag.
 Done when: all the tests above pass.
 
 ### P3-04 Submit
@@ -51,9 +51,9 @@ Build: every row of the matrix; final approval (false) marks the workflow Approv
 Done when: scenario 5 and the false branch of scenario 7 pass; approval and Save use different idempotency keys.
 
 ### P3-08 SaveOnApprove = true final approval
-Effort: Deep (highest risk), line-by-line review | After: P3-07
+Effort: Deep (highest risk), line-by-line review | After: P3-07, P2-09
 Read: technical/12-peg-consistency.md (12.2), architecture/09-peg-lifecycle.md (9.3, the true branch), technical/11-save-orchestration.md
-Build: the PEG service calls the trusted internal Save (skips permission and PEG-initiation checks only, never validation or idempotency); success then Approved; failure then not Approved with a recoverable `FinalApprovalPendingSave` state; retry is idempotent.
+Build: the PEG service calls AxPut through a narrow trusted server client (skips public PEG-initiation checks only, never authentication of the service, validation, version/definition checks, or idempotency); success then Approved; failure then not Approved with a recoverable `FinalApprovalPendingSave` state; retry is idempotent.
 Done when: scenarios 3, 4 and the true branch of 7 pass; fault injection between the Save commit and the PEG update leaves no untracked saved record and no false Approved.
 
 ### P3-09 PEG history adapter and Redis/DB consistency

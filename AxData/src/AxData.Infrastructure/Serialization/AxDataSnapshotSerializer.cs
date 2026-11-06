@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AxData.Contracts.Snapshots;
 using AxData.Domain.Lifecycle;
 using AxData.Domain.Model;
 
@@ -81,11 +82,11 @@ public sealed class AxDataSnapshotSerializer
 
             var state = schemaVersion switch
             {
-                1 => FromSnapshot(document.RootElement.Deserialize<AxDataSnapshotV1>(JsonOptions)
+                1 => FromSnapshot(document.RootElement.Deserialize<DataObjectSnapshotV1>(JsonOptions)
                     ?? throw new AxDataSnapshotException("The snapshot payload is empty.")),
-                2 => FromSnapshot(document.RootElement.Deserialize<AxDataSnapshotV2>(JsonOptions)
+                2 => FromSnapshot(document.RootElement.Deserialize<DataObjectSnapshotV2>(JsonOptions)
                     ?? throw new AxDataSnapshotException("The snapshot payload is empty.")),
-                CurrentSchemaVersion => FromSnapshot(document.RootElement.Deserialize<AxDataSnapshotV3>(JsonOptions)
+                CurrentSchemaVersion => FromSnapshot(document.RootElement.Deserialize<DataObjectSnapshotV3>(JsonOptions)
                     ?? throw new AxDataSnapshotException("The snapshot payload is empty.")),
                 _ => throw new AxDataSnapshotException($"Snapshot schema version '{schemaVersion}' is not supported.")
             };
@@ -303,9 +304,9 @@ public sealed class AxDataSnapshotSerializer
         }
     }
 
-    private static AxDataSnapshotV3 ToSnapshot(AxDataState state)
+    private static DataObjectSnapshotV3 ToSnapshot(AxDataState state)
     {
-        return new AxDataSnapshotV3
+        return new DataObjectSnapshotV3
         {
             SchemaVersion = CurrentSchemaVersion,
             ObjectId = state.ObjectId,
@@ -317,7 +318,7 @@ public sealed class AxDataSnapshotSerializer
             OwnerUserName = state.OwnerUserName,
             InitiatorUserName = state.InitiatorUserName,
             Version = state.Version,
-            StructDef = new StructDefReferenceV1(state.TransId, state.StructDefVersion),
+            StructDef = new StructDefReferenceSnapshot(state.TransId, state.StructDefVersion),
             CreatedAtUtc = FormatTimestamp(state.CreatedAtUtc),
             LastAccessedAtUtc = FormatTimestamp(state.LastAccessedAtUtc),
             ExpiresAtUtc = state.ExpiresAtUtc is null ? null : FormatTimestamp(state.ExpiresAtUtc.Value),
@@ -331,16 +332,16 @@ public sealed class AxDataSnapshotSerializer
             Files = state.Files
                 .OrderBy(file => file.FileId, StringComparer.Ordinal)
                 .ThenBy(file => file.FileName, StringComparer.Ordinal)
-                .Select(file => new FileReferenceV1(file.FileId, file.FileName, file.ContentType))
+                .Select(file => new FileReferenceSnapshot(file.FileId, file.FileName, file.ContentType))
                 .ToList(),
             AxOpen = state.AxOpen
         };
     }
 
-    private static DataContainerV3 ToSnapshot(AxDataContainer container)
+    private static DataContainerSnapshotV3 ToSnapshot(AxDataContainer container)
     {
         var rows = container.Rows
-            .Select(row => new DataRowV3(
+            .Select(row => new DataRowSnapshotV3(
                 row.RowId,
                 row.PersistedRecordId,
                 row.State.ToString(),
@@ -351,12 +352,12 @@ public sealed class AxDataSnapshotSerializer
                     .ToList()))
             .ToList();
 
-        return new DataContainerV3(container.Name, container.IsGrid, rows);
+        return new DataContainerSnapshotV3(container.Name, container.IsGrid, rows);
     }
 
-    private static FieldV3 ToSnapshot(string name, AxFieldValue field) =>
+    private static FieldSnapshotV3 ToSnapshot(string name, AxFieldValue field) =>
         field.IsDirty
-            ? new FieldV3(
+            ? new FieldSnapshotV3(
                 name,
                 ToSnapshotValue(field.Value),
                 field.IsReadOnly ? true : null,
@@ -364,15 +365,15 @@ public sealed class AxDataSnapshotSerializer
                 true,
                 ToSnapshotValue(field.OriginalValue),
                 field.OriginalSourceId)
-            : new FieldV3(
+            : new FieldSnapshotV3(
                 name,
                 ToSnapshotValue(field.Value),
                 field.IsReadOnly ? true : null,
                 field.SourceId);
 
-    private static WorkflowV1 ToSnapshot(PegActiveState workflow)
+    private static WorkflowSnapshot ToSnapshot(PegActiveState workflow)
     {
-        return new WorkflowV1(
+        return new WorkflowSnapshot(
             workflow.WorkflowInstanceId,
             workflow.CurrentTaskId,
             workflow.InitiatorUserName,
@@ -383,7 +384,7 @@ public sealed class AxDataSnapshotSerializer
             FormatTimestamp(workflow.PendingFromUtc));
     }
 
-    private static AxDataState FromSnapshot(AxDataSnapshotV1 snapshot)
+    private static AxDataState FromSnapshot(DataObjectSnapshotV1 snapshot)
     {
         if (snapshot.SchemaVersion != 1)
         {
@@ -429,7 +430,7 @@ public sealed class AxDataSnapshotSerializer
             snapshot.AxOpen);
     }
 
-    private static AxDataState FromSnapshot(AxDataSnapshotV2 snapshot)
+    private static AxDataState FromSnapshot(DataObjectSnapshotV2 snapshot)
     {
         if (snapshot.SchemaVersion != 2)
         {
@@ -474,7 +475,7 @@ public sealed class AxDataSnapshotSerializer
             snapshot.AxOpen);
     }
 
-    private static AxDataState FromSnapshot(AxDataSnapshotV3 snapshot)
+    private static AxDataState FromSnapshot(DataObjectSnapshotV3 snapshot)
     {
         if (snapshot.SchemaVersion != CurrentSchemaVersion)
         {
@@ -519,7 +520,7 @@ public sealed class AxDataSnapshotSerializer
             snapshot.AxOpen);
     }
 
-    private static AxDataContainer FromSnapshot(string objectId, DataContainerV1 container)
+    private static AxDataContainer FromSnapshot(string objectId, DataContainerSnapshotV1 container)
     {
         var rows = (container.Rows ?? throw new AxDataSnapshotException("A data container is missing rows."))
             .Select((row, index) => new AxDataRow(
@@ -544,7 +545,7 @@ public sealed class AxDataSnapshotSerializer
         return new AxDataContainer(Required(container.Name, "dataContainers.name"), container.IsGrid, rows);
     }
 
-    private static AxDataContainer FromSnapshot(DataContainerV2 container)
+    private static AxDataContainer FromSnapshot(DataContainerSnapshotV2 container)
     {
         var rows = (container.Rows ?? throw new AxDataSnapshotException("A data container is missing rows."))
             .Select(row => new AxDataRow(
@@ -565,7 +566,7 @@ public sealed class AxDataSnapshotSerializer
         return new AxDataContainer(Required(container.DcId, "dataContainers.dcId"), container.IsGrid, rows);
     }
 
-    private static AxDataContainer FromSnapshot(DataContainerV3 container)
+    private static AxDataContainer FromSnapshot(DataContainerSnapshotV3 container)
     {
         var rows = (container.Rows ?? throw new AxDataSnapshotException("A data container is missing rows."))
             .Select(row => new AxDataRow(
@@ -582,7 +583,7 @@ public sealed class AxDataSnapshotSerializer
         return new AxDataContainer(Required(container.DcId, "dataContainers.dcId"), container.IsGrid, rows);
     }
 
-    private static AxFieldValue FromSnapshot(FieldV3 field)
+    private static AxFieldValue FromSnapshot(FieldSnapshotV3 field)
     {
         var value = FromSnapshotValue(field.Value);
         if (field.IsDirty is null or false)
@@ -616,7 +617,7 @@ public sealed class AxDataSnapshotSerializer
         return $"row_{Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant()}";
     }
 
-    private static PegActiveState FromSnapshot(WorkflowV1 workflow)
+    private static PegActiveState FromSnapshot(WorkflowSnapshot workflow)
     {
         return new PegActiveState
         {
@@ -631,7 +632,7 @@ public sealed class AxDataSnapshotSerializer
         };
     }
 
-    private static SnapshotValueV1 ToSnapshotValue(object? value)
+    private static SnapshotValue ToSnapshotValue(object? value)
     {
         return value switch
         {
@@ -655,7 +656,7 @@ public sealed class AxDataSnapshotSerializer
         };
     }
 
-    private static object? FromSnapshotValue(SnapshotValueV1? value)
+    private static object? FromSnapshotValue(SnapshotValue? value)
     {
         if (value is null)
         {

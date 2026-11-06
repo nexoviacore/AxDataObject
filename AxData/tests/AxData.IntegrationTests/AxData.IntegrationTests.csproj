@@ -21,6 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\AxData.Contracts\AxData.Contracts.csproj" />
     <ProjectReference Include="..\..\src\AxData.Infrastructure\AxData.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\AxData.Integration.Axpert\AxData.Integration.Axpert.csproj" />
     <ProjectReference Include="..\..\src\AxData.Workers\AxData.Workers.csproj" />
@@ -30,6 +31,7 @@
   <ItemGroup>
     <None Update="Serialization\Fixtures\axdata-snapshot-v1.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Serialization\Fixtures\axdata-snapshot-v2.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Serialization\Fixtures\axdata-snapshot-v3.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -1,9 +1,11 @@
 ## 11. Transaction and Reliability Model
 
-- Main Save, grids, children, GenMaps, and MdMaps commit together wherever they share a database transaction boundary.
-- Any required failure rolls back the complete database unit of work within that transaction boundary.
-- Save and mapping execution are protected by a durable idempotency key.
-- `ObjectId + CallerId + Sequence`, or an explicit request key, identifies a logical bulk-save request.
-- External work is recorded in a Transactional Outbox wherever it shares the same database transaction boundary as the business operation.
-- Workers retry safely and deduplicate outbox deliveries.
-- Operations involving Redis and database state must have defined consistency and recovery rules; Redis state must not be treated as a substitute for a committed business transaction.
+- AxTstructData AxPut owns business Save and its provider transaction; AxData owns Init/Get/Set/Query and shared DataObject state.
+- Every AxPut request is ObjectId-aware. Missing ObjectId generates a secure ULID; omitted retention defaults to retain.
+- Main Save, grids, children, GenMaps, and MdMaps commit together wherever they share AxPut's database transaction.
+- Object version plus compare-and-set prevents stale mutation; the stored StructDef hash prevents old state from being interpreted under a changed definition.
+- Redis is not evidence of a committed business Save. DataObject retention/destruction occurs only after successful database commit, and durable closure prevents snapshot recovery from resurrecting a destroyed object.
+- Core Save slices deliver state hydration, optional payload overlay, empty-payload Save, validation, transaction parity, response, and retention before reliability infrastructure is added.
+- Production durability is incomplete until idempotency, transactional outbox, dispatcher, retry/backoff, poison handling, and recovery workers pass their slices.
+- Idempotency completion and outbox rows ultimately join AxPut's transaction. Required work targeting another database/service is delivered asynchronously; no cross-database atomicity is claimed.
+- PEG approval is not business Save. Trusted final approval invokes the same AxPut-owned Save behavior without any client bypass flag.

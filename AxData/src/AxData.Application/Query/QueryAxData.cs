@@ -95,6 +95,11 @@ public sealed class QueryAxDataHandler(
             return QueryAxDataResult.Failure(AxDataErrors.ObjectExpired);
         }
 
+        if (state.Status == AxDataLifecycleStatus.Closed)
+        {
+            return QueryAxDataResult.Failure(AxDataErrors.ObjectNotFound);
+        }
+
         var authorizationStarted = Stopwatch.GetTimestamp();
         var permission = await authorizationProvider.GetQueryPermissionAsync(
             actor.TenantId,
@@ -161,7 +166,8 @@ public sealed class QueryAxDataHandler(
             return null;
         }
 
-        var transactionReadOnly = !permission.CanEditTransaction ||
+        var transactionReadOnly = state.Status is AxDataLifecycleStatus.Saving or AxDataLifecycleStatus.Saved ||
+                                  !permission.CanEditTransaction ||
                                   !HasAnyRelation(authorization, AxActorRelation.OwnerOrInitiator | AxActorRelation.Administrator);
         var containers = new List<QueryDataContainerResponse>();
         foreach (var container in state.DataContainers.Values)
@@ -216,6 +222,7 @@ public sealed class QueryAxDataHandler(
             .Where(operation => AxAuthorizationPolicy.IsAllowed(
                 authorization with { HasOperationPermission = true },
                 operation))
+            .Where(operation => state.Status == AxDataLifecycleStatus.Active || operation == AxAuthorizationOperation.Query)
             .Select(ToContractName)
             .ToArray();
 

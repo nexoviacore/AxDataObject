@@ -22,8 +22,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\AxData.Api\AxData.Api.csproj" />
+    <ProjectReference Include="..\..\src\AxData.Contracts\AxData.Contracts.csproj" />
     <ProjectReference Include="..\..\src\AxData.Integration.Axpert\AxData.Integration.Axpert.csproj" />
     <ProjectReference Include="..\..\src\AxData.Peg\AxData.Peg.csproj" />
+    <ProjectReference Include="..\..\..\ARM-11.4\AxTstructData\AxTstructData.csproj" />
     <ProjectReference Include="..\AxData.TestSupport\AxData.TestSupport.csproj" />
   </ItemGroup>
 

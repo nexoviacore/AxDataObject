@@ -61,6 +61,20 @@ public sealed class AxDataRecoveryServiceTests
     }
 
     [Fact]
+    public async Task Durable_closure_marker_prevents_older_snapshot_recovery()
+    {
+        var (service, active, durable, _, actor) = CreateFixture();
+        durable.Seed(SampleStructDefFixture.CreateState());
+        active.MarkClosed(actor.TenantId, "object-1");
+
+        var result = await service.RecoverAsync(
+            actor, "object-1", AxAuthorizationOperation.Query, CancellationToken.None);
+
+        Assert.Equal("AXD-NOTFOUND-001", result.Error!.Code);
+        Assert.Null(await active.LoadAsync(actor.TenantId, "object-1", CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Missing_current_structdef_fails_permanently_without_restore()
     {
         var (service, active, durable, _, actor) = CreateFixture(includeDefinition: false);

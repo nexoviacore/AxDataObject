@@ -10,6 +10,13 @@ src/AxData.Api/Identity/ArmSessionConsistencyMiddleware.cs: transitional body AR
 src/AxData.Api/Production/ProductionServices.cs: production Redis/snapshot and live Axpert adapter deployment composition
 src/AxData.Api/Observability: Baseline/Diagnostic structured Microsoft logging over allow-listed operational events
 src/AxData.Api/Middleware/RequestCompletionLoggingMiddleware.cs: correlation-aware HTTP status and duration completion events
+src/AxData.Contracts: infrastructure-free shared DataObject snapshot, AxPut ObjectId/retention/version, and secure ULID contracts
+src/AxData.Contracts/Snapshots/DataObjectSnapshotContracts.cs: public schema v1/v2/v3 DTOs shared by AxData and AxTstructData
+src/AxData.Contracts/Snapshots/DataObjectSnapshotReader.cs: neutral schema-v1/v2/v3 reader that normalizes shared state for AxPut hydration
+../ARM-11.4/AxTstructData/Interface/IAxPutDataObjectStore.cs: AxPut-local tenant-scoped shared DataObject load boundary
+../ARM-11.4/AxTstructData/Model/AxPutDataObjectContext.cs: operation-scoped ObjectId state, known-version/retention state, stable row IDs, committed record-ID mappings, and AXD decision contracts
+../ARM-11.4/AxTstructData/Service/AxPutDataObjectStore.cs: Redis `AXD:{tenantId}:{objectId}` payload loader with identity validation and ARM trace
+../ARM-11.4/AxTstructData/Service/AxPutDataObjectProjection.cs: snapshot authorization, version/revision checks, runtime hydration, permission projection, overlay validation, and stable row-to-record identity capture
 src/AxData.Api/Development/M1DevelopmentServices.cs: opt-in Development-only real Redis/Postgres state composition with deterministic fake Axpert adapters
 src/AxData.Api/Development/DevelopmentIdentity.cs: trusted configured Development identity middleware shared by fake M1 and RealDataReview
 src/AxData.Api/Development/RealDataReviewServices.cs: Development-only real Axpert composition, host allowlist, separate state storage, and startup read-only guard
@@ -36,8 +43,7 @@ src/AxData.Infrastructure/Redis: tenant-scoped Redis state store with atomic ver
 src/AxData.Infrastructure/Redis/RedisAxDataLock.cs: token-owned Redis object lease with bounded expiry and compare-delete release
 src/AxData.Infrastructure/Redis/RedisSnapshotTransport.cs: atomic state-CAS/stream publication, consumer-group delivery, durability-gated TTL, DLQ, and acknowledged-offset trimming
 src/AxData.Infrastructure/Serialization: deterministic, versioned AxData snapshot contracts, typed values, and size/grid limit enforcement
-src/AxData.Infrastructure/Serialization/AxDataSnapshotV2.cs: dcId/rowId snapshot schema preserving semantic row array order with separate nullable recordId
-src/AxData.Infrastructure/Serialization/AxDataSnapshotV3.cs: deterministic sparse snapshot schema with normalized source IDs and dirty-only originals
+src/AxData.Infrastructure/Serialization/AxDataSnapshotSerializer.cs: deterministic v3 writer and v1/v2/v3 shared-contract validation/rehydration
 src/AxData.Infrastructure/Sql: ARMCommon-backed snapshot writes, three-provider atomic version guards, and provider-specific table migrations including PostgreSQL UTC timestamptz upgrade
 src/AxData.Integration.Axpert: adapters for StructDef/Validate/Parser/AxGet/AxPut
 src/AxData.Integration.Axpert/AxpertRecordKeyMapping.cs: consistent business-key and record-ID mapping for legacy permission/AxGet calls
@@ -80,6 +86,9 @@ tests/AxData.IntegrationTests/Sql: snapshot dialect, JSON binding, stale/duplica
 tests/AxData.IntegrationTests/Workers/SnapshotConsumerTests.cs: retry, acknowledgement, and poison-envelope dead-letter tests
 tests/AxData.ContractTests: API contracts (correlation, errors, identity, headers, Query/Set endpoints), Axpert adapter contracts (StructDef, AxGet, authorization, field engine, FillGrid), M1 identity, and the opt-in RealDataReviewSmokeTests harness
 tests/AxData.ContractTests/OperationalLoggingContractTests.cs: Baseline filtering and sensitive-value exclusion for structured operational logs
+tests/AxData.ContractTests/AxPutRequestContractTests.cs: ObjectId, retention, Data/SubmitData, version precedence, ULID, and response-omission contracts
+tests/AxData.ContractTests/AxPutDataObjectProjectionTests.cs: shared-state normalization, authorization, hydration, overlay, identity, version, and StructDef conflict contracts
+tests/AxData.ContractTests/AxPutEndpointErrorContractTests.cs: AxPut ObjectId HTTP status, AXD code, ObjectId, and known-version response contracts
 tests/AxData.UnitTests/Integration/M1DevelopmentAxpertTests.cs: M1 fake fixture, tenant denial, dependency, and read-only behavior
 tools/http/m1-recovery.http: executable Init/Set/Get/evict/recover real-infrastructure walkthrough
 tools/real-data-review/Invoke-P1C04Walkthrough.ps1: value-free P1C-04 HTTP, durability/recovery, and D28 mismatch automation

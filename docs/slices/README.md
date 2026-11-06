@@ -10,8 +10,8 @@ One slice = one Codex thread. Details for each slice are in the phase file; Code
 3. Paste:
 
 ```
-Task: P1C-05 AxData-native FillGrid
-Read docs/PROGRESS.md and the P1C-05 block in docs/slices/phase-1c-real-data-review.md, then the files that block lists, plus tools/postman/README.md.
+Task: P2-01 Shared DataObject contract and AxPut request contract
+Read docs/PROGRESS.md and only the P2-01 block in docs/slices/phase-2-durable-save.md, then only the files that block lists, plus tools/postman/README.md because this slice changes the AxPut contract.
 If this slice touches an endpoint, update the Postman collection per the README rule.
 Read docs/DECISIONS.md or docs/contracts/axpert-notes.md or docs/SALVAGE.md if required.
 Plan first, list assumptions, wait for my OK.
@@ -64,13 +64,17 @@ If the slice changes or adds an HTTP endpoint or response shape, update tools/po
 | P1D-05A | Field-engine parity, state, and performance design       | Standard |                    | phase-1d-readiness-gate.md       |
 | P1D-05B | Operation-scoped field runtime and snapshot v3          | Deep     | P1D-05A            | phase-1d-readiness-gate.md       |
 | P1D-06 | ARM change regression                                    | Light    |                    | phase-1d-readiness-gate.md       |
-| P2-01  | Idempotency store                                        | Deep     | D11                | phase-2-durable-save.md          |
-| P2-02  | Outbox table and transactional writer                    | Standard | D2                 | phase-2-durable-save.md          |
-| P2-03  | Outbox dispatcher worker                                 | Deep     |                    | phase-2-durable-save.md          |
-| P2-04  | Unit of work and Save orchestrator (no-PEG path)         | Deep     | D10, D21, D28, D30 | phase-2-durable-save.md          |
-| P2-04b | Reconciliation worker                                    | Deep     | D10, D21, D28, D30 | phase-2-durable-save.md          |
-| P2-05  | Save endpoint and bulk save                              | Standard |                    | phase-2-durable-save.md          |
-| P2-06  | Real transaction writer (AxPut, child, GenMap, MdMap)    | Deep     | D10                | phase-2-durable-save.md          |
+| P1D-07 | Operational logging                                      | Standard |                    | phase-1d-readiness-gate.md       |
+| P1D-08 | Stable DC and row addressing                             | Standard | D32                | phase-1d-readiness-gate.md       |
+| P2-01  | Shared DataObject and AxPut request contracts            | Deep     | D28, D32, D34-D36  | phase-2-durable-save.md          |
+| P2-02  | ObjectId load/init, authorization, hydration, overlay    | Deep     | D28, D29, D32-D36  | phase-2-durable-save.md          |
+| P2-03  | AxPut transaction parity and Save result                 | Deep     | D10, D20, D32, D36 | phase-2-durable-save.md          |
+| P2-04  | Version claim, lifecycle, retention/destruction          | Deep     | D5, D28, D32, D36  | phase-2-durable-save.md          |
+| P2-05  | Core HTTP and real-provider review                       | Standard | D27, D36           | phase-2-durable-save.md          |
+| P2-06  | AxPut idempotency store and transactional completion     | Deep     | D2, D11, D13, D36  | phase-2-durable-save.md          |
+| P2-07  | AxPut transactional outbox writer                        | Standard | D2, D36            | phase-2-durable-save.md          |
+| P2-08  | Outbox dispatcher, backoff, poison handling              | Deep     |                    | phase-2-durable-save.md          |
+| P2-09  | Save recovery and state-finalization workers             | Deep     | D30, D36           | phase-2-durable-save.md          |
 | P3-01  | PEG state machine (pure logic)                           | Deep     |                    | phase-3-peg.md                   |
 | P3-02  | PEG active state in Redis, versioned                     | Deep     |                    | phase-3-peg.md                   |
 | P3-03  | PEG authorization (security tests first)                 | Deep     |                    | phase-3-peg.md                   |
@@ -95,4 +99,4 @@ If the slice changes or adds an HTTP endpoint or response shape, update tools/po
 | P5-05  | Security suite and dependency/secret audit               | Deep     |                    | phase-5-hardening.md             |
 | P5-06  | Deployment config and runbooks                           | Light    |                    | phase-5-hardening.md             |
 
-Milestones (you review, no Codex): M1 after P1-15, M1.5 after P1C-05, M1.6 after P1D-06, M2 after P2-06, M3 after P3-10, M4 after P4-07.
+Milestones (you review, no Codex): M1 after P1-15, M1.5 after P1C-05, M1.6 after all P1D readiness slices, functional Phase 2 review after P2-05, M2 after P2-09, M3 after P3-10, M4 after P4-07.

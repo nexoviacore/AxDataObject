@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\AxData.Contracts\AxData.Contracts.csproj" />
     <ProjectReference Include="..\AxData.Domain\AxData.Domain.csproj" />
   </ItemGroup>
 

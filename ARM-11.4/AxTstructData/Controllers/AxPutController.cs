@@ -26,13 +26,17 @@ namespace AxTstructData
         public async Task<IActionResult> AxPut(AxPutInput putData)
         {
             ARMResult result = new ARMResult();
-            if (string.IsNullOrEmpty(putData.ARMSessionId) || putData.Data == null)
+            if (string.IsNullOrEmpty(putData.ARMSessionId))
             {
                 result.result.Add("status", false);
                 result.result.Add("messagetype", "Custom");
-                result.result.Add("message", "Required fields : 'ARMSessionId/Data' cannot be empty.");
+                result.result.Add("message", "Required field 'ARMSessionId' cannot be empty.");
+                if (!string.IsNullOrWhiteSpace(putData.ObjectId))
+                    result.result.Add("objectid", putData.ObjectId);
                 return BadRequest(result);
             }
+
+            putData.IfMatch = Request.Headers.IfMatch.ToString();
 
             APIResult getDataResult = await _putData.AxPut(putData);
 
@@ -62,7 +66,24 @@ namespace AxTstructData
                 if (getDataResult.data != null && getDataResult.data.ContainsKey("objectid"))
                     result.result.Add("objectid", getDataResult.data?["objectid"]?.ToString());
 
-                return BadRequest(result);
+                if (getDataResult.data != null && getDataResult.data.TryGetValue("version", out var failureVersion)
+                    && failureVersion != null)
+                    result.result.Add("version", failureVersion);
+
+                if (getDataResult.data != null && getDataResult.data.TryGetValue("dataObjectRetained", out var failureRetained)
+                    && failureRetained != null)
+                    result.result.Add("dataObjectRetained", failureRetained);
+
+                if (getDataResult.data != null && getDataResult.data.TryGetValue("errorcode", out var errorCode)
+                    && errorCode != null)
+                    result.result.Add("errorcode", errorCode);
+
+                int status = getDataResult.data != null &&
+                    getDataResult.data.TryGetValue("httpstatus", out var httpStatus) &&
+                    int.TryParse(httpStatus?.ToString(), out int parsedStatus)
+                    ? parsedStatus
+                    : StatusCodes.Status400BadRequest;
+                return StatusCode(status, result);
             }
             else if (getDataResult.data != null && getDataResult.data.ContainsKey("error") && !string.IsNullOrEmpty(getDataResult.data?["error"]?.ToString() ?? ""))
             {
@@ -90,7 +111,24 @@ namespace AxTstructData
                 if (getDataResult.data != null && getDataResult.data.ContainsKey("objectid"))
                     result.result.Add("objectid", getDataResult.data?["objectid"]?.ToString());
 
-                return BadRequest(result);
+                if (getDataResult.data != null && getDataResult.data.TryGetValue("version", out var dataFailureVersion)
+                    && dataFailureVersion != null)
+                    result.result.Add("version", dataFailureVersion);
+
+                if (getDataResult.data != null && getDataResult.data.TryGetValue("dataObjectRetained", out var dataFailureRetained)
+                    && dataFailureRetained != null)
+                    result.result.Add("dataObjectRetained", dataFailureRetained);
+
+                if (getDataResult.data != null && getDataResult.data.TryGetValue("errorcode", out var dataErrorCode)
+                    && dataErrorCode != null)
+                    result.result.Add("errorcode", dataErrorCode);
+
+                int status = getDataResult.data != null &&
+                    getDataResult.data.TryGetValue("httpstatus", out var dataHttpStatus) &&
+                    int.TryParse(dataHttpStatus?.ToString(), out int parsedStatus)
+                    ? parsedStatus
+                    : StatusCodes.Status400BadRequest;
+                return StatusCode(status, result);
             }
             else
             {

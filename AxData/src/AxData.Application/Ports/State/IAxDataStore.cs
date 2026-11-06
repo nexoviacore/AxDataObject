@@ -6,6 +6,9 @@ public interface IAxDataStore
 {
     Task<AxDataState?> LoadAsync(string tenantId, string objectId, CancellationToken cancellationToken);
 
+    Task<bool> IsClosedAsync(string tenantId, string objectId, CancellationToken cancellationToken) =>
+        Task.FromResult(false);
+
     Task<AxDataStoreWriteResult> WriteAsync(
         AxDataState state,
         long? expectedVersion,

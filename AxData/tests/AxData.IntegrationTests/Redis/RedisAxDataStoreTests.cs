@@ -135,15 +135,50 @@ public sealed class RedisAxDataStoreTests
         var objectId = NewObjectId();
         var store = CreateStore();
         await store.WriteAsync(CreateState(tenantId, objectId), null, CancellationToken.None);
+        await store.WriteAsync(CreateState(tenantId, objectId, version: 2), 1, CancellationToken.None);
         var transport = CreateTransport();
         var changed = CreateState(tenantId, objectId, version: 2);
         var envelope = new SnapshotEnvelope("event-stale", tenantId, objectId, 2, changed, DateTimeOffset.UtcNow);
 
-        var result = await transport.PublishAsync(envelope, 99, CancellationToken.None);
+        var result = await transport.PublishAsync(envelope, 1, CancellationToken.None);
         var length = await _redis.Connection.GetDatabase().StreamLengthAsync($"AXD:SNAPSHOTS:{{{tenantId.ToUpperInvariant()}}}");
 
         Assert.Equal(AxDataStoreWriteStatus.StaleVersion, result.Status);
         Assert.Equal(0, length);
+    }
+
+    [Fact]
+    public async Task Active_save_claim_blocks_a_racing_snapshot_publish()
+    {
+        if (!SupportsStreams()) return;
+        var tenantId = $"tenant-{Guid.NewGuid():N}";
+        var objectId = NewObjectId();
+        var store = CreateStore();
+        await store.WriteAsync(CreateState(tenantId, objectId), null, CancellationToken.None);
+        await _redis.Connection.GetDatabase().HashSetAsync(BuildKey(tenantId, objectId), "saveClaim", "claim-a");
+        var changed = CreateState(tenantId, objectId, version: 2);
+
+        var result = await CreateTransport().PublishAsync(
+            new SnapshotEnvelope("event-claimed", tenantId, objectId, 2, changed, DateTimeOffset.UtcNow),
+            1,
+            CancellationToken.None);
+
+        Assert.Equal(AxDataStoreWriteStatus.StaleVersion, result.Status);
+        Assert.Equal(1, result.CurrentVersion);
+        Assert.Equal(1, (await store.LoadAsync(tenantId, objectId, CancellationToken.None))!.Version);
+    }
+
+    [Fact]
+    public async Task Durable_closure_marker_is_tenant_scoped()
+    {
+        var tenantId = $"tenant-{Guid.NewGuid():N}";
+        var objectId = NewObjectId();
+        var database = _redis.Connection.GetDatabase();
+        await database.StringSetAsync($"AXD:CLOSED:{{{tenantId.ToUpperInvariant()}}}:{objectId.ToUpperInvariant()}", "closed");
+        var store = CreateStore();
+
+        Assert.True(await store.IsClosedAsync(tenantId, objectId, CancellationToken.None));
+        Assert.False(await store.IsClosedAsync("other-tenant", objectId, CancellationToken.None));
     }
 
     [Fact]
@@ -223,7 +258,7 @@ public sealed class RedisAxDataStoreTests
         $"AXD:{{{tenantId.ToUpperInvariant()}}}:{objectId.ToUpperInvariant()}";
 
     private bool SupportsStreams() =>
-        _redis.Connection.GetServer(_redis.Connection.GetEndPoints().Single()).Version.Major >= 5;
+        _redis.SupportsRedis62OrThrowWhenRequired();
 }
 
 [CollectionDefinition(Name)]
@@ -236,12 +271,25 @@ public sealed class RedisServerFixture : IAsyncLifetime
 {
     private Process? _process;
     private ConnectionMultiplexer? _connection;
+    private bool _ownsProcess;
 
     public ConnectionMultiplexer Connection =>
         _connection ?? throw new InvalidOperationException("The Redis fixture is not initialized.");
 
     public async Task InitializeAsync()
     {
+        var externalConnection = Environment.GetEnvironmentVariable("AXDATA_REDIS_TEST_CONNECTION");
+        if (!string.IsNullOrWhiteSpace(externalConnection))
+        {
+            var externalConfiguration = ConfigurationOptions.Parse(externalConnection);
+            externalConfiguration.AbortOnConnectFail = false;
+            externalConfiguration.ConnectTimeout = 5000;
+            externalConfiguration.SyncTimeout = 5000;
+            _connection = await ConnectionMultiplexer.ConnectAsync(externalConfiguration);
+            await _connection.GetDatabase().PingAsync();
+            return;
+        }
+
         var port = GetAvailablePort();
         var executable = Environment.GetEnvironmentVariable("AXDATA_REDIS_SERVER") ?? "redis-server";
         var startInfo = new ProcessStartInfo(executable)
@@ -262,6 +310,7 @@ public sealed class RedisServerFixture : IAsyncLifetime
 
         _process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("The Redis integration-test process could not be started.");
+        _ownsProcess = true;
 
         var configuration = new ConfigurationOptions
         {
@@ -294,13 +343,31 @@ public sealed class RedisServerFixture : IAsyncLifetime
             _connection.Dispose();
         }
 
-        if (_process is { HasExited: false })
+        if (_ownsProcess && _process is { HasExited: false })
         {
             _process.Kill(entireProcessTree: true);
             await _process.WaitForExitAsync();
         }
 
         _process?.Dispose();
+    }
+
+    public bool SupportsRedis62OrThrowWhenRequired()
+    {
+        var serverVersion = Connection.GetServer(Connection.GetEndPoints().Single()).Version;
+        var supported = serverVersion >= new Version(6, 2);
+        var required = string.Equals(
+            Environment.GetEnvironmentVariable("AXDATA_REQUIRE_REDIS_6_2"),
+            "true",
+            StringComparison.OrdinalIgnoreCase);
+
+        if (required && !supported)
+        {
+            throw new InvalidOperationException(
+                $"Redis 6.2 or later is required for P1D-03 verification; connected server is {serverVersion}.");
+        }
+
+        return supported;
     }
 
     private static int GetAvailablePort()

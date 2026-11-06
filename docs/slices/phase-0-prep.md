@@ -34,8 +34,9 @@ Done when: the note exists and D10, D11, D12 are answered.
 
 ### P0-04 Salvage assessment (report only, no new code)
 Effort: Standard | After: P0-01 | Run alongside P0-02/P0-03
-Read: docs/architecture/ and docs/technical/ (whichever sections match what you find in old-AxData), then
-  `ARM-11.4/AxDataObject/` in full, and `ARM-11.4/AxTstructData/` for the specific flows AxDataObject mirrors.
+Historical read used to produce the completed report: matching architecture/technical sections, the now-retired
+  `ARM-11.4/AxDataObject/` project, and the production `ARM-11.4/AxTstructData/` flows it attempted to mirror.
+  Do not restore or reread the retired project; `docs/SALVAGE.md` is the retained result and Git history is archival.
   Use `rg` to jump to the relevant StructDef/Validate/Parser/Common calls from there — don't read those projects
   end to end.
 Do: write `docs/SALVAGE.md` with four sections:

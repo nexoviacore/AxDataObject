@@ -1,6 +1,6 @@
 # P0-04 salvage assessment
 
-This report assesses `ARM-11.4/AxDataObject` against the new AxData architecture. It also compares the AxGet, AxPut, and permission flows that `AxDataObject` mirrors in `ARM-11.4/AxTstructData`. It is an assessment of behavior to port, not permission to reference the old projects directly from Domain or Application.
+This report preserves the completed assessment of the retired `ARM-11.4/AxDataObject` project against the new AxData architecture. The retired source remains available in Git history only. Current parity comes from the production Axpert caller or a fingerprinted cached parity contract, never by restoring the discarded project.
 
 For every later Phase 1-3 implementation plan, any work involving a capability below must name the applicable bucket and item before code is written. A plan must not interpret a **Reuse with changes** item as approval to copy the old type wholesale.
 
@@ -62,8 +62,8 @@ Future plans for the domain state model, request mapping, or compatibility seria
 
 ### Save/AxPut, GenMap, and MdMap behavior
 
-- `AxTstructData.AxPutService` and the incomplete/commented `AxDataObject` save path contain business knowledge for create/edit row selection, record-ID allocation, child transactions, GenMaps, MdMaps, final validation, attachments, and table-wise commands.
-- Treat these as reference behavior for `IAxpertTransactionWriter`, not as reusable orchestration. The writer must fit the new idempotent Save transaction: main/DC/child writes, mappings, idempotency record, and outbox records execute once within the available transaction boundary.
+- `AxTstructData.AxPutService` is the production authority for create/edit row selection, record-ID allocation, child transactions, GenMaps, MdMaps, final validation, attachments, and table-wise commands. The retired AxDataObject path was incomplete/commented and supplied no behavior to preserve beyond this recorded assessment.
+- Extend the production `AxTstructData.AxPutService` with changes; do not port this behavior into an AxData-owned writer. AxPut owns ObjectId-aware Save, including main/DC/child writes and mappings. AxData continues to own Init/Get/Set/Query state operations and shares only the versioned DataObject contract. Reliability additions must join AxPut's existing transaction where possible.
 - Existing SQL-building and mapping routines require database-provider review, parameterization review, explicit success checks, and tests before any port. Cross-database mappings require an outbox/saga rather than a claimed single transaction.
 - PEG submit/approval and business Save remain distinct. `SaveOnApprove=true` uses trusted internal Save only at final approval; `SaveOnApprove=false` reaches `ApprovedAwaitingSave` and requires explicit Save.
 
@@ -71,7 +71,7 @@ Future plans for initialize, set, query, authorization, Redis, snapshots, save, 
 
 ## Discard
 
-- The `AxDataObject` project/application composition (`Program.cs`, project references, and direct ARMCommon/AxStructDef/AxValidate/AxParser wiring): it violates the required Api -> Application -> Domain dependency direction and Axpert port boundary.
+- The retired `AxDataObject` project/application composition (`Program.cs`, project references, and direct ARMCommon/AxStructDef/AxValidate/AxParser wiring): it violated the required Api -> Application -> Domain dependency direction and Axpert port boundary and must not be restored.
 - `DataObjectController` and the old DTOs as public API contracts: they use ARMSessionId and client roles, identify state by TransId/user/record rather than tenant-scoped ObjectId, and lack expected version, idempotency key, correlation/error contract, and permission-filtered query semantics.
 - The Redis key `{schema}:ARM:{transId}:{userName}:{recordId}:ARM-AX-DATAOBJECT`: it is not the required `AXD:{tenantId}:{objectId}` identity and does not implement ObjectId authorization, version CAS, owned locking, or recovery semantics.
 - Blind Redis replacement and load-or-create during Set: these permit silent overwrite and bypass the required stale-version `409` behavior.

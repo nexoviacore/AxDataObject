@@ -16,6 +16,9 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
         if exists == 0 or currentVersion ~= ARGV[1] then
             return 'stale|' .. (currentVersion or '')
         end
+        if redis.call('HEXISTS', KEYS[1], 'saveClaim') == 1 then
+            return 'stale|' .. currentVersion
+        end
         redis.call('HMSET', KEYS[1], 'version', ARGV[2], 'payload', ARGV[3])
         redis.call('PERSIST', KEYS[1])
         redis.call('XADD', KEYS[2], '*',

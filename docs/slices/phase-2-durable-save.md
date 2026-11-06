@@ -1,66 +1,133 @@
-# Phase 2: Durable Save
+# Phase 2: AxPut-owned ObjectId-aware Save
 
-Paths under **Read** are relative to `docs/`. Effort levels as in phase-0-prep.md. DB integration tests: you run.
+Decision D36 supersedes the earlier AxData-owned external-saga plan. AxTstructData AxPut owns business Save; AxData retains Init/Get/Set/Query and the shared DataObject state. Implement each block in a separate chat/session. The first blocks establish the important functional flow; the final blocks add the durability infrastructure required before production release.
 
-### P2-01 Idempotency store
+### P2-01 Shared DataObject contract and AxPut request contract
 
-Effort: Deep | After: P0-02 | Needs: D11
-Read: technical/11-save-orchestration.md (11.1), technical/13-database.md (13.2)
-Build: table and repository; request hash; states InProgress / Completed / FailedRetryable / FailedFinal / NeedsReview; lease with takeover of an expired InProgress (takeover only marks it for reconciliation, never re-runs the writer); same key with a different hash returns AXD-IDEMP. The lease duration must exceed the writer's command timeout plus a margin (D30); expiry only makes the entry eligible for reconciliation.
-Done when: unit tests for hashing and conflict; DB test: concurrent insert leaves exactly one InProgress; an expired lease is reclaimable for reconciliation.
+Effort: Deep | After: P1D-05B | Needs: D28, D32, D34-D36
+Read: technical/06.6-save.md, technical/11-save-orchestration.md (11.1-11.2), contracts/axpert-notes.md (§1, §6), architecture/11-reliability.md
+SALVAGE: Reuse with changes — Redis active-state persistence; Save/AxPut, GenMap, and MdMap behavior.
 
-### P2-02 Outbox table and transactional writer
+Build:
 
-Effort: Standard | After: P2-01 | Needs: D2 (answered: outbox)
-Read: technical/13-database.md (13.3), technical/11-save-orchestration.md (11.3), architecture/11-reliability.md
-Build: `AxOutbox` table; a writer that joins AxData's own local transaction (never AxPut's); deduplication key.
-Done when: a rollback of the local transaction removes the outbox rows.
+1. Define a versioned, infrastructure-free shared snapshot contract for AxData schema v1/v2/v3 compatibility. It carries ObjectId, tenant, TransId, record identity, owner/workflow relation, object version, StructDef hash, DC/row/field state, source IDs, originals, lifecycle, and expiry; it contains no Redis, SQL, Axpert, parser, or service types.
+2. Make AxData serialization consume the shared contract without changing current v1/v2 reads or v3 bytes.
+3. Define the AxPut request contract: nullable `objectid`, nullable `retainDataObject` defaulting to true, `If-Match`/`expectedVersion`, and optional `Data` only for an existing ObjectId. Remove `callIsFromAxSave`.
+4. There is no legacy mode: missing ObjectId generates a secure ULID. A new ObjectId requires a `Data` item for TransId/action; missing or empty `{}` `SubmitData` is valid.
+5. Define response rules: supplied/generated ObjectId is returned; known current version is returned on failure; unknown version is omitted and never serialized as null.
 
-### P2-03 Outbox dispatcher worker
+Cross-project change: AxTstructData must reference/use the neutral contract because it is now the Save owner and must read the same state as AxData. Blast radius is AxTstructData request/response binding and AxData snapshot serialization; no AxStructDef/AxValidate/AxParser/Common change is allowed.
 
-Effort: Deep | After: P2-02
-Read: technical/13-database.md (13.3), architecture/13-scalability.md
-Scope: src/AxData.Workers
-Build: claim bounded batches with DB-safe locking; deliver through a sink port; retry with backoff; deduplicate; dead-letter or review state; sinks faked.
-Done when: two workers never deliver the same row; a failed delivery is retried; a poison message is dead-lettered.
+Done when: snapshot fixtures remain byte-compatible; contract tests cover all ObjectId/retention/Data/SubmitData/version combinations; no `callIsFromAxSave` symbol remains; no product Save behavior changes yet.
+Postman: update the request/response contract examples while preserving user-owned collection edits.
 
-### P2-04 Save orchestrator as external saga (no-PEG path)
+### P2-02 ObjectId load/init, authorization, hydration, and payload overlay
 
-Effort: Deep, line-by-line review | After: P2-02, P1-14, P1D-02 | Needs: D10, D21, D28, D30
-Read: technical/11-save-orchestration.md, technical/06.6-save.md (first row of the matrix only), architecture/11-reliability.md
-Build, in this order (D21), against a FAKE writer with fault injection: 0. Check the StructDef hash (D28); mismatch fails closed before any write.
+Effort: Deep, line-by-line review | After: P2-01 | Needs: D28, D29, D32-D36
+Read: technical/11-save-orchestration.md (11.1-11.2, 11.5), technical/06.6-save.md, contracts/axpert-notes.md (§1, §2, §4, §6)
+SALVAGE: Reuse with changes — Runtime field and row behavior; StructDef/Validate/Parser integration; Authorization lookup; Redis active-state persistence; Save/AxPut behavior.
 
-1. CAS the object lifecycle to Saving (blocks concurrent Set). Do not hold a lock lease across the writer call.
-2. For NEW records, reserve the main record ID (D30) through the Integration.Axpert adapter that calls StructDef.GetRecordIdsFromDB on a writable connection (site number from the live session). Store it as Int64. Then Local transaction: reserve idempotency InProgress with the reserved ID; same hash Completed returns the stored result; different hash conflicts. Commit.
-3. Final validation, then call the writer with a bounded command timeout (D10), passing the reserved ID as RecordId.
-4. Second local transaction: store outcome (including RecordId mappings for tmp: rows, D7), insert the outbox row, mark Completed. Commit.
-5. Update Redis (RecordId, status, version).
-   Done when: a duplicate Save returns the stored result and the writer ran once; a writer failure leaves no outbox row and no Completed; a crash after step 3 and before step 4 leaves InProgress and is picked up by P2-04b; a fault after step 4 and before step 5 is recoverable; StructDef hash mismatch is rejected. retry after a timeout reuses the same reserved ID.
+Parity trace: preserve AxPut session validation; trusted Project/UserName/AxSessionId/roles/dimensions; create/edit permission; StructDef load; Validate/Parser initialization; record/row registration; existing-state load submission; payload submission; targeted refresh; mandatory final-current-value validation. List every skipped step with a reason.
 
-### P2-04b Reconciliation worker (new)
+Build:
 
-Effort: Deep | After: P2-04 | Needs: D21, D30, P2-06 spike
-Read: DECISIONS.md D21 and D30, contracts/axpert-notes.md
-Scope: src/AxData.Workers
-Build: find stale InProgress entries past the lease. NEW records: run the existence probe (system context, read-only, boolean); present -> complete the entry (outcome + outbox + Completed); authoritatively absent -> FailedRetryable (retry reuses the reserved ID); error/ambiguous -> NeedsReview. EDIT/DELETE entries -> NeedsReview, never retried. Never blind-retry the writer.
-Done when: fake tests cover committed-but-unrecorded, never-committed, in-flight (lease not yet expired), probe failure, and edit cases; two workers never reconcile the same entry; no user session is needed.
-Done when: fake-writer tests cover committed-but-unrecorded, never-committed, and unprovable cases; two workers never reconcile the same entry.
+1. Authenticate and resolve trusted tenant/user before generating or loading ObjectId state.
+2. Existing ObjectId: load `AXD:{tenantId}:{objectId}`, verify tenant and object identity, actor relation, transaction/DC/field permission, expected version, and StructDef hash.
+3. Missing ObjectId: generate a cryptographically unpredictable ULID, require a `Data` item, load StructDef, initialize default/autogenerated state, and establish the initial version.
+4. Hydrate one operation-scoped runtime. Missing `Data` for an existing object saves stored state. Present values overlay stored state. Missing or `{}` `SubmitData` performs no overlay and continues through normal AxPut validation/Save applicability.
+5. Reject mismatched TransId/action, unknown or unauthorized DC/row/field input, malformed source/record identity, and failed conversions before SQL.
+6. Inside `ARM-11.4` only, ObjectId-aware Save preserves current AxTstructData trace output and may add operation-relevant DataObject state and field-value messages. Do not add tokens, connection strings, or unrelated secrets; AxData and worker logging rules remain unchanged.
 
-### P2-05 Save endpoint and bulk save
+Cross-project change: production orchestration changes are confined to AxTstructData plus the shared contract. This cannot be implemented as an AxData adapter because AxPut is the approved public Save owner. Blast radius includes all AxPut callers, so request defaults preserve omitted-field compatibility while intentionally adding ObjectId generation to every call.
 
-Effort: Standard | After: P2-04b, P1D-01, P1D-03
-Read: technical/06.6-save.md, technical/11-save-orchestration.md (11.1 key selection)
-Build: `POST .../save` with expected version and Idempotency-Key; `responseFields`; bulk key from tenant + ObjectId + CallerId + Sequence; each bulk item is its own saga with a per-item result (there is no all-or-nothing, because AxPut commits per record); PEG rows of the matrix return the defined "not allowed yet" error until Phase 3.
-Done when: end-to-end scenarios 1, 9 and 12 from technical/21-testing.md pass with fakes; a bulk call with one failing item returns mixed results.
+Done when: focused tests cover existing/no-Data, overlay, `{}`, new/default initialization, unknown ObjectId, cross-tenant/actor denial, stale version, definition mismatch, preservation of existing AxTstructData trace order, and the approved ObjectId state/value trace additions. No business SQL behavior is changed beyond reaching the existing Save path with the correct runtime.
+Postman: happy path plus unknown ObjectId, stale version, and invalid payload negatives.
 
-### P2-06 Real transaction writer (AxPut, child, GenMap, MdMap)
+### P2-03 AxPut transaction parity and ObjectId-aware Save result
 
-Effort: Deep | After: P2-04, P0-03, P1B-01 | Needs: D10, D20, D30
-Read: contracts/axpert-notes.md, technical/11-save-orchestration.md (11.2), technical/21-testing.md (21.2, 21.3)
-Build: Spike first, on a DISPOSABLE test schema (review data stays read-only, D27): (1) confirm a nonzero caller RecordId is treated as create, a replay of the same payload and ID fails without a second row, and recordid is unique in the table; (2) get the FN_AXDBPUT_GETRECID body per provider (the function is not in the repo); (3) build the existence probe from the StructDef main table name. Do the D20 audit after. first the D20 line-by-line audit of AxDataObject vs AxTstructData's AxPutService/SaveData. Then `IAxpertTransactionWriter` that calls AxPut as an external self-committing step; map returned recordIds for tmp: rows (D7). Child, GenMap and MdMap behavior follows what SaveData does inside its own transaction; anything that targets another DB or service goes through the outbox (D2). Do not modify AxPut without review.
-Done when (you run): a child failure leaves no main record (SaveData's own rollback); success returns correct recordId mappings; GenMap/MdMap effects happen once per operation key; D30 reconciliation works against a real committed record.
-(4) Oracle/SQL Server: obtain the allocator and a primary-key/unique proof for each deployed provider; until then new-record ambiguity on that provider goes to NeedsReview (D30). PostgreSQL is already confirmed. (5) Run notes §8.4 steps 2-5 on a disposable PostgreSQL schema.
+Effort: Deep, line-by-line review | After: P2-02 | Needs: D10, D20, D32, D36
+Read: technical/11-save-orchestration.md (11.1-11.3), contracts/axpert-notes.md (§1, §6, §8), architecture/11-reliability.md
+SALVAGE: Reuse with changes — Save/AxPut, GenMap, and MdMap behavior.
 
-## Milestone M2 (you)
+Parity trace: use `contracts/axput-save-parity.md` when its fingerprints match. Otherwise inspect only changed authoritative AxPut symbols and refresh that contract. The retired AxDataObject path is discarded and must not be restored or reread.
 
-Needs M1.6 (Phase 1D) done. Scenarios 1, 2, 9, 12 pass with real adapters, including a crash-between-AxPut-and-record test.
+Build:
+
+1. Feed the hydrated/overlaid runtime into the existing create/edit path without a second Save engine.
+2. Preserve `{}` behavior: initialized or stored values may produce applicable SQL and commit.
+3. Preserve one transaction for main/grid/child/GenMap/MdMap work sharing the same connection.
+4. Capture main/grid returned record IDs and map them back to stable AxData row identities.
+5. Keep the existing AxPut response structure and add ObjectId, final/known version, and `dataObjectRetained`.
+6. Never emit `version:null`. Rollback and validation failures return the known current version and retain unchanged state.
+
+Cross-project change: AxTstructData service/controller/repository behavior changes because it owns Save. Blast radius includes direct AxPut consumers, attachments, GenMap/MdMap, and tracking responses; no shared parser/validation behavior may be changed without a separate approved section.
+
+Done when: characterization and disposable-schema tests prove create, edit, no-Data existing Save, `{}` new Save, child rollback, mapping execution, attachments, record-ID mapping, response compatibility, and no Redis-before-SQL finalization.
+Postman: real disposable-schema happy path and at least one transaction failure.
+
+### P2-04 Version claim, lifecycle finalization, and retention/destruction
+
+Effort: Deep | After: P2-03, P1-14 | Needs: D5, D28, D32, D36
+Read: technical/11-save-orchestration.md (11.1-11.3), architecture/11-reliability.md, technical/06.6-save.md
+SALVAGE: Reuse with changes — Redis active-state persistence; Save/AxPut behavior.
+
+Build:
+
+1. Atomically claim the expected object version for Saving so Set cannot mutate it during persistence; one logical Save has one client-visible version advance.
+2. On rollback/failure, restore/retain the prior usable object state without persisting a partial payload overlay.
+3. After commit, apply record-ID mappings, Saved lifecycle, version, timestamps, and workflow projection through compare-and-set.
+4. Default/true retention keeps the finalized object. False retention durably closes/tombstones it before removing the active Redis key so snapshot recovery cannot resurrect it.
+5. If database commit succeeded but state finalization/cleanup fails, return saved outcome with explicit pending finalization; never report the committed business transaction as failed.
+
+Cross-project change: AxTstructData writes shared DataObject lifecycle state; AxData Set/Get/recovery must recognize Saving/Saved/closed states. Blast radius is ObjectId mutation and recovery only.
+
+Done when: races between Set/Save, stale Save, finalization fault, destroy/recovery, validate-only, and failed-Save retention are deterministic; failure versions are known-or-omitted, never null.
+Postman: retained and destroyed success cases plus stale-version negative.
+
+### P2-05 Core HTTP and real-provider review
+
+Effort: Standard | After: P2-04, P1D-01, P1D-03 | Needs: D27, D36
+Read: technical/06.6-save.md, technical/11-save-orchestration.md, contracts/axpert-notes.md (§6, §8)
+Build: finalize `POST /api/v{version}/AxPut`, header/body version precedence, error mapping, current AxTstructData trace parity, and the ordered Postman review pack. Run only against a reviewed disposable schema; real-data review connections stay read-only. Verify PostgreSQL first and record the Oracle/SQL Server evidence gaps. Bulk remains out of this slice: one ObjectId represents one primary DataObject.
+
+Done when: end-to-end create with values, create with `{}`, existing Save without `Data`, overlay edit, retained/destroyed state, stale version, StructDef mismatch, validation failure, transaction rollback, and response version omission all pass.
+Postman: updated.
+
+> Core functionality checkpoint: P2-01 through P2-05 provide the approved functional Save flow. It is not production-durable until P2-06 through P2-09 are complete.
+
+### P2-06 AxPut idempotency store and transactional completion
+
+Effort: Deep | After: P2-05 | Needs: D2, D11, D13, D36
+Read: technical/11-save-orchestration.md (11.4), architecture/11-reliability.md, technical/13-database.md (13.2)
+Build: provider-specific idempotency table/repository in the AxPut business database; canonical request hash; InProgress/Completed/FailedFinal states; bounded execution lease; same key/different hash conflict; stored generated ObjectId, record mappings, version, retention result, and response. Claim and completion join AxPut's business transaction so a committed Save always has a committed result. Do not add blind writer retry.
+
+Done when: concurrent same-key requests execute business Save once; lost-response replay returns the stored response; changed payload conflicts; rollback leaves no Completed result; generated ObjectId replay is stable.
+
+### P2-07 AxPut transactional outbox writer
+
+Effort: Standard | After: P2-06 | Needs: D2, D36
+Read: technical/11-save-orchestration.md (11.3-11.4), technical/13-database.md (13.3), architecture/11-reliability.md
+Build: provider-specific AxOutbox schema and AxPut repository commands. Same-database required work stays direct; cross-database/service work and post-commit state-finalization/cleanup signals use deduplicated outbox rows written in the business transaction.
+
+Done when: transaction rollback removes outbox rows; one committed logical Save creates each required event once; no request-path queue publish exists.
+
+### P2-08 Outbox dispatcher, backoff, and poison handling
+
+Effort: Deep | After: P2-07
+Read: technical/13-database.md (13.3), architecture/11-reliability.md, architecture/13-scalability.md
+Scope: `src/AxData.Workers` unless deployment composition proves an AxTstructData worker is required.
+Build: claim bounded provider-safe batches; deliver through sink ports; deduplicate; retry with bounded exponential backoff; record safe attempt metadata; dead-letter/NeedsReview poison events. Never log tokens, secrets, or field payloads in worker logs.
+
+Done when: two workers never deliver the same row; transient failure retries; poison delivery is quarantined; successful delivery is not repeated.
+
+### P2-09 Save recovery and state-finalization workers
+
+Effort: Deep | After: P2-08 | Needs: D30 as superseded by D36
+Read: technical/11-save-orchestration.md (11.4), architecture/11-reliability.md, contracts/axpert-notes.md (§6, §8)
+Build: recover committed idempotent outcomes without rerunning AxPut; retry Redis/snapshot finalization and retention=false cleanup from durable events; distinguish transaction rollback from committed-but-unfinalized state; send ambiguous provider outcomes to NeedsReview. No blind replay of edit/delete, children, GenMap, MdMap, or attachments.
+
+Done when: crash after commit/before response, crash after commit/before Redis update, cleanup failure, duplicate worker delivery, provider ambiguity, and expired session cases converge without duplicate business writes.
+
+## Milestone M2
+
+P2-01 through P2-09 are required. Functional review may occur after P2-05; production release requires idempotency, outbox, dispatch, and recovery completion plus real-provider crash-between-commit-and-finalization evidence.

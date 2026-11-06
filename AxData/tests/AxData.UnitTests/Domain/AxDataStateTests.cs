@@ -70,6 +70,35 @@ public sealed class AxDataStateTests
         Assert.Equal(2, state.Version);
     }
 
+    [Fact]
+    public void Save_claim_is_internal_and_finalization_advances_the_version_once()
+    {
+        var state = CreateState();
+
+        state.BeginSaving();
+
+        Assert.Equal(AxDataLifecycleStatus.Saving, state.Status);
+        Assert.Equal(1, state.Version);
+        Assert.Throws<InvalidOperationException>(() => state.RegisterMutation());
+
+        var version = state.FinalizeSaving(retainDataObject: true);
+
+        Assert.Equal(AxDataLifecycleStatus.Saved, state.Status);
+        Assert.Equal(2, version);
+    }
+
+    [Fact]
+    public void Save_claim_rollback_restores_active_state_without_version_advance()
+    {
+        var state = CreateState();
+        state.BeginSaving();
+
+        state.RollbackSaving();
+
+        Assert.Equal(AxDataLifecycleStatus.Active, state.Status);
+        Assert.Equal(1, state.Version);
+    }
+
     private static AxDataState CreateState() => new(
         "01JOBJECT",
         "tenant",

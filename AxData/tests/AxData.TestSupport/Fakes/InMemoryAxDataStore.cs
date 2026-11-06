@@ -6,6 +6,7 @@ namespace AxData.TestSupport.Fakes;
 public sealed class InMemoryAxDataStore : IAxDataStore
 {
     private readonly Dictionary<(string TenantId, string ObjectId), StoredState> _states = new();
+    private readonly HashSet<(string TenantId, string ObjectId)> _closed = [];
 
     public int WriteCount { get; private set; }
 
@@ -20,6 +21,15 @@ public sealed class InMemoryAxDataStore : IAxDataStore
         _states.TryGetValue((Normalize(tenantId), Normalize(objectId)), out var stored);
         return Task.FromResult(stored?.State);
     }
+
+    public Task<bool> IsClosedAsync(string tenantId, string objectId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(_closed.Contains((Normalize(tenantId), Normalize(objectId))));
+    }
+
+    public void MarkClosed(string tenantId, string objectId) =>
+        _closed.Add((Normalize(tenantId), Normalize(objectId)));
 
     public Task<AxDataStoreWriteResult> WriteAsync(
         AxDataState state,

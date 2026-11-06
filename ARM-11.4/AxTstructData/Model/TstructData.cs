@@ -28,7 +28,7 @@
         public bool MilliSecsInTimeStamp { get; set; } = false;
     }
 
-    public class AxPutInput
+    public class AxPutInput : AxData.Contracts.AxPut.AxPutObjectRequestContract
     {
         public string ARMSessionId { get; set; }
         public string AxSessionId { get; set; }
@@ -39,11 +39,15 @@
         public string AxClient_DateFormat { get; set; } = "";
         public List<string>? Roles { get; set; } = new List<string>();
         public bool MilliSecsInTimeStamp { get; set; } = false;
-        [Newtonsoft.Json.JsonProperty("callIsFromAxSave")]
-        public bool CallIsFromAxSave { get; set; } = false;
         [Newtonsoft.Json.JsonProperty("objectid")]
-        public string? ObjectId { get; set; }
-        public List<AxPut> Data { get; set; }
+        public override string? ObjectId { get; set; }
+        [Newtonsoft.Json.JsonProperty("retainDataObject")]
+        public override bool? RetainDataObject { get; set; } = true;
+        [Newtonsoft.Json.JsonProperty("expectedVersion")]
+        public override long? ExpectedVersion { get; set; }
+        [Newtonsoft.Json.JsonIgnore]
+        public string? IfMatch { get; set; }
+        public List<AxPut>? Data { get; set; }
 
     }
     public class AxPut

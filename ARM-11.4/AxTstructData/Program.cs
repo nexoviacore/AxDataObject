@@ -51,6 +51,7 @@ try
     services.AddScoped<IAxGetRepository, AxGetRepository>();
     services.AddScoped<IAxGetService, AxGetService>();
     services.AddScoped<IAxPutRepository, AxPutRepository>();
+    services.AddScoped<IAxPutDataObjectStore, AxPutDataObjectStore>();
     services.AddScoped<IAxPutService, AxPutService>();
     services.AddScoped<IAxDeleteRepository, AxDeleteRepository>();
     services.AddScoped<IAxDeleteService, AxDeleteService>();

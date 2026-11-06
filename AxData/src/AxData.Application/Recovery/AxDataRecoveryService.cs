@@ -33,6 +33,11 @@ public sealed class AxDataRecoveryService(
         ArgumentNullException.ThrowIfNull(actor);
         ArgumentException.ThrowIfNullOrWhiteSpace(objectId);
 
+        if (await activeStore.IsClosedAsync(actor.TenantId, objectId, cancellationToken).ConfigureAwait(false))
+        {
+            return AxDataRecoveryResult.Failure(AxDataErrors.ObjectNotFound);
+        }
+
         var loadStarted = Stopwatch.GetTimestamp();
         var read = await snapshotRepository.LoadLatestAsync(
             actor.TenantId,

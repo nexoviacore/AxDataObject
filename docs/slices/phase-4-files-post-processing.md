@@ -26,7 +26,7 @@ Done when: expired link, wrong tenant and a different artifact are all denied.
 
 ### P4-04 Print request API and event
 
-Effort: Standard | After: P2-03, P4-03 | Needs: D2, D9
+Effort: Standard | After: P2-08, P4-03 | Needs: D2, D9
 Read: technical/06.7-print.md, architecture/08-lifecycle.md (8.5)
 Build: `POST .../print` (idempotent); authorization by ObjectId plus explicit print permission (approvers denied by default); enqueue a print event; response shape per D9.
 Done when: API tests with fakes; unauthorized user denied.
@@ -40,9 +40,9 @@ Done when: contract tests with a recorded sample; retry and dedupe work; failure
 
 ### P4-06 Notification and integration workers
 
-Effort: Standard | After: P2-03
+Effort: Standard | After: P2-08
 Read: technical/13-database.md (13.3), architecture/07.2-peg-module.md
-Build: reuse the P2-03 dispatcher; sinks for notifications and integration messages; idempotent delivery.
+Build: reuse the P2-08 dispatcher; sinks for notifications and integration messages; idempotent delivery.
 Done when: duplicate events deliver once; permanent failures dead-lettered.
 
 ### P4-07 Audit trail

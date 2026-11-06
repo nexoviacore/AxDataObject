@@ -173,6 +173,18 @@ function Wait-ForWorkerAcknowledgement {
                 $deadLettered += [int] $match.Groups['dead'].Value
             }
 
+            foreach ($line in Get-Content -LiteralPath $LogPath) {
+                if (-not ([string] $line).TrimStart().StartsWith("{")) { continue }
+                try {
+                    $event = $line | ConvertFrom-Json
+                    if ([string] $event.name -eq "snapshot.ack.completed") { $acknowledged++ }
+                    if ([string] $event.name -eq "snapshot.deadletter.completed") { $deadLettered++ }
+                }
+                catch {
+                    # The worker may still be appending the current JSON line; retry on the next poll.
+                }
+            }
+
             if ($deadLettered -gt 0) {
                 throw "The snapshot worker dead-lettered $deadLettered item(s)."
             }
@@ -324,10 +336,27 @@ function Invoke-WalkthroughCase {
         throw "Initial Get version does not match Init for case '$($Case.Name)'."
     }
 
+    $resolvedSetData = $Case.SetData | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100 -AsHashtable
+    foreach ($dcEntry in $resolvedSetData.GetEnumerator()) {
+        foreach ($row in @($dcEntry.Value.Rows)) {
+            if (-not $row.ContainsKey("RowId") -or
+                [string] $row.RowId -ne "__FIRST_EXISTING_ROW__") { continue }
+
+            $container = @($initialGet.dataContainers | Where-Object { [string] $_.dcId -eq [string] $dcEntry.Key }) |
+                Select-Object -First 1
+            $existingRow = @($container.rows) | Select-Object -First 1
+            if ($null -eq $existingRow -or [string]::IsNullOrWhiteSpace([string] $existingRow.rowId)) {
+                throw "Case '$($Case.Name)' could not resolve the first existing row for DC '$($dcEntry.Key)'."
+            }
+
+            $row.RowId = [string] $existingRow.rowId
+        }
+    }
+
     $setBody = [ordered]@{
         getDeps = $true
         expectedVersion = [long] $init.version
-        data = $Case.SetData
+        data = $resolvedSetData
     }
     $set = Invoke-SafeHttp -Method POST -Uri "$script:P1C04BaseUrl/api/v1/axdata/$objectId/set" `
         -Headers @{ 'If-Match' = "`"$($init.version)`"" } -Body $setBody
@@ -490,6 +519,9 @@ $persistenceTimeout = Get-Variable -Name P1C04PersistenceTimeoutSeconds -Scope S
 $script:P1C04StartupTimeoutSeconds = if ($null -ne $startupTimeout) { [int] $startupTimeout } else { 45 }
 $script:P1C04PersistenceTimeoutSeconds = if ($null -ne $persistenceTimeout) { [int] $persistenceTimeout } else { 30 }
 $script:WorkerAcknowledgements = 0
+# The non-admin Windows review runner uses the structured console sink. Prevent the
+# default Event Log provider from throwing and truncating otherwise valid HTTP responses.
+$env:Logging__EventLog__LogLevel__Default = "None"
 $axDataRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../.."))
 $script:ContractTestProject = Join-Path $axDataRoot "tests/AxData.ContractTests/AxData.ContractTests.csproj"
 $apiProject = Join-Path $axDataRoot "src/AxData.Api/AxData.Api.csproj"

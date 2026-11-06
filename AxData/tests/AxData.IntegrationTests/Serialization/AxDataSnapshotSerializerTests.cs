@@ -67,6 +67,19 @@ public sealed class AxDataSnapshotSerializerTests
     }
 
     [Fact]
+    public void Serialize_preserves_committed_v3_bytes()
+    {
+        var fixturePath = Path.Combine(AppContext.BaseDirectory, "Serialization", "Fixtures", "axdata-snapshot-v3.json");
+        var expected = File.ReadAllBytes(fixturePath);
+        while (expected.Length > 0 && expected[^1] is (byte)'\n' or (byte)'\r')
+        {
+            expected = expected[..^1];
+        }
+
+        Assert.Equal(expected, CreateSerializer().Serialize(CreateState()));
+    }
+
+    [Fact]
     public void Deserialize_reads_committed_v1_fixture()
     {
         var fixturePath = Path.Combine(AppContext.BaseDirectory, "Serialization", "Fixtures", "axdata-snapshot-v1.json");

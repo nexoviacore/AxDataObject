@@ -8,7 +8,9 @@ execution and real-data evidence gap.
 
 ## 1. Does AxPut commit internally? (D10) — ANSWERED
 
-`AxPutService.AxPut` owns commit/rollback and closes the ambient DB connection. `AxPutRepository.ExecuteSaveDataSQLCommands(AxPut, List<SQLCommandBuilder>)` returns `Task<TransactionResult>` and calls `_common._dbHelper.ExecuteSQLsInTransactionAsync(sqlCommands, false)`. `Utils.CloseDBConnectionAsync` calls `RollbackActiveTransactions()` before closing, so any dangling transaction from AxPut is rolled back by `Utils`, not committed. AxPut remains an external, self-committing step for AxData — AxData's Save orchestrator cannot join it to AxData's own local transaction (revisit P2-04/P2-06 design).
+`AxPutService.AxPut` owns commit/rollback and closes the ambient DB connection. `AxPutRepository.ExecuteSaveDataSQLCommands(AxPut, List<SQLCommandBuilder>)` returns `Task<TransactionResult>` and calls `_common._dbHelper.ExecuteSQLsInTransactionAsync(sqlCommands, false)`. `Utils.CloseDBConnectionAsync` calls `RollbackActiveTransactions()` before closing, so any dangling transaction from AxPut is rolled back by `Utils`, not committed.
+
+**Accepted Phase 2 ownership (D36):** AxPut is the public business-Save API and remains self-committing; AxData does not wrap it in an external Save saga. Every AxPut request is ObjectId-aware. A missing ObjectId is generated, and omitted `retainDataObject` defaults to true. AxData owns the other DataObject APIs and both services use the same versioned tenant-scoped state contract. A future PEG final-approval path may use a narrow trusted AxPut client, not an AxData transaction writer.
 
 ## 2. Callable signatures — UPDATED
 

@@ -1,0 +1,66 @@
+name: AxData P1D-03 E2E
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/axdata-e2e.yml"
+      - "AxData/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: axdata-p1d03-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  redis-and-http-walkthrough:
+    runs-on: [self-hosted, Windows, X64, axdata-real-review]
+    timeout-minutes: 30
+    env:
+      AXDATA_REDIS_TEST_CONNECTION: ${{ vars.AXDATA_REDIS_TEST_CONNECTION }}
+      AXDATA_REQUIRE_REDIS_6_2: "true"
+      P1C04_CONFIG_PATH: ${{ vars.P1C04_CONFIG_PATH }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate runner configuration
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:AXDATA_REDIS_TEST_CONNECTION)) {
+            throw "Repository variable AXDATA_REDIS_TEST_CONNECTION is required."
+          }
+          if ([string]::IsNullOrWhiteSpace($env:P1C04_CONFIG_PATH) -or
+              -not (Test-Path -LiteralPath $env:P1C04_CONFIG_PATH -PathType Leaf)) {
+            throw "Repository variable P1C04_CONFIG_PATH must name the existing ignored runner configuration."
+          }
+
+      - name: Build AxData serially
+        shell: pwsh
+        run: dotnet build --nologo -v q --no-restore -m:1 .\AxData\AxData.sln
+
+      - name: Verify Redis restart and redelivery
+        shell: pwsh
+        run: >-
+          dotnet test --nologo -v q --no-restore --no-build
+          .\AxData\tests\AxData.IntegrationTests\AxData.IntegrationTests.csproj
+          --filter "FullyQualifiedName~RedisAxDataStoreTests"
+
+      - name: Run P1C-04 HTTP chain
+        shell: pwsh
+        run: >-
+          pwsh -NoProfile -File .\AxData\tools\real-data-review\Invoke-P1C04Walkthrough.ps1
+          -ConfigPath $env:P1C04_CONFIG_PATH
+          -ReportPath .\AxData\artifacts\real-data-review\p1d-03-ci-report.md
+
+      - name: Record safe result
+        if: success()
+        shell: pwsh
+        run: |
+          "P1D-03 Redis 6.2+ restart/redelivery and P1C-04 HTTP walkthrough: PASS" |
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY

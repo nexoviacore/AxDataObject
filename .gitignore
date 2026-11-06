@@ -23,6 +23,10 @@
 **/.vscode/
 **/.codex/
 **/.agents/
+!/.agents/
+!/.agents/skills/
+!/.agents/skills/axdata-slice/
+!/.agents/skills/axdata-slice/**
 **/.claude/
 *.user
 *.suo

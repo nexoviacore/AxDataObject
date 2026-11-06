@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\AxData\src\AxData.Contracts\AxData.Contracts.csproj" />
     <ProjectReference Include="..\ARMCommon\ARMCommon.csproj" />
     <ProjectReference Include="..\AxParserApp\AxParser.csproj" />
     <ProjectReference Include="..\AxStructDef\AxStructDef.csproj" />

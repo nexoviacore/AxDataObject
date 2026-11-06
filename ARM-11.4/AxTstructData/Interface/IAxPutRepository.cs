@@ -6,6 +6,7 @@ namespace AxTstructData
     {
         Task<SQLResult> GetCreatePermissionFromDB(AxPut putData);
         Task<SQLResult> GetEditPermissionFromDB(AxPut putData);
+        Task<string?> GetStructDefVersionAsync(string transId);
         Task<SQLResult> ExecuteDCWiseSQLs(Int64 recordId, string sql);
         //Task<SQLResult> GetRecordIdsFromDB(Int32 siteNo, Int32 rowsCount);
         Task<SQLResult> GetChildTransRecordId(string parentRecid, string table, string mapName);

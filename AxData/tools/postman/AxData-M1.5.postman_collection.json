@@ -19,7 +19,11 @@
         { "key": "beforeEvictionVersion", "value": "" },
         { "key": "editableDcId", "value": "" },
         { "key": "editableRowId", "value": "" },
-        { "key": "axSavePrototypeObjectId", "value": "" }
+        { "key": "axPutObjectId", "value": "" },
+        { "key": "axPutVersion", "value": "" },
+        { "key": "axPutExistingObjectId", "value": "" },
+        { "key": "axPutExistingVersion", "value": "" },
+        { "key": "axPutStaleVersion", "value": "" }
     ],
     "item": [
         {
@@ -480,25 +484,32 @@
             ]
         },
         {
-            "name": "Temporary AxPut AxSave prototype",
-            "description": "Disposable demonstration only. Run against a reviewed disposable transaction/schema; this deliberately writes Redis before AxPut SQL and is not the production AxSave design.",
+            "name": "P2-04 AxPut lifecycle finalization",
+            "description": "Run only against a reviewed disposable transaction/schema. Covers retained and destroyed Save finalization, one visible version advance, stale-version rejection, legacy response compatibility, and transaction rollback.",
             "item": [
                 {
-                    "name": "01 AxSave flag creates objectid and calls AxPut",
+                    "name": "01 Missing objectid generates ULID",
                     "request": {
                         "auth": {
                             "type": "bearer",
                             "bearer": [
-                                { "key": "token", "value": "{{bearerToken}}", "type": "string" }
+                                {
+                                    "key": "token",
+                                    "value": "{{ARMToken}}",
+                                    "type": "string"
+                                }
                             ]
                         },
                         "method": "POST",
                         "header": [
-                            { "key": "Content-Type", "value": "application/json" }
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"callIsFromAxSave\": true,\n  \"Roles\": [],\n  \"Data\": [\n    {\n      \"TransId\": \"{{prototypeTransId}}\",\n      \"Action\": \"create\",\n      \"SubmitData\": {{prototypeSubmitData}}\n    }\n  ]\n}",
+                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"Roles\": [],\n  \"Data\": [\n    {\n      \"TransId\": \"{{prototypeTransId}}\",\n      \"Action\": \"create\",\n      \"SubmitData\": {{prototypeSubmitData}}\n    }\n  ]\n}",
                             "options": { "raw": { "language": "json" } }
                         },
                         "url": "{{axPutBaseUrl}}/api/v1/AxPut"
@@ -512,29 +523,38 @@
                                     "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
                                     "const envelope = pm.response.json();",
                                     "const body = envelope.result || envelope;",
-                                    "pm.test('AxSave AxPut returns objectid', () => pm.expect(body.objectid).to.be.a('string').and.not.empty);",
-                                    "pm.collectionVariables.set('axSavePrototypeObjectId', body.objectid);"
+                                    "pm.test('AxPut returns a ULID objectid', () => pm.expect(body.objectid).to.match(/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/));",
+                                    "pm.test('Known version is numeric and retained state is reported', () => { pm.expect(body.version).to.be.a('number'); pm.expect(body.dataObjectRetained).to.eql(true); });",
+                                    "pm.collectionVariables.set('axPutObjectId', body.objectid);",
+                                    "if (typeof body.version === 'number') pm.collectionVariables.set('axPutVersion', body.version);"
                                 ]
                             }
                         }
                     ]
                 },
                 {
-                    "name": "02 Supplied unknown objectid is rejected",
+                    "name": "02 New object without Data is rejected",
                     "request": {
                         "auth": {
                             "type": "bearer",
                             "bearer": [
-                                { "key": "token", "value": "{{bearerToken}}", "type": "string" }
+                                {
+                                    "key": "token",
+                                    "value": "{{ARMToken}}",
+                                    "type": "string"
+                                }
                             ]
                         },
                         "method": "POST",
                         "header": [
-                            { "key": "Content-Type", "value": "application/json" }
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"callIsFromAxSave\": true,\n  \"objectid\": \"missing-axsave-object\",\n  \"Roles\": [],\n  \"Data\": [\n    {\n      \"TransId\": \"{{prototypeTransId}}\",\n      \"Action\": \"create\",\n      \"SubmitData\": {{prototypeSubmitData}}\n    }\n  ]\n}",
+                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"Roles\": []\n}",
                             "options": { "raw": { "language": "json" } }
                         },
                         "url": "{{axPutBaseUrl}}/api/v1/AxPut"
@@ -548,7 +568,346 @@
                                     "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
                                     "const envelope = pm.response.json();",
                                     "const body = envelope.result || envelope;",
-                                    "pm.test('Rejected response retains supplied objectid', () => pm.expect(body.objectid).to.eql('missing-axsave-object'));"
+                                    "pm.test('Missing Data is rejected before Save', () => pm.expect(body.message).to.include('Data must contain at least one item'));",
+                                    "pm.test('Invalid request code', () => pm.expect(body.errorcode).to.eql('AXD-REQ-001'));",
+                                    "pm.test('No objectid is generated for an invalid request', () => pm.expect(body).not.to.have.property('objectid'));",
+                                    "pm.test('Version is omitted', () => pm.expect(body).not.to.have.property('version'));"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "03 Initialize disposable existing DataObject",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"transId\": \"{{prototypeTransId}}\",\n  \"key\": {\n    \"field\": \"{{prototypeKeyField}}\",\n    \"value\": \"{{prototypeKeyValue}}\"\n  }\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{baseUrl}}/api/v1/axdata",
+                        "description": "Creates the shared DataObject used by the P2-02 AxPut checks. The key must identify a record in the reviewed disposable schema."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                    "const body = pm.response.json();",
+                                    "pm.test('Disposable Init returns objectId and version', () => { pm.expect(body.objectId).to.be.a('string').and.not.empty; pm.expect(body.version).to.be.a('number'); });",
+                                    "pm.collectionVariables.set('axPutExistingObjectId', body.objectId);",
+                                    "pm.collectionVariables.set('axPutExistingVersion', body.version);",
+                                    "pm.collectionVariables.set('axPutStaleVersion', Number(body.version) + 1);"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "04 Existing object without Data hydrates stored state",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{ARMToken}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" },
+                            { "key": "If-Match", "value": "\"{{axPutExistingVersion}}\"" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"Roles\": [],\n  \"objectid\": \"{{axPutExistingObjectId}}\"\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{axPutBaseUrl}}/api/v1/AxPut"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                    "const envelope = pm.response.json();",
+                                    "const body = envelope.result || envelope;",
+                                    "pm.test('Stored object is returned', () => pm.expect(body.objectid).to.eql(pm.collectionVariables.get('axPutExistingObjectId')));",
+                                    "pm.test('Save advances exactly one version', () => pm.expect(body.version).to.eql(Number(pm.collectionVariables.get('axPutExistingVersion')) + 1));",
+                                    "pm.test('Finalized state is retained without pending cleanup', () => { pm.expect(body.dataObjectRetained).to.eql(true); pm.expect(body).not.to.have.property('dataObjectFinalizationPending'); });",
+                                    "pm.collectionVariables.set('axPutObjectId', body.objectid);",
+                                    "pm.collectionVariables.set('axPutVersion', body.version);"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "05 Unknown objectid is rejected",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                { "key": "token", "value": "{{ARMToken}}", "type": "string" }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" },
+                            { "key": "If-Match", "value": "\"1\"" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"Roles\": [],\n  \"objectid\": \"01JUNKNOWNOBJECT00000000000\"\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{axPutBaseUrl}}/api/v1/AxPut"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                                    "const body = (pm.response.json().result || pm.response.json());",
+                                    "pm.test('Unknown object code', () => pm.expect(body.errorcode).to.eql('AXD-REQ-001'));",
+                                    "pm.test('Unknown object returns supplied id and omits version', () => { pm.expect(body.objectid).to.eql('01JUNKNOWNOBJECT00000000000'); pm.expect(body).not.to.have.property('version'); });"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "05b Initialize active object for negatives",
+                    "request": {
+                        "method": "POST",
+                        "header": [{ "key": "Content-Type", "value": "application/json" }],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"transId\": \"{{prototypeTransId}}\",\n  \"key\": { \"field\": \"{{prototypeKeyField}}\", \"value\": \"{{prototypeKeyValue}}\" }\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{baseUrl}}/api/v1/axdata"
+                    },
+                    "event": [{
+                        "listen": "test",
+                        "script": {
+                            "type": "text/javascript",
+                            "exec": [
+                                "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                "const body = pm.response.json();",
+                                "pm.collectionVariables.set('axPutNegativeObjectId', body.objectId);",
+                                "pm.collectionVariables.set('axPutNegativeVersion', body.version);",
+                                "pm.collectionVariables.set('axPutNegativeStaleVersion', Number(body.version) + 1);"
+                            ]
+                        }
+                    }]
+                },
+                {
+                    "name": "06 Stale version is rejected",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                { "key": "token", "value": "{{ARMToken}}", "type": "string" }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" },
+                            { "key": "If-Match", "value": "\"{{axPutNegativeStaleVersion}}\"" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"Roles\": [],\n  \"objectid\": \"{{axPutNegativeObjectId}}\"\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{axPutBaseUrl}}/api/v1/AxPut"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                                    "const body = (pm.response.json().result || pm.response.json());",
+                                    "pm.test('Stale version code, current version, and retained state', () => { pm.expect(body.errorcode).to.eql('AXD-CONC-001'); pm.expect(body.version).to.eql(Number(pm.collectionVariables.get('axPutNegativeVersion'))); pm.expect(body.dataObjectRetained).to.eql(true); });"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "07 Invalid overlay is rejected before SQL",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                { "key": "token", "value": "{{ARMToken}}", "type": "string" }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" },
+                            { "key": "If-Match", "value": "\"{{axPutNegativeVersion}}\"" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"Roles\": [],\n  \"objectid\": \"{{axPutNegativeObjectId}}\",\n  \"Data\": [\n    {\n      \"TransId\": \"{{prototypeTransId}}\",\n      \"Action\": \"edit\",\n      \"SubmitData\": {\n        \"dc999999\": {\n          \"row1\": { \"unknown_p2_field\": \"invalid\" }\n        }\n      }\n    }\n  ]\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{axPutBaseUrl}}/api/v1/AxPut"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                                    "const body = (pm.response.json().result || pm.response.json());",
+                                    "pm.test('Invalid overlay code, retained version, and retained state', () => { pm.expect(body.errorcode).to.eql('AXD-REQ-001'); pm.expect(body.version).to.eql(Number(pm.collectionVariables.get('axPutNegativeVersion'))); pm.expect(body.dataObjectRetained).to.eql(true); });"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "08 Configured child or mapping failure rolls back",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                { "key": "token", "value": "{{ARMToken}}", "type": "string" }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"Roles\": [],\n  \"Data\": [\n    {\n      \"TransId\": \"{{prototypeFailureTransId}}\",\n      \"Action\": \"create\",\n      \"SubmitData\": {{prototypeFailureSubmitData}}\n    }\n  ]\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{axPutBaseUrl}}/api/v1/AxPut",
+                        "description": "Configure a disposable transaction whose child, GenMap, MdMap, or database command fails after an earlier batch. Verify database effects separately as described in README.md."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Transaction failure is returned', () => pm.response.to.have.status(400));",
+                                    "const body = (pm.response.json().result || pm.response.json());",
+                                    "pm.test('Failure returns safe object state', () => { pm.expect(body.objectid).to.be.a('string').and.not.empty; pm.expect(body.version).to.be.a('number'); pm.expect(body.dataObjectRetained).to.eql(true); pm.expect(body).not.to.have.property('data'); });"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "09 Initialize disposable object for destruction",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"transId\": \"{{prototypeTransId}}\",\n  \"key\": {\n    \"field\": \"{{prototypeKeyField}}\",\n    \"value\": \"{{prototypeKeyValue}}\"\n  }\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{baseUrl}}/api/v1/axdata"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                    "const body = pm.response.json();",
+                                    "pm.collectionVariables.set('axPutDestroyObjectId', body.objectId);",
+                                    "pm.collectionVariables.set('axPutDestroyVersion', body.version);",
+                                    "pm.collectionVariables.set('axPutDestroyStaleVersion', Number(body.version) + 1);"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "10 Active object stale version is rejected",
+                    "request": {
+                        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{ARMToken}}", "type": "string" }] },
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" },
+                            { "key": "If-Match", "value": "\"{{axPutDestroyStaleVersion}}\"" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"Roles\": [],\n  \"objectid\": \"{{axPutDestroyObjectId}}\"\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{axPutBaseUrl}}/api/v1/AxPut"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                                    "const body = (pm.response.json().result || pm.response.json());",
+                                    "pm.test('Stale version returns current retained version', () => { pm.expect(body.errorcode).to.eql('AXD-CONC-001'); pm.expect(body.version).to.eql(Number(pm.collectionVariables.get('axPutDestroyVersion'))); pm.expect(body.dataObjectRetained).to.eql(true); });"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "11 Successful Save destroys DataObject after commit",
+                    "request": {
+                        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{ARMToken}}", "type": "string" }] },
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" },
+                            { "key": "If-Match", "value": "\"{{axPutDestroyVersion}}\"" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"ARMSessionId\": \"{{armSessionId}}\",\n  \"Roles\": [],\n  \"objectid\": \"{{axPutDestroyObjectId}}\",\n  \"retainDataObject\": false\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": "{{axPutBaseUrl}}/api/v1/AxPut"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                                    "const body = (pm.response.json().result || pm.response.json());",
+                                    "pm.test('Destroyed Save advances once and reports final state', () => { pm.expect(body.version).to.eql(Number(pm.collectionVariables.get('axPutDestroyVersion')) + 1); pm.expect(body.dataObjectRetained).to.eql(false); pm.expect(body).not.to.have.property('dataObjectFinalizationPending'); });"
                                 ]
                             }
                         }

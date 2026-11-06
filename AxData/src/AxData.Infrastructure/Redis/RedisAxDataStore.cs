@@ -79,6 +79,17 @@ public sealed class RedisAxDataStore : IAxDataStore
         return state;
     }
 
+    public async Task<bool> IsClosedAsync(
+        string tenantId,
+        string objectId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return await _database.KeyExistsAsync(BuildClosedKey(tenantId, objectId))
+            .WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public async Task<AxDataStoreWriteResult> WriteAsync(
         AxDataState state,
         long? expectedVersion,
@@ -111,6 +122,13 @@ public sealed class RedisAxDataStore : IAxDataStore
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(objectId);
         return $"AXD:{{{tenantId.ToUpperInvariant()}}}:{objectId.ToUpperInvariant()}";
+    }
+
+    internal static RedisKey BuildClosedKey(string tenantId, string objectId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(objectId);
+        return $"AXD:CLOSED:{{{tenantId.ToUpperInvariant()}}}:{objectId.ToUpperInvariant()}";
     }
 
     private static AxDataStoreWriteResult ParseWriteResult(string result)

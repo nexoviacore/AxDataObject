@@ -8,6 +8,7 @@ public sealed class AxDataState
         new Dictionary<AxDataLifecycleStatus, AxDataLifecycleStatus[]>
         {
             [AxDataLifecycleStatus.Active] = [AxDataLifecycleStatus.PendingApproval, AxDataLifecycleStatus.Saved, AxDataLifecycleStatus.Expired, AxDataLifecycleStatus.Closed],
+            [AxDataLifecycleStatus.Saving] = [],
             [AxDataLifecycleStatus.PendingApproval] = [AxDataLifecycleStatus.ApprovedAwaitingSave, AxDataLifecycleStatus.Saved, AxDataLifecycleStatus.Rejected, AxDataLifecycleStatus.Recalled, AxDataLifecycleStatus.Expired],
             [AxDataLifecycleStatus.ApprovedAwaitingSave] = [AxDataLifecycleStatus.Saved, AxDataLifecycleStatus.Expired, AxDataLifecycleStatus.Closed],
             [AxDataLifecycleStatus.Rejected] = [AxDataLifecycleStatus.Active, AxDataLifecycleStatus.Closed, AxDataLifecycleStatus.Expired],
@@ -136,9 +137,40 @@ public sealed class AxDataState
         return true;
     }
 
+    public void BeginSaving()
+    {
+        if (Status != AxDataLifecycleStatus.Active)
+        {
+            throw new InvalidOperationException($"An object in {Status} state cannot be claimed for Save.");
+        }
+
+        Status = AxDataLifecycleStatus.Saving;
+    }
+
+    public void RollbackSaving()
+    {
+        if (Status != AxDataLifecycleStatus.Saving)
+        {
+            throw new InvalidOperationException($"An object in {Status} state has no Save claim to release.");
+        }
+
+        Status = AxDataLifecycleStatus.Active;
+    }
+
+    public long FinalizeSaving(bool retainDataObject)
+    {
+        if (Status != AxDataLifecycleStatus.Saving)
+        {
+            throw new InvalidOperationException($"An object in {Status} state has no Save claim to finalize.");
+        }
+
+        Status = retainDataObject ? AxDataLifecycleStatus.Saved : AxDataLifecycleStatus.Closed;
+        return ++Version;
+    }
+
     public long RegisterMutation()
     {
-        if (Status is AxDataLifecycleStatus.Expired or AxDataLifecycleStatus.Closed)
+        if (Status is AxDataLifecycleStatus.Saving or AxDataLifecycleStatus.Saved or AxDataLifecycleStatus.Expired or AxDataLifecycleStatus.Closed)
         {
             throw new InvalidOperationException($"An object in {Status} state cannot be mutated.");
         }

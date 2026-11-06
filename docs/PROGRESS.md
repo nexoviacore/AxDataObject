@@ -172,14 +172,14 @@ Format:
 - Tests: serial build passes; 145 unit, 34 integration, and 63 contract tests pass without restore; end-to-end exits successfully. The read-only live characterization also passes.
 - Next: P1C-03 Development-only review composition, then the P1C-04 HTTP walkthrough.
 
-## P2-06 D30 spike planning done (2026-10-05)
+## Pre-D36 AxPut D30 spike planning done (2026-10-05)
 
 - Done: Traced create/edit selection, supplied RecordId handling, StructDef main-table resolution, and the SQL-only existence probe.
 - Finding: Builder transaction-table DDL is absent from this repository, so main-key uniqueness requires supplied Builder source or disposable-schema catalog proof.
 - Tests: Added a plan only; no tests or ARM-11.4 files changed. All live AxPut/provider steps are user-run.
-- Next: Run the disposable-schema constraint, create replay, late-commit, and edit-replay characterization before implementing D30 reconciliation.
+- Next: Retain this evidence for P2-03/P2-09; D36 supersedes the former external-saga reconciliation plan.
 
-## P2-06 site-number trace done (2026-10-05)
+## Pre-D36 AxPut site-number trace done (2026-10-05)
 
 - Done: Traced allocator callers and `psiteno` from tenant AxProps through the session hash into `GetRecordIdsFromDB`.
 - Finding: Site number is tenant-configured/session-copied; fallback is zero, negative becomes one; RecordId is Int64 and supports 15-digit IDs.
@@ -363,3 +363,40 @@ Format:
 - Decision: This intentionally disposable ARM comparison is not the durable AxData Save design and must be removed before Phase 2 production integration.
 - Tests: 11 focused characterization checks, 159 unit tests, and 39 integration tests pass; serial AxTstructData and AxData solution builds pass without restore with existing warnings.
 - Postman: updated with disposable-schema happy and unknown-ObjectId negative requests.
+
+## AxPut-owned Phase 2 Save planning accepted (2026-11-05)
+- Done: Replaced the external AxData Save saga plan with nine session-ready AxPut-owned functional and durability slices.
+- Decisions: D36 makes every AxPut call ObjectId-aware; missing IDs are generated, retention defaults true, `{}` may save, and known failure versions are never null.
+- Next: Start P2-01 shared DataObject/request contracts; complete core flow through P2-05 before the final idempotency/outbox/worker slices.
+- Postman: not applicable (planning only); existing user collection changes were preserved.
+
+## Slice catalog aligned for AxPut-owned Phase 2 (2026-11-05)
+- Done: Updated the slice catalog, readiness gate, PEG trusted-Save dependency, post-processing dispatcher dependency, and M2 completion point to P2-09.
+- Status: Core functional review is P2-01..P2-05; durability is P2-06..P2-09; P1D-02/03/04/06 remain before full M1.6 closure.
+- Next: Run P1D-02, then start P2-01 in separate sessions; P1D-04/P1D-06 may overlap P2-01 and P1D-03 must precede P2-05.
+- Postman: not applicable (routing documentation only); existing user collection changes were preserved.
+
+## P2-01 done (2026-11-05)
+- Done: Added neutral shared v1/v2/v3 DataObject and AxPut contracts, secure ULIDs, byte-compatible AxData serialization, and ObjectId-aware AxPut binding; removed the disposable flag/Redis projection.
+- Decisions: Retention null/omitted defaults true; supplied ObjectIds require `If-Match` or `expectedVersion`, matching when both are sent; shared-state hydration remains P2-02 and existing AxPut transaction/trace order is unchanged.
+- Tests: Serial build, 15 ARM checks, 9 focused contracts, 14 snapshot checks, 159 unit, and 40 integration tests pass; full contracts are 158 passed/2 pre-existing parser-guard failures.
+- Next: P2-02 ObjectId load/init, authorization, hydration, and payload overlay.
+- Postman: updated; existing `ARMToken` edits preserved.
+
+## P2-02 done (2026-11-06)
+- Done: AxPut now loads tenant-scoped shared DataObjects, authorizes actor plus current transaction/DC/field access, checks version/StructDef hash, hydrates one runtime, and applies validated optional overlays before the unchanged SQL path.
+- Decisions: ARM trace may add operation-relevant DataObject state/field values; AxData/worker logs remain value-free. P2-04 still owns atomic version claim and finalization.
+- Tests: Serial build, 29 ARM checks, 20 focused contracts, 159 unit, 40 integration, and E2E pass; full contracts are 169 passed/2 pre-existing parser-guard failures.
+- Next: P2-03 AxPut transaction parity and ObjectId-aware Save result. Postman: updated; existing `ARMToken` edits preserved.
+
+## P2-03 done (2026-11-06)
+- Done: Preserved AxPut transaction/response parity, added commit-gated stable row-to-record mappings and known ObjectId retention results, cached the parity trace, and retired the unreferenced legacy AxDataObject project.
+- Decisions: P2-03 reports actual retained state without version advance; P2-04 owns claim/finalization/destruction. AxTstructData plus the fingerprinted parity contract are authoritative; Git history archives the discarded project.
+- Tests: Serial builds, 35 ARM checks, 22 focused contracts, 159 unit, 40 integration, and E2E pass; full contracts are 171 passed/2 pre-existing parser-guard failures. The user-verified disposable PostgreSQL Postman happy and rollback review passes.
+- Next: Continue P2-04 lifecycle finalization review. Postman: updated.
+
+## P2-04 done (2026-11-06)
+- Done: Added atomic Saving claims, rollback/ValidateOnly restoration, one-version Saved finalization, durable closure before active-key removal, and committed-success pending-finalization responses.
+- Decisions: AxPut publishes lifecycle snapshots through the existing tenant stream; a persistent tenant-scoped closure marker prevents older SQL snapshots from recovering destroyed objects. No ARM SQL/validation/transaction-order change.
+- Tests: Serial build, 26 focused contracts, 60 focused unit, 9 Redis lifecycle/race, 162 full unit, and 42 integration tests pass; E2E exits successfully. The user-verified disposable PostgreSQL Postman retained/destroyed review passes; full contracts retain two pre-existing parser-guard failures.
+- Next: Complete P1D-03, then P2-05 core HTTP and real-provider review. Postman: updated.
