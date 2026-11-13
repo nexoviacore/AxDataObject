@@ -1,6 +1,6 @@
 using System.Text.Json;
 using AxData.Api.Contracts;
-using AxData.Api.Routing;
+using AxData.Api.Controllers;
 using AxData.Application.Ports;
 using AxData.Application.Ports.Axpert;
 using AxData.Application.Set;
@@ -9,7 +9,7 @@ using AxData.Domain.Model;
 using AxData.TestSupport.Fakes;
 using AxData.TestSupport.Fixtures;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Mvc;
 
 namespace AxData.ContractTests;
 
@@ -23,13 +23,10 @@ public sealed class SetAxDataEndpointTests
         var handler = await CreateHandlerAsync();
         var request = Request(expectedVersion: null);
 
-        var result = await AxDataEndpoints.HandleSetAsync(
-            "object-1", request, handler, context, CancellationToken.None);
+        var result = await CreateController(context).SetAsync(
+            "object-1", request, handler, CancellationToken.None);
 
-        await result.ExecuteAsync(context);
-        context.Response.Body.Position = 0;
-        using var response = await JsonDocument.ParseAsync(context.Response.Body);
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        using var response = ToJsonDocument(Assert.IsType<OkObjectResult>(result));
         Assert.Equal("success", response.RootElement.GetProperty("status").GetString());
         Assert.Equal(2, response.RootElement.GetProperty("version").GetInt64());
         Assert.Equal("corr-set", response.RootElement.GetProperty("correlationId").GetString());
@@ -41,13 +38,12 @@ public sealed class SetAxDataEndpointTests
         var context = CreateHttpContext("corr-stale");
         var handler = await CreateHandlerAsync();
 
-        var result = await AxDataEndpoints.HandleSetAsync(
-            "object-1", Request(expectedVersion: 9), handler, context, CancellationToken.None);
+        var result = await CreateController(context).SetAsync(
+            "object-1", Request(expectedVersion: 9), handler, CancellationToken.None);
 
-        await result.ExecuteAsync(context);
-        context.Response.Body.Position = 0;
-        using var response = await JsonDocument.ParseAsync(context.Response.Body);
-        Assert.Equal(StatusCodes.Status409Conflict, context.Response.StatusCode);
+        var error = Assert.IsType<ObjectResult>(result);
+        using var response = ToJsonDocument(error);
+        Assert.Equal(StatusCodes.Status409Conflict, error.StatusCode);
         Assert.Equal("AXD-CONC-001", response.RootElement.GetProperty("code").GetString());
         Assert.Equal(1, response.RootElement.GetProperty("currentVersion").GetInt64());
     }
@@ -59,13 +55,12 @@ public sealed class SetAxDataEndpointTests
         var mismatch = SampleStructDefFixture.Definition with { Version = "changed" };
         var handler = await CreateHandlerAsync(currentDefinition: mismatch);
 
-        var result = await AxDataEndpoints.HandleSetAsync(
-            "object-1", Request(expectedVersion: 1), handler, context, CancellationToken.None);
+        var result = await CreateController(context).SetAsync(
+            "object-1", Request(expectedVersion: 1), handler, CancellationToken.None);
 
-        await result.ExecuteAsync(context);
-        context.Response.Body.Position = 0;
-        using var response = await JsonDocument.ParseAsync(context.Response.Body);
-        Assert.Equal(StatusCodes.Status409Conflict, context.Response.StatusCode);
+        var error = Assert.IsType<ObjectResult>(result);
+        using var response = ToJsonDocument(error);
+        Assert.Equal(StatusCodes.Status409Conflict, error.StatusCode);
         Assert.Equal("AXD-CONC-003", response.RootElement.GetProperty("code").GetString());
     }
 
@@ -83,13 +78,10 @@ public sealed class SetAxDataEndpointTests
         var context = CreateHttpContext("corr-validation");
         var handler = await CreateHandlerAsync();
 
-        var result = await AxDataEndpoints.HandleSetAsync(
-            "object-1", request, handler, context, CancellationToken.None);
+        var result = await CreateController(context).SetAsync(
+            "object-1", request, handler, CancellationToken.None);
 
-        await result.ExecuteAsync(context);
-        context.Response.Body.Position = 0;
-        using var response = await JsonDocument.ParseAsync(context.Response.Body);
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        using var response = ToJsonDocument(Assert.IsType<OkObjectResult>(result));
         Assert.Equal("validation_error", response.RootElement.GetProperty("status").GetString());
         Assert.Equal(1, response.RootElement.GetProperty("version").GetInt64());
         Assert.Empty(response.RootElement.GetProperty("changed").EnumerateArray());
@@ -127,11 +119,12 @@ public sealed class SetAxDataEndpointTests
         var context = CreateHttpContext("corr-bypass");
         var handler = await CreateHandlerAsync("unrelated");
 
-        var result = await AxDataEndpoints.HandleSetAsync(
-            "object-1", request, handler, context, CancellationToken.None);
+        var result = await CreateController(context).SetAsync(
+            "object-1", request, handler, CancellationToken.None);
 
-        await result.ExecuteAsync(context);
-        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+        Assert.Equal(
+            StatusCodes.Status403Forbidden,
+            Assert.IsType<ObjectResult>(result).StatusCode);
     }
 
     [Fact]
@@ -148,13 +141,10 @@ public sealed class SetAxDataEndpointTests
         var context = CreateHttpContext("corr-new-row");
         var handler = await CreateHandlerAsync();
 
-        var result = await AxDataEndpoints.HandleSetAsync(
-            "object-1", request, handler, context, CancellationToken.None);
+        var result = await CreateController(context).SetAsync(
+            "object-1", request, handler, CancellationToken.None);
 
-        await result.ExecuteAsync(context);
-        context.Response.Body.Position = 0;
-        using var response = await JsonDocument.ParseAsync(context.Response.Body);
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        using var response = ToJsonDocument(Assert.IsType<OkObjectResult>(result));
         var created = Assert.Single(response.RootElement.GetProperty("createdRows").EnumerateArray());
         Assert.Equal("dc2", created.GetProperty("dcId").GetString());
         Assert.Equal(0, created.GetProperty("requestRowIndex").GetInt32());
@@ -175,13 +165,12 @@ public sealed class SetAxDataEndpointTests
         var context = CreateHttpContext("corr-record-id");
         var handler = await CreateHandlerAsync();
 
-        var result = await AxDataEndpoints.HandleSetAsync(
-            "object-1", request, handler, context, CancellationToken.None);
+        var result = await CreateController(context).SetAsync(
+            "object-1", request, handler, CancellationToken.None);
 
-        await result.ExecuteAsync(context);
-        context.Response.Body.Position = 0;
-        using var response = await JsonDocument.ParseAsync(context.Response.Body);
-        Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
+        var error = Assert.IsType<ObjectResult>(result);
+        using var response = ToJsonDocument(error);
+        Assert.Equal(StatusCodes.Status400BadRequest, error.StatusCode);
         Assert.Equal("AXD-REQ-001", response.RootElement.GetProperty("code").GetString());
     }
 
@@ -245,10 +234,19 @@ public sealed class SetAxDataEndpointTests
     {
         var context = new DefaultHttpContext
         {
-            TraceIdentifier = correlationId,
-            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider()
+            TraceIdentifier = correlationId
         };
-        context.Response.Body = new MemoryStream();
         return context;
     }
+
+    private static AxDataController CreateController(HttpContext context) =>
+        new()
+        {
+            ControllerContext = new ControllerContext { HttpContext = context }
+        };
+
+    private static JsonDocument ToJsonDocument(ObjectResult result) =>
+        JsonDocument.Parse(JsonSerializer.Serialize(
+            result.Value,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
 }

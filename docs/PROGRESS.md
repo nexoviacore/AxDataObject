@@ -406,3 +406,15 @@ Format:
 - Decision: The user approved a P2-05 prerequisite waiver because repository Settings are unavailable; CI remains unexecuted and is still required before M1.6 closure.
 - Tests: Serial no-restore build, 9 Redis integration cases, Postman JSON, diff/secret checks, and the full local P1C-04 walkthrough pass.
 - Next: P2-05 core HTTP and real-provider review; run `.github/workflows/axdata-e2e.yml` when an administrator supplies the runner. Postman: not applicable.
+
+## AxData Init one-time on-load refresh done (2026-11-10)
+- Done: Init now materializes row 1 for each new empty non-grid DC, hydrates one Axpert runtime, runs `RefreshFieldsOnLoad` exactly once before version-1 storage, reads refreshed non-save/default values back, and leaves empty grids rowless; Set/Get and AxPut production behavior are unchanged.
+- Decisions: Current ARM missing/non-mandatory parser-variable compatibility is preserved; the five fail-closed parser guards are explicitly deferred to a later approved ARM change.
+- Tests: serial API build, 7 focused Init unit, 6 focused loader/endpoint/adapter contracts, 32 ARM checks, 165 full unit, and 42 integration pass; full contracts are 179 passed with the 2 deferred parser-guard failures; empty E2E exits successfully.
+- Next: implement the separately approved ARM parser-guard fix later. Postman: updated.
+
+## AxData keyed/empty Init field parity done (2026-11-12)
+- Done: keyed Init now loads an unrefreshed AxGet baseline; keyed and empty Init each run one AxValidate New/Existing pass, including saved form-load-generated fields without overwriting ordinary persisted values.
+- Decisions: AxData owns exactly-once orchestration while AxValidate owns Accept/Calculate/default semantics; existing AxGet/AxPut/AxDelete defaults and deferred parser compatibility remain unchanged.
+- Tests: serial build, 8 focused on-load, 7 Init unit, 16 loader/endpoint, 165 full unit, 42 integration, 32 ARM checks, and E2E pass; full contracts are 185 passed with 2 deferred parser-guard failures.
+- Next: production review may exercise representative keyed and empty transactions; implement the separately approved parser guards later. Postman: not applicable.

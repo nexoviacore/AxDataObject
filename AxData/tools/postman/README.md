@@ -48,6 +48,8 @@ Confirm `GET http://localhost:5116/health` returns 200 before running Postman.
 
 Run the requests in numeric order, including `02a Get addressing contract`. That request discovers the editable Axpert `dcId` and server-issued opaque `rowId`; all later Set and selective Query requests reuse those collection variables instead of inferring a DC number or using `recordId` as row identity. Set requests send the D4 header form `If-Match: "{{version}}"`. The stale requests deliberately send `If-Match: "{{preUpdateVersion}}"`, where `preUpdateVersion` is the version saved immediately before the successful update.
 
+Requests `01 Init new` and `02 Init existing` each run exactly one Axpert on-load pass before version 1 is stored. A new empty non-grid DC first receives one server-addressed row so its initialization-eligible non-save/default fields can be refreshed; empty grids remain rowless. ObjectId collision retries must not repeat the pass. Later Get requests are read-only, while Set remains dependency-targeted.
+
 Request `03 Set valid` advances the object to version 2 and publishes its snapshot. Wait until the worker reports a newly acknowledged snapshot. Run `04 Get before eviction`, then delete only the exact active-state key:
 
 ```powershell

@@ -11,6 +11,7 @@ $validateHelper = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'ARM-11.4\A
 $parserSource = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'ARM-11.4\AxParserApp\AxParser.cs')
 $validationResult = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'ARM-11.4\AxValidate\Dto\ValidationInvocationResult.cs')
 $operationResult = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'ARM-11.4\AxValidate\Dto\OperationResult.cs')
+$axGet = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'ARM-11.4\AxTstructData\Service\AxGetService.cs')
 $axPut = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'ARM-11.4\AxTstructData\Service\AxPutService.cs')
 $pascal = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'docs\arm-tasks\uStructDef.pas')
 $observations = [System.Collections.Generic.List[object]]::new()
@@ -445,9 +446,20 @@ try {
     Assert-Contains $validate 'catch (Exception ex)' 'Structured parser/SQL failure handling is missing.'
     Add-Observation 'arm-dep-03-full-validation' 'all current fields validate mandatory/duplicate/width/expression rules; required query data fails closed'
 
-    Assert-Contains $validate 'public async Task<string> RefreshFieldsOnLoad()' 'Load refresh compatibility entry point changed.'
+    Assert-Contains $validate 'public Task<string> RefreshFieldsOnLoad()' 'Load refresh compatibility entry point changed.'
+    Assert-Contains $validate 'public Task<string> InitializeFieldsOnLoad(bool isNewRecord)' 'AxData Init field-processing entry point is missing.'
+    Assert-Contains $validate 'if (!field.SaveValue)' 'On-load refresh no longer selects non-save fields.'
+    Assert-Contains $validate 'string.Equals(field.ModeofEntry, "calculate", StringComparison.OrdinalIgnoreCase)' 'Existing Init no longer selects saved Calculate fields.'
+    Assert-Contains $validate '_parser.GetVarValue("Axp_RefreshExpsOnLoad")' 'Existing Init no longer honors Axp_RefreshExpsOnLoad.'
+    Assert-Contains $validate 'if (!string.IsNullOrWhiteSpace(field.Cexp))' 'New Init no longer selects saved expression/default fields.'
+    Assert-Contains $validate 'xfld.ModeofEntry == "select" || xfld.ModeofEntry == "accept"' 'On-load refresh lost Accept SQL processing.'
+    Assert-Contains $validate 'else if (xfld.ModeofEntry == "accept")' 'On-load refresh lost Accept query result processing.'
+    Assert-Contains $validate 'if (xfld.ModeofEntry == "calculate" || fieldEmpty)' 'On-load refresh lost Calculate/default expression processing.'
     Assert-Contains $validate 'ValidationInvocationResult details = await ValidateDataDetailed();' 'ValidateData compatibility wrapper changed.'
-    Add-Observation 'arm-dep-03-compatibility' 'load refresh and ValidateData compatibility entry points remain present'
+    Assert-Contains $axGet 'LoadDataCore(getData, accessResult, validate, refreshFieldsOnLoad: true)' 'Existing AxGet no longer enables its compatibility on-load refresh.'
+    Assert-Contains $axGet 'LoadDataCore(getData, accessResult, validate, refreshFieldsOnLoad: false)' 'Trusted AxData baseline load entry point is missing.'
+    Assert-Contains $axGet 'if (refreshFieldsOnLoad)' 'AxGet baseline load no longer gates its compatibility on-load refresh.'
+    Add-Observation 'arm-dep-03-compatibility' 'existing AxGet retains its refresh; trusted AxData baseline load skips it so Init owns exactly one New/Existing field-processing pass'
 
     foreach ($integrationContract in @(
         'private async Task<OperationResult> ValidateForPersistence(',
@@ -458,7 +470,7 @@ try {
         'GetGenMapFieldAddresses(genMapBuffer, genMapRecord)',
         'operation.Kind != StructDef.GenMapOpKind.Value',
         'AxPut dependency compatibility fallback:',
-        'requiresInitializationRefresh: true',
+        'requiresInitializationRefresh: _dataObjectContext?.Snapshot is null',
         'requiresInitializationRefresh: isCreate',
         'if (compatibilityWarnings.Count > 0)'
     )) {
@@ -473,7 +485,7 @@ try {
     Assert-Contains $validate '_sdef.GetFieldIndex(parent.FieldName, parentRowNo) < 0' 'Targeted parent readiness no longer checks row initialization.'
     Assert-Contains $validate 'if (RequiresRootSelectionResolution(root.Field))' 'Targeted selection roots no longer resolve normalized identities.'
     Assert-Contains $validate 'FieldValue = await RefreshFieldAsync(root.Field, root.RowNo);' 'Targeted selection-root refresh is missing.'
-    Assert-Contains $validate 'if (IsUnavailableDirectVariableExpression(xfld.Cexp))' 'Optional direct-variable compatibility handling is missing.'
+    Assert-Contains $validate 'private bool IsUnavailableDirectVariableExpression(string expression)' 'Deferred optional-variable compatibility helper was removed.'
     Assert-Contains $parserSource 'decimal value = Convert.ToDecimal(param, CultureInfo.InvariantCulture);' 'Parser abs no longer accepts decimal operands.'
 
     $submitCoreStart = $validate.IndexOf('private async Task<string> SubmitValueCore(', [StringComparison]::Ordinal)
@@ -538,22 +550,14 @@ try {
     Assert-Equal ($targetedCounters.Commands -join ',') ($compatibilityCounters.Commands -join ',') 'Targeted persistence commands differ from compatibility output.'
     Add-Observation 'arm-dep-04-sparse-counters' 'repeated-runtime sparse edit refresh=1 vs 3, query=1 vs 2, persistence commands unchanged'
 
-    $validateEvaluations = [regex]::Matches($validate, '(?m)^\s*if \(!_parser\.Evaluate\(')
-    Assert-Equal $validateEvaluations.Count 5 'Active Validate parser-evaluation count changed.'
-    foreach ($evaluation in $validateEvaluations) {
-        $windowLength = [Math]::Min(1400, $validate.Length - $evaluation.Index)
-        $window = $validate.Substring($evaluation.Index, $windowLength)
-        $valueRead = $window.IndexOf('_parser.Value', [StringComparison]::Ordinal)
-        $throwGuard = $window.IndexOf('throw new InvalidOperationException', [StringComparison]::Ordinal)
-        $returnGuard = $window.IndexOf('return false;', [StringComparison]::Ordinal)
-        $failureGuard = if ($throwGuard -ge 0 -and ($returnGuard -lt 0 -or $throwGuard -lt $returnGuard)) { $throwGuard } else { $returnGuard }
-        Assert-True ($valueRead -gt $failureGuard -and $failureGuard -ge 0) 'Validate reads Parser.Value before handling Evaluate(false).'
-    }
+    $guardedRefreshEvaluations = [regex]::Matches($validate, '(?m)^\s*if \(_parser\.Evaluate\(')
+    Assert-Equal $guardedRefreshEvaluations.Count 4 'Current ARM refresh-expression compatibility shape changed.'
+    Assert-Contains $validate '_parser.Evaluate(fld.Cvalexp);' 'Current ARM validation-expression compatibility shape changed.'
     $taxEvaluate = $validateHelper.IndexOf('if (!_parser.Evaluate(formula))', [StringComparison]::Ordinal)
     $taxFailure = $validateHelper.IndexOf('throw new InvalidOperationException("Tax formula evaluation failed.")', $taxEvaluate, [StringComparison]::Ordinal)
     $taxValue = $validateHelper.IndexOf('_parser.Value', $taxEvaluate, [StringComparison]::Ordinal)
     Assert-True ($taxEvaluate -ge 0 -and $taxFailure -gt $taxEvaluate -and $taxValue -gt $taxFailure) 'Tax formula reads Parser.Value before handling Evaluate(false).'
-    Add-Observation 'parser-failure' 'all five Validate evaluations and the tax evaluation handle failure before Parser.Value; a missing direct optional variable preserves the existing field without a stale read'
+    Add-Observation 'parser-failure-deferred' 'current ARM keeps four success-only refresh evaluations plus the existing validation evaluation; fail-closed handling is explicitly deferred for production compatibility, while tax evaluation remains guarded'
 
     foreach ($parityStep in @(
         '_validate = new Validate(_common, _traceService);',

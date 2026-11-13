@@ -40,6 +40,7 @@ public sealed class InitializeAxDataHandler(
     IAxpertAuthorizationProvider authorizationProvider,
     IStructDefProvider structDefProvider,
     IAxpertDataLoader dataLoader,
+    IAxpertFieldEngine fieldEngine,
     IAxDataStore store,
     IObjectIdGenerator objectIdGenerator,
     IClock clock,
@@ -97,11 +98,35 @@ public sealed class InitializeAxDataHandler(
         }
 
         ValidateOptions();
+        var now = clock.UtcNow;
+        var state = CreateState(
+            loaded.State,
+            definition,
+            user,
+            objectIdGenerator.NewObjectId(),
+            now);
+        var fieldOperation = await fieldEngine.CreateOperationAsync(
+            state,
+            user,
+            cancellationToken).ConfigureAwait(false);
+        if (!fieldOperation.Succeeded || fieldOperation.Operation is null)
+        {
+            return InitializeAxDataResult.Failure(AxDataErrors.DependencyUnavailable);
+        }
+
+        await using (fieldOperation.Operation)
+        {
+            var initialized = await fieldOperation.Operation.InitializeOnLoadAsync(
+                cancellationToken).ConfigureAwait(false);
+            if (!initialized.Succeeded)
+            {
+                return InitializeAxDataResult.Failure(AxDataErrors.ValidationFailed);
+            }
+        }
+
+        state.ExpiresAtUtc = now.Add(options.InactivityTtl);
         for (var attempt = 0; attempt < options.ObjectIdCollisionRetries; attempt++)
         {
-            var now = clock.UtcNow;
-            var state = CreateState(loaded.State, definition, user, objectIdGenerator.NewObjectId(), now);
-            state.ExpiresAtUtc = now.Add(options.InactivityTtl);
             var write = await store.WriteAsync(state, expectedVersion: null, cancellationToken).ConfigureAwait(false);
             Log.Write(new OperationalEvent(
                 "redis.cas.completed", "initialize", write.Status == AxDataStoreWriteStatus.Stored ? "stored" : "conflict",
@@ -117,6 +142,18 @@ public sealed class InitializeAxDataHandler(
                     state.RecordId,
                     permission.IsReadOnly,
                     state.ExpiresAtUtc.Value));
+            }
+
+            if (attempt + 1 < options.ObjectIdCollisionRetries)
+            {
+                now = clock.UtcNow;
+                state = CreateState(
+                    state,
+                    definition,
+                    user,
+                    objectIdGenerator.NewObjectId(),
+                    now);
+                state.ExpiresAtUtc = now.Add(options.InactivityTtl);
             }
         }
 

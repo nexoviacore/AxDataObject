@@ -85,7 +85,7 @@ public sealed class AxpertDataSource(
             }
 
             input.RecordId = recordId;
-            var loaded = await axGetService.LoadData(input, access).ConfigureAwait(false);
+            var loaded = await axGetService.LoadBaselineData(input, access).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             if (!loaded.success || !string.IsNullOrWhiteSpace(loaded.error) ||
                 !loaded.data.TryGetValue("data", out var payload))

@@ -68,6 +68,46 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
         public Task<FieldOperationStatus> InitializeAsync(CancellationToken cancellationToken) =>
             CreateAndHydrateAsync(cancellationToken);
 
+        public async Task<FieldEvaluationResult> InitializeOnLoadAsync(
+            CancellationToken cancellationToken)
+        {
+            if (_disposed || _completed || _runtime is null || _contaminated)
+            {
+                return Failure(
+                    UnknownAddress(),
+                    "The Axpert field operation is not ready for on-load processing.");
+            }
+
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await _runtime.Validate.InitializeFieldsOnLoad(state.RecordId is null).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!_runtime.Validate.validationPassed)
+                {
+                    _contaminated = true;
+                    return Failure(
+                        UnknownAddress(),
+                        "Axpert rejected on-load field processing.");
+                }
+
+                var result = ReadBack(_runtime, state, []);
+                _completed = result.Succeeded;
+                return result;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                _contaminated = true;
+                return Failure(
+                    UnknownAddress(),
+                    "Axpert on-load field processing failed.");
+            }
+        }
+
         public async Task<FieldEvaluationResult> EvaluateAsync(
             FieldAddress field,
             object? value,

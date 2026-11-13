@@ -9,6 +9,8 @@ using AxValidate.Dto;
 using AxValidate.Helpers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.Win32;
+using Org.BouncyCastle.Utilities;
 using System.Data;
 using System.Text.RegularExpressions;
 using System.Xml;
@@ -772,6 +774,7 @@ namespace AxValidate
             return invocation;
         }
 
+        // targeted dependency flow
         public async Task<ValidationInvocationResult> RefreshAndValidateChangesAsync(
             IReadOnlyList<ValidationAddress> changedFields
         )
@@ -2292,6 +2295,13 @@ namespace AxValidate
             return details.LegacyMessage;
         }
 
+        // Purpose: Load existing/baseline data into the runtime without treating every loaded field as a user change.
+        // 1) Loads field values.
+        // 2) Loads row actions and record IDs.
+        // 3) Loads source IDs.
+        // 4) Registers parser variables.
+        // 5) Returns structured success/errors.
+        // 6) Does not run dependency traversal.
         public async Task<ValidationInvocationResult> SubmitValueOnLoadDetailed(
             TStructRequestDto dataJson
         )
@@ -2638,6 +2648,9 @@ namespace AxValidate
             return details.LegacyMessage;
         }
 
+        // Apply actually submitted values and record their exact field addresses.
+        // It writes values and parser variables, but does not itself walk dependencies
+        // DC, Frame, Row, Field, Category = Submission
         public async Task<ValidationInvocationResult> SubmitValueDetailed(TStructRequestDto dataJson)
         {
             BeginValidationInvocation();
@@ -3413,7 +3426,17 @@ namespace AxValidate
             return result;
         }
 
-        public async Task<string> RefreshFieldsOnLoad()
+        public Task<string> RefreshFieldsOnLoad()
+        {
+            return ProcessFieldsOnLoad(initializeFields: false, isNewRecord: false);
+        }
+
+        public Task<string> InitializeFieldsOnLoad(bool isNewRecord)
+        {
+            return ProcessFieldsOnLoad(initializeFields: true, isNewRecord);
+        }
+
+        private async Task<string> ProcessFieldsOnLoad(bool initializeFields, bool isNewRecord)
         {
             BeginValidationInvocation();
             string result = string.Empty;
@@ -3433,9 +3456,14 @@ namespace AxValidate
                 return "No fields to refresh";
             }
 
-            onDataLoad = true;
+            bool refreshExpressionsOnLoad = !string.Equals(
+                _parser.GetVarValue("Axp_RefreshExpsOnLoad"),
+                "false",
+                StringComparison.OrdinalIgnoreCase
+            );
             for (int fidx = 0; fidx < _sdef.Frames.Count; fidx++)
             {
+                onDataLoad = true;
                 _traceService.LogMessage($"DC Name: DC{_sdef.Frames[fidx].FrameNo}");
 
                 try
@@ -3457,7 +3485,12 @@ namespace AxValidate
                             TField field = _sdef.Flds[fldIdx];
                             _traceService.LogMessage($"Field Name:  {field.FieldName}");
 
-                            if (!field.SaveValue)
+                            if (ShouldProcessFieldOnLoad(
+                                field,
+                                initializeFields,
+                                isNewRecord,
+                                refreshExpressionsOnLoad
+                            ))
                             {
 
                                 try
@@ -3581,6 +3614,43 @@ namespace AxValidate
             return processedFields > 0
                 ? $"Successfully processed {processedFields} fields. Details: {string.Join("; " + Environment.NewLine, validateResultList)}"
                 : "No values were submitted";
+        }
+
+        private static bool ShouldProcessFieldOnLoad(
+            TField field,
+            bool initializeFields,
+            bool isNewRecord,
+            bool refreshExpressionsOnLoad)
+        {
+            if (!field.SaveValue)
+                return true;
+
+            if (!initializeFields)
+                return false;
+
+            if (!isNewRecord)
+            {
+                return refreshExpressionsOnLoad
+                    && string.Equals(field.ModeofEntry, "calculate", StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrWhiteSpace(field.Cexp);
+            }
+
+            if (!string.IsNullOrWhiteSpace(field.Cexp))
+                return true;
+
+            if (string.Equals(field.ModeofEntry, "accept", StringComparison.OrdinalIgnoreCase))
+            {
+                return !string.IsNullOrWhiteSpace(field.SQLText)
+                    || (field.SQL != null && field.SQL.Count > 0);
+            }
+
+            if (string.Equals(field.ModeofEntry, "select", StringComparison.OrdinalIgnoreCase))
+            {
+                return field.Autoselect || !string.IsNullOrWhiteSpace(field.ComponentType);
+            }
+
+            return string.Equals(field.ModeofEntry, "fill", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(field.LinkField);
         }
 
         public async Task<OperationResult> ValidateData()

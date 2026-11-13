@@ -163,6 +163,13 @@ public sealed class FakeAxpertFieldEngine(StructDefHandle definition) : IAxpertF
 
     public int CompleteCount { get; private set; }
 
+    public int InitializeOnLoadCount { get; private set; }
+
+    public FieldEvaluationResult InitializeOnLoadResult { get; set; } =
+        FieldEvaluationResult.Success();
+
+    public Action<AxDataState>? OnInitializeOnLoad { get; set; }
+
     public Task<FieldOperationStartResult> CreateOperationAsync(
         AxDataState state,
         AxUserContext user,
@@ -243,6 +250,15 @@ public sealed class FakeAxpertFieldEngine(StructDefHandle definition) : IAxpertF
     private sealed class Operation(FakeAxpertFieldEngine owner, AxDataState state) : IAxpertFieldOperation
     {
         private readonly List<FieldChange> _changes = [];
+
+        public Task<FieldEvaluationResult> InitializeOnLoadAsync(
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            owner.InitializeOnLoadCount++;
+            owner.OnInitializeOnLoad?.Invoke(state);
+            return Task.FromResult(owner.InitializeOnLoadResult);
+        }
 
         public async Task<FieldEvaluationResult> EvaluateAsync(
             FieldAddress field,

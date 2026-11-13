@@ -1,11 +1,12 @@
 using AxData.Api.Contracts;
 using AxData.Domain.Errors;
+using Microsoft.AspNetCore.Mvc;
 
 namespace AxData.Api.Errors;
 
 public static class AxDataHttpErrorMapper
 {
-    public static IResult Map(
+    public static IActionResult Map(
         AxDataErrorDefinition error,
         string correlationId,
         long? currentVersion = null)
@@ -16,6 +17,9 @@ public static class AxDataHttpErrorMapper
             correlationId,
             currentVersion);
 
-        return Results.Json(response, statusCode: error.HttpStatusCode);
+        return new ObjectResult(response)
+        {
+            StatusCode = error.HttpStatusCode
+        };
     }
 }

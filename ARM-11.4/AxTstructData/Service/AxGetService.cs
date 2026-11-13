@@ -404,6 +404,20 @@ namespace AxTstructData
 
         public async Task<APIResult> LoadData(AxGet getData, APIResult accessResult = null, Validate validate = null)
         {
+            return await LoadDataCore(getData, accessResult, validate, refreshFieldsOnLoad: true);
+        }
+
+        public async Task<APIResult> LoadBaselineData(AxGet getData, APIResult accessResult = null, Validate validate = null)
+        {
+            return await LoadDataCore(getData, accessResult, validate, refreshFieldsOnLoad: false);
+        }
+
+        private async Task<APIResult> LoadDataCore(
+            AxGet getData,
+            APIResult accessResult,
+            Validate validate,
+            bool refreshFieldsOnLoad)
+        {
             var result = new APIResult();
 
             try
@@ -541,7 +555,10 @@ namespace AxTstructData
                     return result;
                 }
 
-                var dataJson = await _validate.RefreshFieldsOnLoad();
+                if (refreshFieldsOnLoad)
+                {
+                    await _validate.RefreshFieldsOnLoad();
+                }
 
                 result.success = true;
                 result.data["message"] = "Data loaded successfully.";

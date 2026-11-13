@@ -157,6 +157,148 @@ public sealed class AxpertFieldEngineContractTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task On_load_processing_refreshes_non_save_calculations_once_and_reads_them_back()
+    {
+        var state = CreateState();
+        state.DataContainers["dc1"].Rows[0].Fields["qty"].SetValue(2m);
+        state.DataContainers["dc1"].Rows[0].Fields["amount"].SetValue(0m);
+        var factory = new LegacyRuntimeFactory();
+        var adapter = new AxpertFieldEngine(factory);
+        var started = await adapter.CreateOperationAsync(state, User, default);
+
+        Assert.True(started.Succeeded, started.Error);
+        await using var operation = started.Operation!;
+        var result = await operation.InitializeOnLoadAsync(default);
+
+        Assert.True(result.Succeeded, result.Errors.FirstOrDefault()?.Message);
+        Assert.Equal(25m, state.DataContainers["dc1"].Rows[0].Fields["amount"].Value);
+        Assert.Equal(1, factory.CallCount);
+        Assert.Equal(1, factory.LastCreatedRuntime!.HydrationCount);
+        Assert.Equal(1, factory.LastCreatedRuntime.ReadbackCount);
+    }
+
+    [Fact]
+    public async Task On_load_processing_preserves_current_value_when_ARM_calculation_cannot_be_evaluated()
+    {
+        var state = CreateState();
+        var adapter = new AxpertFieldEngine(
+            new LegacyRuntimeFactory(invalidCalculationExpression: true));
+        var started = await adapter.CreateOperationAsync(state, User, default);
+
+        Assert.True(started.Succeeded, started.Error);
+        await using var operation = started.Operation!;
+        var result = await operation.InitializeOnLoadAsync(default);
+
+        Assert.True(result.Succeeded, result.Errors.FirstOrDefault()?.Message);
+        Assert.Equal(12.50m, state.DataContainers["dc1"].Rows[0].Fields["amount"].Value);
+    }
+
+    [Fact]
+    public async Task New_on_load_processing_refreshes_saved_calculation_fields()
+    {
+        var state = CreateState();
+        state.DataContainers["dc1"].Rows[0].Fields["amount"].SetValue(0m);
+        var factory = new LegacyRuntimeFactory(saveCalculation: true);
+        var adapter = new AxpertFieldEngine(factory);
+        var started = await adapter.CreateOperationAsync(state, User, default);
+
+        Assert.True(started.Succeeded, started.Error);
+        await using var operation = started.Operation!;
+        var result = await operation.InitializeOnLoadAsync(default);
+
+        Assert.True(result.Succeeded, result.Errors.FirstOrDefault()?.Message);
+        Assert.Equal(12.50m, state.DataContainers["dc1"].Rows[0].Fields["amount"].Value);
+        Assert.Equal(1, factory.CallCount);
+        Assert.Equal(1, factory.LastCreatedRuntime!.ReadbackCount);
+    }
+
+    [Fact]
+    public async Task Existing_on_load_processing_refreshes_saved_calculation_fields_when_enabled()
+    {
+        var state = CreateState(recordId: 1001);
+        state.DataContainers["dc1"].Rows[0].Fields["amount"].SetValue(0m);
+        var adapter = new AxpertFieldEngine(new LegacyRuntimeFactory(saveCalculation: true));
+        var started = await adapter.CreateOperationAsync(state, User, default);
+
+        Assert.True(started.Succeeded, started.Error);
+        await using var operation = started.Operation!;
+        var result = await operation.InitializeOnLoadAsync(default);
+
+        Assert.True(result.Succeeded, result.Errors.FirstOrDefault()?.Message);
+        Assert.Equal(12.50m, state.DataContainers["dc1"].Rows[0].Fields["amount"].Value);
+    }
+
+    [Fact]
+    public async Task Existing_on_load_processing_preserves_saved_calculation_when_refresh_is_disabled()
+    {
+        var state = CreateState(recordId: 1001);
+        state.DataContainers["dc1"].Rows[0].Fields["amount"].SetValue(7m);
+        var adapter = new AxpertFieldEngine(new LegacyRuntimeFactory(
+            saveCalculation: true,
+            refreshExpressionsOnLoad: false));
+        var started = await adapter.CreateOperationAsync(state, User, default);
+
+        Assert.True(started.Succeeded, started.Error);
+        await using var operation = started.Operation!;
+        var result = await operation.InitializeOnLoadAsync(default);
+
+        Assert.True(result.Succeeded, result.Errors.FirstOrDefault()?.Message);
+        Assert.Equal(7m, state.DataContainers["dc1"].Rows[0].Fields["amount"].Value);
+    }
+
+    [Fact]
+    public async Task New_on_load_processing_applies_saved_accept_default_expression()
+    {
+        var state = CreateState();
+        state.DataContainers["dc1"].Rows[0].Fields["qty"].SetValue(null);
+        var adapter = new AxpertFieldEngine(new LegacyRuntimeFactory(savedAcceptExpression: true));
+        var started = await adapter.CreateOperationAsync(state, User, default);
+
+        Assert.True(started.Succeeded, started.Error);
+        await using var operation = started.Operation!;
+        var result = await operation.InitializeOnLoadAsync(default);
+
+        Assert.True(result.Succeeded, result.Errors.FirstOrDefault()?.Message);
+        Assert.Equal(5m, state.DataContainers["dc1"].Rows[0].Fields["qty"].Value);
+    }
+
+    [Fact]
+    public async Task New_on_load_processing_applies_saved_accept_SQL_default()
+    {
+        var defaults = new DataTable();
+        defaults.Columns.Add("default_qty", typeof(decimal));
+        defaults.Rows.Add(9m);
+        SelectionDbHelper.Create(defaults, out IDbHelper dbHelper);
+        var runtime = LegacyFixture.CreateRuntime(dbHelper: dbHelper);
+        TField field = runtime.Validate._sdef.GetField("qty")!;
+        field.SaveValue = true;
+        field.SQL = ["select default_qty from defaults"];
+        field.SQLText = field.SQL[0];
+        LegacyFixture.Seed(runtime, "", 12.50m, 0m);
+
+        await runtime.Validate.InitializeFieldsOnLoad(isNewRecord: true);
+
+        Assert.True(runtime.Validate.validationPassed);
+        Assert.Equal("9.00", runtime.Validate._sdef.GetFieldValue("qty", 1));
+    }
+
+    [Fact]
+    public async Task Existing_on_load_processing_does_not_overwrite_saved_accept_value()
+    {
+        var state = CreateState(recordId: 1001);
+        state.DataContainers["dc1"].Rows[0].Fields["qty"].SetValue(7m);
+        var adapter = new AxpertFieldEngine(new LegacyRuntimeFactory(savedAcceptExpression: true));
+        var started = await adapter.CreateOperationAsync(state, User, default);
+
+        Assert.True(started.Succeeded, started.Error);
+        await using var operation = started.Operation!;
+        var result = await operation.InitializeOnLoadAsync(default);
+
+        Assert.True(result.Succeeded, result.Errors.FirstOrDefault()?.Message);
+        Assert.Equal(7m, state.DataContainers["dc1"].Rows[0].Fields["qty"].Value);
+    }
+
+    [Fact]
     public async Task Targeted_validation_falls_back_when_a_required_parent_row_is_not_initialized()
     {
         var trace = new CountingTraceService();
@@ -718,7 +860,10 @@ public sealed class AxpertFieldEngineContractTests(ITestOutputHelper output)
         bool asGrid = false,
         bool sourceKeyField = false,
         bool requiresCompatibilityFallback = false,
-        bool includeUnrelatedCalculation = false) : IAxpertFieldRuntimeFactory
+        bool includeUnrelatedCalculation = false,
+        bool saveCalculation = false,
+        bool? refreshExpressionsOnLoad = null,
+        bool savedAcceptExpression = false) : IAxpertFieldRuntimeFactory
     {
         public int CallCount { get; private set; }
 
@@ -743,6 +888,26 @@ public sealed class AxpertFieldEngineContractTests(ITestOutputHelper output)
                 requiresCompatibilityFallback: requiresCompatibilityFallback,
                 includeUnrelatedCalculation: includeUnrelatedCalculation,
                 traceService: trace);
+            if (saveCalculation)
+            {
+                LastCreatedRuntime.Validate._sdef.GetField("amount")!.SaveValue = true;
+            }
+
+            if (savedAcceptExpression)
+            {
+                TField field = LastCreatedRuntime.Validate._sdef.GetField("qty")!;
+                field.SaveValue = true;
+                field.Cexp = "2 + 3";
+                field.Exprn = 0;
+            }
+
+            if (refreshExpressionsOnLoad.HasValue)
+            {
+                LastCreatedRuntime.Validate._parser.RegisterVar(
+                    "Axp_RefreshExpsOnLoad",
+                    "c",
+                    refreshExpressionsOnLoad.Value ? "true" : "false");
+            }
             CreatedRuntimes.Add(LastCreatedRuntime);
             return Task.FromResult(AxpertOperationResult<AxpertFieldRuntime>.Success(
                 LastCreatedRuntime));

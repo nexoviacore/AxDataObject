@@ -45,7 +45,7 @@
                             "options": { "raw": { "language": "json" } }
                         },
                         "url": "{{baseUrl}}/api/v1/axdata",
-                        "description": "Creates new state using the contract-tested null key shape."
+                        "description": "Creates new state using the contract-tested null key shape after one non-save/default on-load refresh and validation pass."
                     },
                     "event": [
                         {
@@ -58,7 +58,7 @@
                                     "pm.test('Init new returns success', () => pm.expect(body.status).to.eql('success'));",
                                     "pm.test('Init new returns objectId and version', () => {",
                                     "  pm.expect(body.objectId).to.be.a('string').and.not.empty;",
-                                    "  pm.expect(body.version).to.be.a('number');",
+                                    "  pm.expect(body.version).to.eql(1);",
                                     "});",
                                     "pm.collectionVariables.set('newObjectId', body.objectId);"
                                 ]
@@ -82,7 +82,7 @@
                             "options": { "raw": { "language": "json" } }
                         },
                         "url": "{{baseUrl}}/api/v1/axdata",
-                        "description": "Loads existing state using the contract-tested keyField/keyValue shape."
+                        "description": "Loads existing state using the contract-tested keyField/keyValue shape, then runs the one-time on-load field pass before storing version 1."
                     },
                     "event": [
                         {
@@ -95,7 +95,7 @@
                                     "pm.test('Init existing returns success', () => pm.expect(body.status).to.eql('success'));",
                                     "pm.test('Init existing returns objectId and version', () => {",
                                     "  pm.expect(body.objectId).to.be.a('string').and.not.empty;",
-                                    "  pm.expect(body.version).to.be.a('number');",
+                                    "  pm.expect(body.version).to.eql(1);",
                                     "});",
                                     "pm.collectionVariables.set('objectId', body.objectId);",
                                     "pm.collectionVariables.set('version', body.version);",

@@ -56,6 +56,8 @@ public interface IAxpertFieldEngine
 
 public interface IAxpertFieldOperation : IAsyncDisposable
 {
+    Task<FieldEvaluationResult> InitializeOnLoadAsync(CancellationToken cancellationToken);
+
     Task<FieldEvaluationResult> EvaluateAsync(
         FieldAddress field,
         object? value,

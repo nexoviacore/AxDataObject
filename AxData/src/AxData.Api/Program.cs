@@ -1,6 +1,5 @@
 using AxData.Api.Identity;
 using AxData.Api.Middleware;
-using AxData.Api.Routing;
 using AxData.Application.Ports;
 using AxData.Application.Init;
 using AxData.Application.Query;
@@ -13,6 +12,7 @@ using AxData.Api.Production;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddControllers();
 builder.Services.AddScoped<IUserContext, HttpUserContext>();
 builder.Services.AddScoped<InitializeAxDataHandler>();
 builder.Services.AddScoped<QueryAxDataHandler>();
@@ -62,8 +62,8 @@ else
 
 app.UseAuthorization();
 
-app.MapGet("/health", () => Results.Ok());
-app.MapGroup(ApiRoutes.BasePath).MapAxDataEndpoints();
+//app.MapGet("/health", () => Results.Ok());
+app.MapControllers();
 
 app.Run();
 

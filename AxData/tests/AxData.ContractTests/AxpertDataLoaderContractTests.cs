@@ -73,6 +73,30 @@ public sealed class AxpertDataLoaderContractTests
     }
 
     [Fact]
+    public async Task New_transaction_materializes_row_one_for_empty_non_grid_frames_only()
+    {
+        var source = new StubDataSource(new AxpertDataSourceResult(
+            true,
+            null,
+            [new("dc1", []), new("dc2", [])]));
+        var loader = new AxpertDataLoader(source, new FakeRowIdGenerator("row_header_new"));
+
+        var result = await loader.LoadAsync(
+            SampleStructDefFixture.Definition,
+            new AxRecordKey(null, null, null),
+            User,
+            default);
+
+        Assert.True(result.Succeeded, result.Error);
+        var header = Assert.Single(result.State!.DataContainers["dc1"].Rows);
+        Assert.Equal("row_header_new", header.RowId);
+        Assert.Equal(AxRowState.New, header.State);
+        Assert.Null(header.PersistedRecordId);
+        Assert.Null(Assert.Single(header.Fields).Value.Value);
+        Assert.Empty(result.State.DataContainers["dc2"].Rows);
+    }
+
+    [Fact]
     public async Task Does_not_read_payload_after_axget_failure()
     {
         var loader = new AxpertDataLoader(new StubDataSource(new AxpertDataSourceResult(

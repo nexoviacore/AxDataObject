@@ -4,6 +4,7 @@ Keep under ~150 lines. Codex updates this at the end of each slice: one line per
 Group a folder into one line when it has more than 5 files. All paths below are relative to `AxData/`.
 
 src/AxData.Api: HTTP endpoints, authentication, filters
+src/AxData.Api/Controllers/AxDataController.cs: authenticated MVC controller for Initialize, Query, Get, and Set HTTP operations
 src/AxData.Api/Contracts, Errors, Identity, Middleware, Requests, Routing: versioned API conventions, trusted claims, safe errors, correlation/logging scopes, and request metadata parsing
 src/AxData.Api/Identity/AxAuthAuthentication.cs: pinned AxAuth JWT validation and AXD authentication challenge responses
 src/AxData.Api/Identity/ArmSessionConsistencyMiddleware.cs: transitional body ARMSessionId equality guard without trusting body identity

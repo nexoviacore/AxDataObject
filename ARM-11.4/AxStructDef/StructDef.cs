@@ -591,6 +591,9 @@ namespace AxStructDef
                     .Where(node => node.NodeType == XmlNodeType.Element)
                     .ToList();
 
+                // Legacy text format: <a58> eamount,srate,d2 </a58>
+                // first character = type
+                // remaining text = target
                 if (structuredChildren.Count == 0)
                 {
                     ParseLegacyDependencyText(
@@ -602,6 +605,8 @@ namespace AxStructDef
                     continue;
                 }
 
+                // Structured format: <a58> <e> amount </e> <s> rate </s> <sf> 2 </sf> </a58>
+                // reads named tags and traverses dependencies through the XML
                 foreach (XmlNode child in structuredChildren)
                 {
                     string tag = child.Name.Trim().ToLowerInvariant();
@@ -663,7 +668,7 @@ namespace AxStructDef
                     );
                     continue;
                 }
-
+                // Populates: Dependents, DependentTypes, Deps, DepFrames
                 AddLegacyDependent(sourceField, target, token[0]);
                 AddDependencyEdge(metadata, sourceField, target, kind, ref declarationOrder);
             }
@@ -691,6 +696,7 @@ namespace AxStructDef
                 return;
             }
 
+            // Field names are case-insensitive, For ordinary types(e, s, f, ag), only one edge is retained:
             TDependencyEdge? existing = metadata.Edges.FirstOrDefault(edge =>
                 string.Equals(edge.Source, sourceField.FieldName, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(edge.Target, target, StringComparison.OrdinalIgnoreCase)
@@ -700,6 +706,8 @@ namespace AxStructDef
 
             if (existing != null)
             {
+                // if the existing type is Expression and a later duplicate is Select, it upgrades to Select
+                // Special types are deduplicated only when their exact kind matches
                 if (existing.Kind == TDependencyKind.Expression && kind == TDependencyKind.Select)
                     existing.Kind = TDependencyKind.Select;
                 return;
@@ -870,6 +878,7 @@ namespace AxStructDef
                 string current = pending.Dequeue();
                 if (!visited.Add(current))
                     continue;
+                // A -> B -> C-> A
                 if (string.Equals(current, target, StringComparison.OrdinalIgnoreCase))
                     return true;
 
@@ -1015,7 +1024,7 @@ namespace AxStructDef
                 "dc" => TDependencyKind.DataContainer,
                 "lbl" => TDependencyKind.Label,
                 "sf" => TDependencyKind.DependentFrame,
-                _ => default
+                _ => default // TDependencyKind.Expression
             };
             return tag is "e" or "s" or "f" or "ag" or "fg" or "dc" or "lbl" or "sf";
         }

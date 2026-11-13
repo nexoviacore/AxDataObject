@@ -53,6 +53,65 @@ public sealed class InitializeAxDataTests
     }
 
     [Fact]
+    public async Task On_load_processing_runs_once_and_its_values_are_stored()
+    {
+        var fixture = CreateFixture();
+        fixture.FieldEngine.OnInitializeOnLoad = state =>
+            state.DataContainers["dc2"].Rows[0].Fields["amount"].SetValue(25m);
+
+        var result = await fixture.Handler.HandleAsync(
+            new InitializeAxDataCommand(SampleStructDefFixture.TransId, null),
+            CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, fixture.FieldEngine.InitializeOnLoadCount);
+        var stored = await fixture.Store.LoadAsync(
+            SampleStructDefFixture.TenantId,
+            result.Response!.ObjectId,
+            CancellationToken.None);
+        Assert.Equal(25m, stored!.DataContainers["dc2"].Rows[0].Fields["amount"].Value);
+    }
+
+    [Fact]
+    public async Task Failed_on_load_processing_does_not_store_an_object()
+    {
+        var fixture = CreateFixture();
+        fixture.FieldEngine.InitializeOnLoadResult = FieldEvaluationResult.Failure(
+            new FieldEvaluationError(
+                new FieldAddress("dc1", "row_new", "amount"),
+                "AXD-VAL-001",
+                "The scripted on-load calculation failed."));
+
+        var result = await fixture.Handler.HandleAsync(
+            new InitializeAxDataCommand(SampleStructDefFixture.TransId, null),
+            CancellationToken.None);
+
+        Assert.Equal("AXD-VAL-001", result.Error!.Code);
+        Assert.Equal(1, fixture.FieldEngine.InitializeOnLoadCount);
+        Assert.Null(await fixture.Store.LoadAsync(
+            SampleStructDefFixture.TenantId,
+            "01J-OPAQUE",
+            CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Object_id_collision_retries_do_not_repeat_on_load_processing()
+    {
+        var fixture = CreateFixture(objectId: "object-1");
+        var existing = SampleStructDefFixture.CreateState();
+        Assert.Equal(
+            AxDataStoreWriteStatus.Stored,
+            (await fixture.Store.WriteAsync(existing, null, CancellationToken.None)).Status);
+
+        var result = await fixture.Handler.HandleAsync(
+            new InitializeAxDataCommand(SampleStructDefFixture.TransId, null),
+            CancellationToken.None);
+
+        Assert.Equal("AXD-INFRA-001", result.Error!.Code);
+        Assert.Equal(1, fixture.FieldEngine.InitializeOnLoadCount);
+    }
+
+    [Fact]
     public async Task Unauthorized_request_stops_before_definition_or_data_load()
     {
         var fixture = CreateFixture();
@@ -80,7 +139,9 @@ public sealed class InitializeAxDataTests
         Assert.Equal(0, fixture.Loader.CallCount);
     }
 
-    private static Fixture CreateFixture(AxDataState? loaded = null)
+    private static Fixture CreateFixture(
+        AxDataState? loaded = null,
+        string objectId = "01J-OPAQUE")
     {
         var authorization = new FakeAxpertAuthorizationProvider();
         var definitions = new FakeStructDefProvider(SampleStructDefFixture.Definition);
@@ -88,6 +149,7 @@ public sealed class InitializeAxDataTests
         {
             Result = new AxDataLoadResult(true, loaded ?? SampleStructDefFixture.CreateState(), null)
         };
+        var fieldEngine = new FakeAxpertFieldEngine(SampleStructDefFixture.Definition);
         var store = new InMemoryAxDataStore();
         var handler = new InitializeAxDataHandler(
             new FakeUserContext(new AxUserContext(
@@ -97,11 +159,12 @@ public sealed class InitializeAxDataTests
             authorization,
             definitions,
             loader,
+            fieldEngine,
             store,
-            new FakeObjectIdGenerator("01J-OPAQUE"),
+            new FakeObjectIdGenerator(objectId, objectId, objectId),
             new FakeClock(Now),
             new InitializeAxDataOptions());
-        return new Fixture(handler, authorization, definitions, loader, store);
+        return new Fixture(handler, authorization, definitions, loader, fieldEngine, store);
     }
 
     private sealed record Fixture(
@@ -109,5 +172,6 @@ public sealed class InitializeAxDataTests
         FakeAxpertAuthorizationProvider Authorization,
         FakeStructDefProvider StructDefs,
         FakeAxpertDataLoader Loader,
+        FakeAxpertFieldEngine FieldEngine,
         InMemoryAxDataStore Store);
 }

@@ -211,6 +211,13 @@ public sealed class M1DevelopmentFieldEngine : IAxpertFieldEngine
     {
         private readonly List<FieldChange> _changes = [];
 
+        public Task<FieldEvaluationResult> InitializeOnLoadAsync(
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(FieldEvaluationResult.Success());
+        }
+
         public Task<FieldEvaluationResult> EvaluateAsync(
             FieldAddress field,
             object? value,

@@ -842,6 +842,8 @@ namespace AxTstructData
             return new APIResult(true, $"Structure loaded successfully for transid {putData.TransId}");
         }
 
+        // Extracts successful submission addresses: frame + row + field
+        // These become dependency roots.
         private static IReadOnlyList<ValidationAddress> GetSubmittedFieldAddresses(
             ValidationInvocationResult submissionResult
         )
@@ -852,6 +854,8 @@ namespace AxTstructData
                 .ToList();
         }
 
+        // Builds dependency roots for fields actually changed by GenMap.
+        // Delete operations are excluded because deleting a row does not mean its old field values should be refreshed.
         private static IReadOnlyList<ValidationAddress> GetGenMapFieldAddresses(
             StructDef.GenMapBuffer buffer,
             int recordNo

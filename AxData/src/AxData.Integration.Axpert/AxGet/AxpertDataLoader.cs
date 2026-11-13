@@ -111,6 +111,11 @@ public sealed class AxpertDataLoader(
             returnedContainers.TryGetValue(containerDefinition.Name, out var returned);
             var rows = returned?.Rows.Select(row => BuildRow(containerDefinition, row)).ToArray()
                 ?? [];
+            if (result.RecordId is null && !containerDefinition.IsGrid && rows.Length == 0)
+            {
+                rows = [BuildNewRow(containerDefinition)];
+            }
+
             state.DataContainers.Add(
                 containerDefinition.Name,
                 new AxDataContainer(containerDefinition.Name, containerDefinition.IsGrid, rows));
@@ -148,6 +153,18 @@ public sealed class AxpertDataLoader(
         return row.RecordId is > 0
             ? new AxDataRow(rowIdGenerator.NewRowId(), AxRowState.Unchanged, row.RecordId, fields)
             : new AxDataRow(rowIdGenerator.NewRowId(), AxRowState.New, fields: fields);
+    }
+
+    private AxDataRow BuildNewRow(DataContainerDefinition definition)
+    {
+        var fields = definition.Fields.ToDictionary(
+            field => field.Name,
+            field => new AxFieldValue(null, field.IsReadOnly),
+            StringComparer.OrdinalIgnoreCase);
+        return new AxDataRow(
+            rowIdGenerator.NewRowId(),
+            AxRowState.New,
+            fields: fields);
     }
 
     private static AxDataLoadResult Failure(string error) => new(false, null, error);
