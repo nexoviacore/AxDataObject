@@ -1,7 +1,4 @@
-using System.Data;
-using System.Security.Cryptography;
 using System.Text.RegularExpressions;
-using ARMCommon.Model;
 using AxData.Application.Ports.Axpert;
 using AxData.Integration.Axpert.Runtime;
 using AxStructDef.Models;
@@ -11,33 +8,42 @@ namespace AxData.Integration.Axpert.StructDef;
 
 public interface IAxpertStructDefSource
 {
-    Task<AxpertStructDefSnapshot?> LoadCurrentAsync(
+    Task<StructDefHandle?> LoadCurrentAsync(
         string tenantId,
         string transId,
         CancellationToken cancellationToken);
 }
 
-public sealed record AxpertStructDefSnapshot(
-    string TenantId,
-    string TransId,
-    string ContentHash,
-    IReadOnlyList<DataContainerDefinition> DataContainers,
-    IReadOnlyList<FieldDependency> Dependencies,
-    IReadOnlyList<FillGridDefinition> FillGrids,
-    string? UpdatedOn = null,
-    string? LegacyVersionNo = null,
-    bool RunTimeStruct = false,
-    bool RunTimeMode = false,
-    bool RequiresCompatibilityFallback = false,
-    IReadOnlyList<FieldDependencyDiagnostic>? DependencyDiagnostics = null);
+public interface IAxpertStructDefRuntimeSource
+{
+    Task<AxpertStructDefRuntime?> LoadCurrentRuntimeAsync(
+        string tenantId,
+        string transId,
+        CancellationToken cancellationToken);
+}
 
-public sealed class AxpertStructDefSource(IAxpertRuntimeContextFactory contextFactory) : IAxpertStructDefSource
+public sealed record AxpertStructDefRuntime(
+    AxpertRuntimeContext Context,
+    LegacyStructDef Definition);
+
+public sealed class AxpertStructDefSource(IAxpertRuntimeContextFactory contextFactory) :
+    IAxpertStructDefSource,
+    IAxpertStructDefRuntimeSource
 {
     private static readonly Regex SafeSchemaName = new(
         "^[A-Za-z_][A-Za-z0-9_$]*$",
         RegexOptions.CultureInvariant);
 
-    public async Task<AxpertStructDefSnapshot?> LoadCurrentAsync(
+    public async Task<StructDefHandle?> LoadCurrentAsync(
+        string tenantId,
+        string transId,
+        CancellationToken cancellationToken)
+    {
+        var runtime = await LoadCurrentRuntimeAsync(tenantId, transId, cancellationToken);
+        return runtime is null ? null : Project(runtime.Definition, tenantId, transId);
+    }
+
+    public async Task<AxpertStructDefRuntime?> LoadCurrentRuntimeAsync(
         string tenantId,
         string transId,
         CancellationToken cancellationToken)
@@ -45,7 +51,7 @@ public sealed class AxpertStructDefSource(IAxpertRuntimeContextFactory contextFa
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(transId);
 
-        var runtimeResult = await contextFactory.CreateAsync(tenantId, cancellationToken).ConfigureAwait(false);
+        var runtimeResult = await contextFactory.CreateAsync(tenantId, cancellationToken);
         if (!runtimeResult.Succeeded || runtimeResult.Value is null)
         {
             return null;
@@ -59,73 +65,35 @@ public sealed class AxpertStructDefSource(IAxpertRuntimeContextFactory contextFa
             return null;
         }
 
-        var rowResult = await runtime.Common._dbHelper.ExecuteSQLAsync(
-            "SELECT props, blobno, updatedon, runtimetstruct, runtimemod " +
-            $"FROM \"{schema}\".tstructs WHERE LOWER(name) = @name ORDER BY blobno",
-            ["@name"],
-            [DbType.String],
-            [transId.ToLowerInvariant()]).ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
-        if (!string.IsNullOrWhiteSpace(rowResult.error) || rowResult.data.Rows.Count == 0)
-        {
-            return null;
-        }
-
-        var contentHash = ComputeContentHash(rowResult);
-        if (contentHash is null)
-        {
-            return null;
-        }
-
         var definition = await LegacyStructDef.LoadStructure(
             runtime.Common,
             transId,
             runtime.Roles.ToList(),
             runtime.TraceService,
-            refreshCache: true).ConfigureAwait(false);
+            refreshCache: true);
         cancellationToken.ThrowIfCancellationRequested();
-        if (definition?.Frames is null || definition.Flds is null || definition.Fgs is null)
+        if (definition?.Frames is null || definition.Flds is null)
         {
             return null;
         }
 
+        return new AxpertStructDefRuntime(runtime, definition);
+    }
+
+    internal static StructDefHandle Project(
+        LegacyStructDef definition,
+        string tenantId,
+        string transId)
+    {
         var dependencyProjection = ProjectDependencyMetadata(definition.DependencyMetadata);
-        var first = rowResult.data.Rows[0];
-        return new AxpertStructDefSnapshot(
+        return new StructDefHandle(
             tenantId,
             transId,
-            contentHash,
             ProjectContainers(definition, dependencyProjection.Dependencies),
             dependencyProjection.Dependencies,
             ProjectFillGrids(definition),
-            Text(first, "updatedon"),
-            definition.Struct?.VersionNo,
-            definition.Struct?.RunTimeStruct ?? Flag(first, "runtimetstruct"),
-            definition.Struct?.RunTimeMode ?? Flag(first, "runtimemod"),
             dependencyProjection.RequiresCompatibilityFallback,
             dependencyProjection.Diagnostics);
-    }
-
-    internal static string? ComputeContentHash(SQLResult result)
-    {
-        if (result.data.Rows.Count == 0 || !result.data.Columns.Contains("props"))
-        {
-            return null;
-        }
-
-        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        foreach (DataRow row in result.data.Rows)
-        {
-            var bytes = ToBytes(row["props"]);
-            if (bytes is null)
-            {
-                return null;
-            }
-
-            hash.AppendData(bytes);
-        }
-
-        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 
     private static IReadOnlyList<DataContainerDefinition> ProjectContainers(
@@ -144,7 +112,8 @@ public sealed class AxpertStructDefSource(IAxpertRuntimeContextFactory contextFa
                     frame.AsGrid,
                     fields.Select(field => new FieldDefinition(
                         field.FieldName,
-                        frame.ReadOnly || field.Readonly)).ToArray(),
+                        frame.ReadOnly || field.Readonly,
+                        field.SourceKey)).ToArray(),
                     DeriveEvaluationOrder(
                         frame.FrameNo,
                         fields.Select(field => field.FieldName).ToArray(),
@@ -296,7 +265,7 @@ public sealed class AxpertStructDefSource(IAxpertRuntimeContextFactory contextFa
     };
 
     private static IReadOnlyList<FillGridDefinition> ProjectFillGrids(LegacyStructDef definition) =>
-        definition.Fgs!
+        (definition.Fgs ?? [])
             .Select(fillGrid => new FillGridDefinition(
                 string.IsNullOrWhiteSpace(fillGrid.Fname) ? fillGrid.Name : fillGrid.Fname,
                 fillGrid.TargetDcName,
@@ -344,14 +313,6 @@ public sealed class AxpertStructDefSource(IAxpertRuntimeContextFactory contextFa
 
         return value is string raw ? System.Text.Encoding.UTF8.GetBytes(raw) : null;
     }
-
-    private static string? Text(DataRow row, string column) =>
-        row.Table.Columns.Contains(column) && row[column] is not DBNull
-            ? Convert.ToString(row[column], System.Globalization.CultureInfo.InvariantCulture)
-            : null;
-
-    private static bool Flag(DataRow row, string column) =>
-        string.Equals(Text(row, column), "Y", StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeSchema(string value) => value.Split('~', 2)[0];
 

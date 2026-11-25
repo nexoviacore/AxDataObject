@@ -6,20 +6,11 @@ namespace AxData.Application.Ports.Axpert;
 public sealed record StructDefHandle(
     string TenantId,
     string TransId,
-    string Version,
     IReadOnlyList<DataContainerDefinition> DataContainers,
     IReadOnlyList<FieldDependency> Dependencies,
     IReadOnlyList<FillGridDefinition> FillGrids,
-    StructDefRevisionInfo? RevisionInfo = null,
     bool RequiresCompatibilityFallback = false,
     IReadOnlyList<FieldDependencyDiagnostic>? DependencyDiagnostics = null);
-
-public sealed record StructDefRevisionInfo(
-    string ContentHash,
-    string? UpdatedOn,
-    string? LegacyVersionNo,
-    bool RunTimeStruct,
-    bool RunTimeMode);
 
 public sealed record DataContainerDefinition(
     string Name,
@@ -27,7 +18,7 @@ public sealed record DataContainerDefinition(
     IReadOnlyList<FieldDefinition> Fields,
     IReadOnlyList<string>? EvaluationOrder = null);
 
-public sealed record FieldDefinition(string Name, bool IsReadOnly = false);
+public sealed record FieldDefinition(string Name, bool IsReadOnly = false, bool SourceKey = false);
 
 public sealed record FieldDependency(
     string SourceContainer,
@@ -123,8 +114,7 @@ public sealed record FieldOperationStartResult(
 
 public enum FieldOperationFailureKind
 {
-    DependencyUnavailable,
-    DefinitionChanged
+    DependencyUnavailable
 }
 
 public sealed record FieldOperationStatus(
@@ -143,6 +133,27 @@ public sealed record FieldOperationStatus(
 public sealed record AxRecordKey(string? KeyField, string? KeyValue, long? RecordId);
 
 public sealed record AxCreatePermission(bool IsAllowed, bool IsReadOnly = false);
+
+public sealed record AxPermissionField(string Name, bool IsReadOnly);
+
+public sealed record AxPermissionDataContainer(
+    string Name,
+    IReadOnlyList<AxPermissionField> Fields);
+
+public static class AxPermissionSchema
+{
+    public static IReadOnlyList<AxPermissionDataContainer> FromState(AxDataState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        return state.DataContainers.Values
+            .Select(container => new AxPermissionDataContainer(
+                container.Name,
+                container.Fields
+                    .Select(field => new AxPermissionField(field.Name, field.IsReadOnly))
+                    .ToArray()))
+            .ToArray();
+    }
+}
 
 public sealed record AxQueryPermission(
     bool IsAllowed,
@@ -168,6 +179,45 @@ public sealed record AxQueryPermission(
 }
 
 public sealed record AxDataLoadResult(bool Succeeded, AxDataState? State, string? Error);
+
+public sealed record AxpertInitializedData(
+    string TransId,
+    long? RecordId,
+    IReadOnlyList<AxDataContainer> DataContainers,
+    IReadOnlyList<AxFileReference> Files,
+    bool AxOpen)
+{
+    public static AxpertInitializedData FromState(AxDataState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        return new(
+            state.TransId,
+            state.RecordId,
+            state.DataContainers.Values.ToArray(),
+            state.Files.ToArray(),
+            state.AxOpen);
+    }
+}
+
+public sealed record AxpertInitializationResult(
+    bool Succeeded,
+    AxpertInitializedData? Data,
+    AxpertInitializationFailureKind FailureKind = AxpertInitializationFailureKind.DependencyUnavailable,
+    string? Error = null)
+{
+    public static AxpertInitializationResult Success(AxpertInitializedData data) => new(true, data);
+
+    public static AxpertInitializationResult Failure(
+        AxpertInitializationFailureKind failureKind,
+        string? error = null) => new(false, null, failureKind, error);
+}
+
+public enum AxpertInitializationFailureKind
+{
+    UnknownTransaction,
+    DependencyUnavailable,
+    ValidationFailed
+}
 
 public sealed record FillGridRow(IReadOnlyDictionary<string, object?> Values);
 

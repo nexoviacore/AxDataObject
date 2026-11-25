@@ -8,14 +8,12 @@ public static class AxDataHttpErrorMapper
 {
     public static IActionResult Map(
         AxDataErrorDefinition error,
-        string correlationId,
-        long? currentVersion = null)
+        string correlationId)
     {
         var response = AxDataErrorResponse.Create(
             error.Code,
             error.Message,
-            correlationId,
-            currentVersion);
+            correlationId);
 
         return new ObjectResult(response)
         {

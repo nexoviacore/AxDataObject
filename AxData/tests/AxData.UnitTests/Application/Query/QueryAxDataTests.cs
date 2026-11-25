@@ -11,43 +11,47 @@ namespace AxData.UnitTests.Application.Query;
 public sealed class QueryAxDataTests
 {
     [Fact]
-    public async Task Existing_record_forwards_full_business_key_to_authorization()
+    public async Task Existing_record_forwards_record_id_to_authorization()
     {
         var state = CreateState();
-        state.KeyField = "orderdate";
-        state.KeyValue = "05/10/2026";
         state.RecordId = 42;
         var fixture = await CreateFixtureAsync("owner", state);
 
         var result = await fixture.Handler.HandleAsync(All(), CancellationToken.None);
 
         Assert.True(result.Succeeded);
-        Assert.Equal(new AxRecordKey("orderdate", "05/10/2026", 42), fixture.Authorization.LastQueryKey);
+        Assert.Equal(new AxRecordKey(null, null, 42), fixture.Authorization.LastQueryKey);
     }
 
     [Fact]
-    public async Task Redis_miss_recovers_authorized_snapshot_and_continues_query()
+    public async Task Redis_miss_returns_not_found_without_authorization()
     {
         var state = CreateState();
         var store = new InMemoryAxDataStore();
-        var durable = new FakeSnapshotRepository();
-        durable.Seed(state);
         var authorization = new FakeAxpertAuthorizationProvider();
-        var definitions = new FakeStructDefProvider(SampleStructDefFixture.Definition);
         var handler = new QueryAxDataHandler(
             new FakeUserContext(new AxUserContext(state.TenantId, "owner", new HashSet<string>())),
             store,
-            definitions,
-            authorization,
-            FakeRecovery.Create(store, authorization, definitions, durable));
+            authorization);
 
         var result = await handler.HandleAsync(All(), CancellationToken.None);
 
+        Assert.Equal("AXD-NOTFOUND-001", result.Error!.Code);
+        Assert.Equal(0, authorization.QueryCallCount);
+        Assert.Null(await store.LoadAsync(state.TenantId, state.ObjectId, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Query_uses_the_stored_DataObject_schema_without_StructDef()
+    {
+        var state = CreateState();
+        var fixture = await CreateFixtureAsync("owner", state);
+
+        var result = await fixture.Handler.HandleAsync(All(), CancellationToken.None);
+
         Assert.True(result.Succeeded);
-        Assert.NotNull(await store.LoadAsync(state.TenantId, state.ObjectId, CancellationToken.None));
-        Assert.Equal(
-            state.DataContainers["dc2"].Rows.Select(row => row.RowId),
-            result.Response!.DataContainers.Single(container => container.DcId == "dc2").Rows.Select(row => row.RowId));
+        Assert.Contains(fixture.Authorization.LastQueryDataContainers!, container =>
+            container.Name == "dc2" && container.Fields.Any(field => field.Name == "qty"));
     }
 
     [Fact]
@@ -90,9 +94,9 @@ public sealed class QueryAxDataTests
 
         var container = Assert.Single(result.Response!.DataContainers);
         var fields = Assert.Single(container.Rows).Fields;
-        Assert.Equal(["qty", "amount"], fields.Select(field => field.Name));
-        Assert.False(fields[0].ReadOnly);
-        Assert.True(fields[1].ReadOnly);
+        Assert.Equal(["amount", "qty"], fields.Select(field => field.Name));
+        Assert.True(fields[0].ReadOnly);
+        Assert.False(fields[1].ReadOnly);
     }
 
     [Fact]
@@ -151,25 +155,63 @@ public sealed class QueryAxDataTests
     }
 
     [Fact]
-    public async Task StructDef_hash_mismatch_fails_closed_after_authorization()
+    public async Task Query_does_not_require_a_current_StructDef()
     {
         var state = CreateState();
         var store = new InMemoryAxDataStore();
         await store.WriteAsync(state, null, CancellationToken.None);
         var authorization = new FakeAxpertAuthorizationProvider();
-        var definitions = new FakeStructDefProvider(SampleStructDefFixture.Definition with { Version = "changed" });
         var handler = new QueryAxDataHandler(
             new FakeUserContext(new AxUserContext(state.TenantId, "owner", new HashSet<string>())),
             store,
-            definitions,
-            authorization,
-            FakeRecovery.Create(store, authorization, definitions));
+            authorization);
 
         var result = await handler.HandleAsync(All(), CancellationToken.None);
 
-        Assert.Equal("AXD-CONC-003", result.Error!.Code);
+        Assert.True(result.Succeeded);
         Assert.Equal(1, authorization.QueryCallCount);
-        Assert.Equal(1, (await store.LoadAsync(state.TenantId, state.ObjectId, CancellationToken.None))!.Version);
+        Assert.NotNull(await store.LoadAsync(state.TenantId, state.ObjectId, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Saving_query_returns_the_complete_visible_snapshot_as_non_editable()
+    {
+        var state = CreateState();
+        state.BeginSaving();
+        var fixture = await CreateFixtureAsync("owner", state);
+
+        var result = await fixture.Handler.HandleAsync(All(), CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.Response!.ReadOnly);
+        Assert.Equal(["query"], result.Response.AllowedOperations);
+        Assert.NotEmpty(result.Response.DataContainers);
+        Assert.All(result.Response.DataContainers, container =>
+        {
+            Assert.True(container.ReadOnly);
+            Assert.All(container.Rows.SelectMany(row => row.Fields), field => Assert.True(field.ReadOnly));
+        });
+    }
+
+    [Fact]
+    public async Task Query_uses_static_read_only_metadata_from_the_DataObject()
+    {
+        var state = CreateState();
+        AxDataContainer header = state.DataContainers["dc1"];
+        header.Rows[0].Fields["customer"] = new AxFieldValue("Acme", isReadOnly: true);
+        state.DataContainers["dc1"] = new AxDataContainer(
+            header.Name,
+            header.IsGrid,
+            header.Rows,
+            header.Fields.Select(field => field.Name == "customer" ? field with { IsReadOnly = true } : field));
+        var fixture = await CreateFixtureAsync("owner", state);
+
+        var result = await fixture.Handler.HandleAsync(All(), CancellationToken.None);
+
+        var customer = Assert.Single(
+            result.Response!.DataContainers.Single(container => container.DcId == "dc1").Rows.Single().Fields,
+            field => field.Name == "customer");
+        Assert.True(customer.ReadOnly);
     }
 
     [Fact]
@@ -215,20 +257,19 @@ public sealed class QueryAxDataTests
         var store = new InMemoryAxDataStore();
         await store.WriteAsync(state ?? CreateState(), null, CancellationToken.None);
         var authorization = new FakeAxpertAuthorizationProvider();
-        var definitionProvider = new FakeStructDefProvider(SampleStructDefFixture.Definition);
         var handler = new QueryAxDataHandler(
             new FakeUserContext(new AxUserContext(actorTenant, userName, new HashSet<string>())),
             store,
-            definitionProvider,
-            authorization,
-            FakeRecovery.Create(store, authorization, definitionProvider));
+            authorization);
         return new Fixture(handler, authorization);
     }
 
     private static AxDataState CreateState()
     {
         var state = SampleStructDefFixture.CreateState();
-        state.DataContainers["dc1"].Rows[0].Fields.Add("secret", new AxFieldValue("classified"));
+        AxDataContainer header = state.DataContainers["dc1"];
+        header.Rows[0].Fields.Add("secret", new AxFieldValue("classified"));
+        state.DataContainers["dc1"] = new AxDataContainer(header.Name, header.IsGrid, header.Rows);
         return state;
     }
 

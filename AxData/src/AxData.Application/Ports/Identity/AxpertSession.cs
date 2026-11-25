@@ -13,6 +13,8 @@ public sealed record AxpertSessionContext(
 
 public interface IAxpertSessionResolver
 {
+    /// <summary>Validates an Axpert session and resolves its tenant, user, roles, and site.</summary>
+    /// <returns>The trusted session context, or <see langword="null"/> when validation fails.</returns>
     Task<AxpertSessionContext?> ResolveAsync(
         AxpertSessionRequest request,
         CancellationToken cancellationToken);

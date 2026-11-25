@@ -41,6 +41,8 @@ public sealed class AxDataRow
 
     public Dictionary<string, AxFieldValue> Fields { get; }
 
+    /// <summary>Applies a valid row lifecycle transition.</summary>
+    /// <returns><see langword="true"/> when the row changed; otherwise <see langword="false"/>.</returns>
     public bool TransitionTo(AxRowState target)
     {
         if (target == State)
@@ -64,6 +66,7 @@ public sealed class AxDataRow
         return true;
     }
 
+    /// <summary>Associates a newly persisted row with its positive database record identifier.</summary>
     public void AssignPersistedRecordId(long recordId)
     {
         if (State != AxRowState.New || PersistedRecordId is not null)

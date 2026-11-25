@@ -1,21 +1,15 @@
 @baseUrl = http://localhost:5116
 
 # Before running these requests:
-# 1. Apply src/AxData.Infrastructure/Sql/Migrations/Postgres/001_AxDataObjectInstance.sql.
-# 2. Start the worker in PowerShell after setting:
-#    $env:AXDATA_REDIS_CONNECTION = "localhost:6385"
-#    $env:AXDATA_POSTGRES_CONNECTION = "<axdata-snapshot-connection-string>"
-#    $env:AXDATA_TENANT_ID = "sample-tenant"
-#    dotnet run --no-restore --project src/AxData.Workers
-# 3. Start the API in another PowerShell after setting:
+# 1. Start the API in PowerShell after setting:
 #    $env:ASPNETCORE_ENVIRONMENT = "Development"
 #    $env:AxData__M1__Enabled = "true"
-#    $env:AxData__Postgres__ConnectionString = $env:AXDATA_POSTGRES_CONNECTION
+#    $env:AxData__Redis__ConnectionString = "localhost:6385"
 #    dotnet run --no-restore --project src/AxData.Api
 
 ### Init
 # @name init
-POST {{baseUrl}}/api/v1/axdata
+POST {{baseUrl}}/api/v1/axdata/init
 Content-Type: application/json
 
 {
@@ -25,11 +19,11 @@ Content-Type: application/json
 
 ### Set: creates a line and calculates amount = qty x rate
 @objectId = {{init.response.body.$.objectId}}
-POST {{baseUrl}}/api/v1/axdata/{{objectId}}/set
+POST {{baseUrl}}/api/v1/axdata/set
 Content-Type: application/json
-If-Match: "1"
 
 {
+  "objectId": "{{objectId}}",
   "getDeps": true,
   "data": {
     "lines": {
@@ -48,13 +42,22 @@ If-Match: "1"
   }
 }
 
-### Get from Redis; expect version 2 and amount 25.0
-GET {{baseUrl}}/api/v1/axdata/{{objectId}}
+### Get from Redis; expect amount 25.0 and no object-version field
+POST {{baseUrl}}/api/v1/axdata/get
+Content-Type: application/json
 
-### Pause here until the worker reports acknowledged=1.
+{
+  "objectId": "{{objectId}}"
+}
+
 # Evict only this active-state key in Memurai CLI. Replace OBJECT_ID with the Init response value in uppercase:
 # memurai-cli -p 6385 DEL "AXD:{SAMPLE-TENANT}:OBJECT_ID"
 
-### Get after eviction; expect the same version/data, recovered from Postgres
-GET {{baseUrl}}/api/v1/axdata/{{objectId}}
+### Get after eviction; expect 404 / AXD-NOTFOUND-001 with no database recovery attempt
+POST {{baseUrl}}/api/v1/axdata/get
+Content-Type: application/json
+
+{
+  "objectId": "{{objectId}}"
+}
 

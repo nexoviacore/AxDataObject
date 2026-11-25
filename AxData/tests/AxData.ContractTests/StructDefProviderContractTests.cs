@@ -1,92 +1,52 @@
 using AxData.Application.Ports.Axpert;
 using AxData.Integration.Axpert.StructDef;
 using AxData.TestSupport.Fixtures;
-using ARMCommon.Model;
 using AxStructDef.Models;
-using System.Data;
-using System.Security.Cryptography;
 
 namespace AxData.ContractTests;
 
 public sealed class StructDefProviderContractTests
 {
     [Fact]
-    public async Task Current_definition_uses_content_hash_and_hash_keyed_cache()
+    public async Task Current_definition_is_loaded_fresh_without_a_revision_cache()
     {
-        var source = new StubStructDefSource(Snapshot(Hash('a')));
+        var source = new StubStructDefSource(Definition());
         var provider = new AxpertStructDefProvider(source);
 
         var first = await provider.GetAsync(SampleStructDefFixture.TenantId, SampleStructDefFixture.TransId, default);
         var second = await provider.GetAsync(SampleStructDefFixture.TenantId, SampleStructDefFixture.TransId, default);
 
         Assert.NotNull(first);
-        Assert.Equal(Hash('a'), first.Version);
         Assert.Same(first, second);
         Assert.Equal(2, source.LoadCalls);
     }
 
     [Fact]
-    public async Task Current_hash_change_is_detected_and_projects_a_new_definition()
+    public async Task Provider_returns_the_current_definition_without_revision_binding()
     {
-        var source = new MutableStructDefSource(Snapshot(Hash('a')));
+        var source = new MutableStructDefSource(Definition());
         var provider = new AxpertStructDefProvider(source);
 
         var first = await provider.GetAsync(SampleStructDefFixture.TenantId, SampleStructDefFixture.TransId, default);
-        source.Current = Snapshot(Hash('b'));
+        source.Current = Definition() with { RequiresCompatibilityFallback = true };
         var second = await provider.GetAsync(SampleStructDefFixture.TenantId, SampleStructDefFixture.TransId, default);
-        var stale = await provider.GetVersionAsync(
-            SampleStructDefFixture.TenantId,
-            SampleStructDefFixture.TransId,
-            Hash('a'),
-            default);
 
-        Assert.Equal(Hash('a'), first?.Version);
-        Assert.Equal(Hash('b'), second?.Version);
-        Assert.Null(stale);
-    }
-
-    [Fact]
-    public async Task Expected_hash_fails_closed_when_current_row_changed()
-    {
-        var provider = new AxpertStructDefProvider(new StubStructDefSource(Snapshot(Hash('c'))));
-
-        var missing = await provider.GetVersionAsync(
-            SampleStructDefFixture.TenantId,
-            SampleStructDefFixture.TransId,
-            Hash('d'),
-            default);
-
-        Assert.Null(missing);
+        Assert.False(first?.RequiresCompatibilityFallback);
+        Assert.True(second?.RequiresCompatibilityFallback);
     }
 
     [Fact]
     public async Task Mismatched_source_identity_is_rejected()
     {
-        var source = new MismatchedStructDefSource(Snapshot(Hash('e'), tenantId: "wrong-tenant"));
+        var source = new MismatchedStructDefSource(Definition(tenantId: "wrong-tenant"));
         var provider = new AxpertStructDefProvider(source);
 
-        var definition = await provider.GetVersionAsync(
+        var definition = await provider.GetAsync(
             SampleStructDefFixture.TenantId,
             SampleStructDefFixture.TransId,
-            Hash('e'),
             default);
 
         Assert.Null(definition);
-    }
-
-    [Fact]
-    public void Content_hash_covers_raw_props_chunks_in_blob_order()
-    {
-        var result = new SQLResult();
-        result.data.Columns.Add("props", typeof(byte[]));
-        result.data.Rows.Add(new byte[] { 1, 2, 3 });
-        result.data.Rows.Add(new byte[] { 4, 5 });
-
-        var actual = AxpertStructDefSource.ComputeContentHash(result);
-        var expected = Convert.ToHexString(SHA256.HashData(new byte[] { 1, 2, 3, 4, 5 }))
-            .ToLowerInvariant();
-
-        Assert.Equal(expected, actual);
     }
 
     [Fact]
@@ -230,12 +190,12 @@ public sealed class StructDefProviderContractTests
             "qty",
             "amount",
             "A dependency cycle was detected.");
-        var snapshot = Snapshot(Hash('f')) with
+        var scriptedDefinition = Definition() with
         {
             RequiresCompatibilityFallback = true,
             DependencyDiagnostics = [diagnostic]
         };
-        var provider = new AxpertStructDefProvider(new StubStructDefSource(snapshot));
+        var provider = new AxpertStructDefProvider(new StubStructDefSource(scriptedDefinition));
 
         var definition = await provider.GetAsync(
             SampleStructDefFixture.TenantId,
@@ -247,53 +207,49 @@ public sealed class StructDefProviderContractTests
         Assert.Equal(diagnostic, Assert.Single(definition.DependencyDiagnostics!));
     }
 
-    private static AxpertStructDefSnapshot Snapshot(
-        string contentHash,
+    private static StructDefHandle Definition(
         string tenantId = SampleStructDefFixture.TenantId,
         string transId = SampleStructDefFixture.TransId) => new(
             tenantId,
             transId,
-            contentHash,
             SampleStructDefFixture.Definition.DataContainers,
             SampleStructDefFixture.Definition.Dependencies,
             SampleStructDefFixture.Definition.FillGrids);
 
-    private sealed class StubStructDefSource(params AxpertStructDefSnapshot[] snapshots) : IAxpertStructDefSource
+    private sealed class StubStructDefSource(params StructDefHandle[] definitions) : IAxpertStructDefSource
     {
         public int LoadCalls { get; private set; }
 
-        public Task<AxpertStructDefSnapshot?> LoadCurrentAsync(
+        public Task<StructDefHandle?> LoadCurrentAsync(
             string tenantId,
             string transId,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             LoadCalls++;
-            var snapshot = snapshots.LastOrDefault(item =>
+            var definition = definitions.LastOrDefault(item =>
                 Same(item.TenantId, tenantId) && Same(item.TransId, transId));
-            return Task.FromResult(snapshot);
+            return Task.FromResult(definition);
         }
     }
 
-    private sealed class MismatchedStructDefSource(AxpertStructDefSnapshot snapshot) : IAxpertStructDefSource
+    private sealed class MismatchedStructDefSource(StructDefHandle definition) : IAxpertStructDefSource
     {
-        public Task<AxpertStructDefSnapshot?> LoadCurrentAsync(
+        public Task<StructDefHandle?> LoadCurrentAsync(
             string tenantId,
             string transId,
-            CancellationToken cancellationToken) => Task.FromResult<AxpertStructDefSnapshot?>(snapshot);
+            CancellationToken cancellationToken) => Task.FromResult<StructDefHandle?>(definition);
     }
 
-    private sealed class MutableStructDefSource(AxpertStructDefSnapshot current) : IAxpertStructDefSource
+    private sealed class MutableStructDefSource(StructDefHandle current) : IAxpertStructDefSource
     {
-        public AxpertStructDefSnapshot Current { get; set; } = current;
+        public StructDefHandle Current { get; set; } = current;
 
-        public Task<AxpertStructDefSnapshot?> LoadCurrentAsync(
+        public Task<StructDefHandle?> LoadCurrentAsync(
             string tenantId,
             string transId,
-            CancellationToken cancellationToken) => Task.FromResult<AxpertStructDefSnapshot?>(Current);
+            CancellationToken cancellationToken) => Task.FromResult<StructDefHandle?>(Current);
     }
-
-    private static string Hash(char value) => new(value, 64);
 
     private static bool Same(string left, string right) =>
         string.Equals(left, right, StringComparison.OrdinalIgnoreCase);

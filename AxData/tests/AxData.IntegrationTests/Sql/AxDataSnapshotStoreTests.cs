@@ -12,15 +12,15 @@ public sealed class AxDataSnapshotStoreTests
     private static readonly DateTimeOffset Now = new(2026, 9, 29, 8, 30, 0, TimeSpan.Zero);
 
     [Theory]
-    [InlineData("oracle", "WHERE incoming.ObjectVersion > target.ObjectVersion")]
-    [InlineData("postgres", "WHERE EXCLUDED.ObjectVersion > AxDataObjectInstance.ObjectVersion")]
-    [InlineData("mssql", "WHEN MATCHED AND incoming.ObjectVersion > target.ObjectVersion")]
-    public async Task Selects_version_guarded_sql_and_binds_snapshot_as_json(
+    [InlineData("oracle", "MERGE INTO AxDataObjectInstance")]
+    [InlineData("postgres", "ON CONFLICT (TenantId, ObjectId) DO UPDATE")]
+    [InlineData("mssql", "WHEN MATCHED THEN UPDATE")]
+    public async Task Selects_upsert_sql_and_binds_snapshot_as_json(
         string provider,
         string expectedGuard)
     {
         var (store, recorder) = CreateStore(provider);
-        var state = CreateState("tenant-a", "object-1", 13, new string('x', 8_000));
+        var state = CreateState("tenant-a", "object-1", new string('x', 8_000));
 
         var status = await store.UpsertAsync(
             new AxDataSnapshotWrite("event-13", state, Now),
@@ -28,9 +28,12 @@ public sealed class AxDataSnapshotStoreTests
 
         Assert.Equal(AxDataSnapshotUpsertStatus.Stored, status);
         Assert.Contains(expectedGuard, recorder.LastSql, StringComparison.Ordinal);
-        var jsonIndex = Assert.IsAssignableFrom<IReadOnlyList<string>>(recorder.LastParameterNames)
-            .ToList()
-            .IndexOf("DataObjectJson");
+        var parameterNames = Assert.IsAssignableFrom<IReadOnlyList<string>>(recorder.LastParameterNames);
+        Assert.DoesNotContain("KeyField", parameterNames);
+        Assert.DoesNotContain("KeyValue", parameterNames);
+        Assert.DoesNotContain("KeyField", recorder.LastSql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("KeyValue", recorder.LastSql, StringComparison.OrdinalIgnoreCase);
+        var jsonIndex = parameterNames.ToList().IndexOf("DataObjectJson");
         Assert.Equal(DbType.Object, recorder.LastParameterTypes![jsonIndex]);
         Assert.Contains(new string('x', 8_000), Assert.IsType<string>(recorder.LastParameterValues![jsonIndex]), StringComparison.Ordinal);
     }
@@ -41,7 +44,7 @@ public sealed class AxDataSnapshotStoreTests
     public async Task Binds_snapshot_timestamps_as_UTC_DateTimes_for_non_Postgres_providers(string provider)
     {
         var (store, recorder) = CreateStore(provider);
-        var state = CreateState("tenant-a", "object-1", 13, "timestamps");
+        var state = CreateState("tenant-a", "object-1", "timestamps");
 
         await store.UpsertAsync(
             new AxDataSnapshotWrite("event-13", state, Now),
@@ -65,7 +68,7 @@ public sealed class AxDataSnapshotStoreTests
     public async Task Binds_Postgres_snapshot_timestamps_as_explicit_UTC_timestamptz_values()
     {
         var (store, recorder) = CreateStore("postgres");
-        var state = CreateState("tenant-a", "object-1", 13, "timestamps");
+        var state = CreateState("tenant-a", "object-1", "timestamps");
 
         await store.UpsertAsync(
             new AxDataSnapshotWrite("event-13", state, Now),
@@ -89,21 +92,19 @@ public sealed class AxDataSnapshotStoreTests
     }
 
     [Fact]
-    public async Task Older_version_cannot_overwrite_newer_snapshot()
+    public async Task Later_delivery_overwrites_the_previous_snapshot()
     {
         var (store, recorder) = CreateStore("postgres");
         await store.UpsertAsync(
-            new AxDataSnapshotWrite("event-13", CreateState("tenant-a", "object-1", 13, "newer"), Now),
+            new AxDataSnapshotWrite("event-13", CreateState("tenant-a", "object-1", "first"), Now),
             CancellationToken.None);
 
         var status = await store.UpsertAsync(
-            new AxDataSnapshotWrite("event-12", CreateState("tenant-a", "object-1", 12, "older"), Now.AddSeconds(1)),
+            new AxDataSnapshotWrite("event-12", CreateState("tenant-a", "object-1", "later"), Now.AddSeconds(1)),
             CancellationToken.None);
 
-        Assert.Equal(AxDataSnapshotUpsertStatus.Ignored, status);
-        Assert.Equal(13, recorder.GetVersion("tenant-a", "object-1"));
-        Assert.Contains("newer", recorder.GetPayload("tenant-a", "object-1"), StringComparison.Ordinal);
-        Assert.DoesNotContain("older", recorder.GetPayload("tenant-a", "object-1"), StringComparison.Ordinal);
+        Assert.Equal(AxDataSnapshotUpsertStatus.Stored, status);
+        Assert.Contains("later", recorder.GetPayload("tenant-a", "object-1"), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -112,15 +113,14 @@ public sealed class AxDataSnapshotStoreTests
         var (store, recorder) = CreateStore("oracle");
         var write = new AxDataSnapshotWrite(
             "duplicate-event",
-            CreateState("tenant-a", "object-1", 7, "same"),
+            CreateState("tenant-a", "object-1", "same"),
             Now);
 
         var first = await store.UpsertAsync(write, CancellationToken.None);
         var duplicate = await store.UpsertAsync(write, CancellationToken.None);
 
         Assert.Equal(AxDataSnapshotUpsertStatus.Stored, first);
-        Assert.Equal(AxDataSnapshotUpsertStatus.Ignored, duplicate);
-        Assert.Equal(7, recorder.GetVersion("tenant-a", "object-1"));
+        Assert.Equal(AxDataSnapshotUpsertStatus.Stored, duplicate);
     }
 
     [Fact]
@@ -128,18 +128,17 @@ public sealed class AxDataSnapshotStoreTests
     {
         var (store, recorder) = CreateStore("mssql");
         await store.UpsertAsync(
-            new AxDataSnapshotWrite("event-a", CreateState("tenant-a", "shared-object", 13, "a"), Now),
+            new AxDataSnapshotWrite("event-a", CreateState("tenant-a", "shared-object", "a"), Now),
             CancellationToken.None);
         await store.UpsertAsync(
-            new AxDataSnapshotWrite("event-b", CreateState("tenant-b", "shared-object", 4, "b"), Now),
+            new AxDataSnapshotWrite("event-b", CreateState("tenant-b", "shared-object", "b"), Now),
             CancellationToken.None);
 
         await store.UpsertAsync(
-            new AxDataSnapshotWrite("event-a-stale", CreateState("tenant-a", "shared-object", 12, "stale"), Now),
+            new AxDataSnapshotWrite("event-a-later", CreateState("tenant-a", "shared-object", "later-a"), Now),
             CancellationToken.None);
 
-        Assert.Equal(13, recorder.GetVersion("tenant-a", "shared-object"));
-        Assert.Equal(4, recorder.GetVersion("tenant-b", "shared-object"));
+        Assert.Contains("later-a", recorder.GetPayload("tenant-a", "shared-object"), StringComparison.Ordinal);
         Assert.Contains("b", recorder.GetPayload("tenant-b", "shared-object"), StringComparison.Ordinal);
     }
 
@@ -152,14 +151,14 @@ public sealed class AxDataSnapshotStoreTests
         string parameterMarker)
     {
         var (store, recorder) = CreateStore(provider);
-        var state = CreateState("tenant-a", "object-1", 13, "recoverable");
+        var state = CreateState("tenant-a", "object-1", "recoverable");
         await store.UpsertAsync(new AxDataSnapshotWrite("event-13", state, Now), CancellationToken.None);
 
         var found = await store.LoadLatestAsync("tenant-a", "object-1", CancellationToken.None);
         var missingTenant = await store.LoadLatestAsync("tenant-b", "object-1", CancellationToken.None);
 
         Assert.Equal(SnapshotReadStatus.Found, found.Status);
-        Assert.Equal(13, found.State!.Version);
+        Assert.Equal("object-1", found.State!.ObjectId);
         Assert.Equal(SnapshotReadStatus.NotFound, missingTenant.Status);
         Assert.Contains(parameterMarker, recorder.LastSql, StringComparison.Ordinal);
     }
@@ -178,7 +177,6 @@ public sealed class AxDataSnapshotStoreTests
     private static AxDataState CreateState(
         string tenantId,
         string objectId,
-        long version,
         string marker)
     {
         var row = new AxDataRow(
@@ -205,16 +203,10 @@ public sealed class AxDataSnapshotStoreTests
             objectId,
             tenantId,
             "employee",
-            "employeeid",
-            "42",
             42,
-            "owner",
             "initiator",
-            version,
-            "struct-rev-1",
             Now.AddHours(-1),
             Now,
-            Now.AddHours(1),
             AxDataLifecycleStatus.PendingApproval,
             [new AxDataContainer("dc1", isGrid: false, [row])],
             workflow,

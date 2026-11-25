@@ -30,6 +30,9 @@ public sealed class SnapshotConsumer(
     SnapshotConsumerOptions options,
     IOperationalEventSink? operationalLog = null)
 {
+    /// <summary>Processes one bounded batch of new or reclaimed snapshot deliveries.</summary>
+    /// <returns>Counts of stored, ignored, retried, and dead-lettered deliveries.</returns>
+    /// <remarks>Successful and terminal deliveries are acknowledged; transient repository failures remain pending.</remarks>
     public async Task<SnapshotConsumerRunResult> RunOnceAsync(CancellationToken cancellationToken)
     {
         ValidateOptions();
@@ -39,7 +42,7 @@ public sealed class SnapshotConsumer(
             options.ConsumerName,
             options.BatchSize,
             options.PendingIdleTime,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         var acknowledged = 0;
         var deadLettered = 0;
 
@@ -51,7 +54,7 @@ public sealed class SnapshotConsumer(
                     delivery,
                     options.ConsumerGroup,
                     delivery.InvalidReason ?? "invalid-envelope",
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken);
                 deadLettered++;
                 Log.Write(new OperationalEvent(
                     "snapshot.deadletter.completed", "worker", "invalid-envelope",
@@ -64,27 +67,26 @@ public sealed class SnapshotConsumer(
             while (true)
             {
                 var persistStarted = Stopwatch.GetTimestamp();
-                var status = await repository.UpsertAsync(delivery.Envelope, cancellationToken).ConfigureAwait(false);
+                var status = await repository.UpsertAsync(delivery.Envelope, cancellationToken);
                 Log.Write(new OperationalEvent(
                     "snapshot.persistence.completed", "worker", status.ToString().ToLowerInvariant(),
                     status == SnapshotPersistStatus.Unavailable ? OperationalLogLevel.Warning : OperationalLogLevel.Information,
                     CorrelationId: delivery.Envelope.CorrelationId, TenantId: delivery.Envelope.TenantId,
                     TransId: delivery.Envelope.Snapshot.TransId, ObjectId: delivery.Envelope.ObjectId,
-                    Version: delivery.Envelope.ObjectVersion, Attempt: attempt,
+                    Attempt: attempt,
                     DurationMs: Stopwatch.GetElapsedTime(persistStarted).TotalMilliseconds));
                 if (status is SnapshotPersistStatus.Stored or SnapshotPersistStatus.Ignored)
                 {
                     await transport.AcknowledgeAsync(
                         delivery,
-                        delivery.Envelope.ObjectVersion,
                         options.ConsumerGroup,
-                        cancellationToken).ConfigureAwait(false);
+                        cancellationToken);
                     acknowledged++;
                     Log.Write(new OperationalEvent(
                         "snapshot.ack.completed", "worker", "acknowledged",
                         CorrelationId: delivery.Envelope.CorrelationId, TenantId: delivery.Envelope.TenantId,
                         TransId: delivery.Envelope.Snapshot.TransId, ObjectId: delivery.Envelope.ObjectId,
-                        Version: delivery.Envelope.ObjectVersion, Attempt: attempt));
+                        Attempt: attempt));
                     break;
                 }
 
@@ -94,13 +96,13 @@ public sealed class SnapshotConsumer(
                         delivery,
                         options.ConsumerGroup,
                         "snapshot-persistence-failed",
-                        cancellationToken).ConfigureAwait(false);
+                        cancellationToken);
                     deadLettered++;
                     Log.Write(new OperationalEvent(
                         "snapshot.deadletter.completed", "worker", "persistence-failed",
                         OperationalLogLevel.Error, CorrelationId: delivery.Envelope.CorrelationId,
                         TenantId: delivery.Envelope.TenantId, TransId: delivery.Envelope.Snapshot.TransId,
-                        ObjectId: delivery.Envelope.ObjectId, Version: delivery.Envelope.ObjectVersion,
+                        ObjectId: delivery.Envelope.ObjectId,
                         ReasonCode: "snapshot-persistence-failed", Attempt: attempt));
                     break;
                 }
@@ -110,8 +112,8 @@ public sealed class SnapshotConsumer(
                     OperationalLogLevel.Warning, OperationalLogDetail.Diagnostic,
                     delivery.Envelope.CorrelationId, delivery.Envelope.TenantId,
                     delivery.Envelope.Snapshot.TransId, delivery.Envelope.ObjectId,
-                    delivery.Envelope.ObjectVersion, Attempt: attempt));
-                await Task.Delay(GetRetryDelay(attempt), cancellationToken).ConfigureAwait(false);
+                    Attempt: attempt));
+                await Task.Delay(GetRetryDelay(attempt), cancellationToken);
                 attempt++;
             }
         }

@@ -27,7 +27,7 @@ public sealed class MicrosoftOperationalEventSink(
         logger.Log(
             logLevel,
             new EventId(7100, operationalEvent.Name),
-            "AxData event {EventName} stage={Stage} outcome={Outcome} correlationId={CorrelationId} tenantId={TenantId} transId={TransId} objectId={ObjectId} version={Version} currentVersion={CurrentVersion} errorCode={ErrorCode} reasonCode={ReasonCode} provider={Provider} httpStatus={HttpStatusCode} count={Count} secondaryCount={SecondaryCount} attempt={Attempt} durationMs={DurationMs}",
+            "AxData event {EventName} stage={Stage} outcome={Outcome} correlationId={CorrelationId} tenantId={TenantId} transId={TransId} objectId={ObjectId} errorCode={ErrorCode} reasonCode={ReasonCode} provider={Provider} httpStatus={HttpStatusCode} count={Count} secondaryCount={SecondaryCount} attempt={Attempt} durationMs={DurationMs}",
             operationalEvent.Name,
             operationalEvent.Stage,
             operationalEvent.Outcome,
@@ -35,8 +35,6 @@ public sealed class MicrosoftOperationalEventSink(
             operationalEvent.TenantId,
             operationalEvent.TransId,
             operationalEvent.ObjectId,
-            operationalEvent.Version,
-            operationalEvent.CurrentVersion,
             operationalEvent.ErrorCode,
             operationalEvent.ReasonCode,
             operationalEvent.Provider,

@@ -216,8 +216,6 @@ public sealed class AxpertFillGridEngineContractTests
             "sample-tenant",
             "sample-order",
             "owner",
-            "owner",
-            "1",
             DateTimeOffset.UnixEpoch);
         state.DataContainers.Add(
             "dc1",

@@ -8,7 +8,6 @@ namespace AxData.Api.Identity;
 public static class HttpUserContextClaims
 {
     public const string TenantId = "tenant_id";
-    public const string AdministratorRole = "admin";
     public const string ArmSessionId = "sid";
 }
 
@@ -48,7 +47,7 @@ public sealed class HttpUserContext(
 
         var session = await sessionResolver.ResolveAsync(
             new AxpertSessionRequest(sessionId, tokenUserName),
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         if (session is null ||
             !string.Equals(session.SessionId, sessionId, StringComparison.Ordinal) ||
             !string.Equals(session.UserName, tokenUserName, StringComparison.Ordinal))
@@ -59,8 +58,7 @@ public sealed class HttpUserContext(
         return new AxUserContext(
             session.TenantId,
             session.UserName,
-            session.Roles,
-            IsAdministrator: false);
+            session.Roles);
     }
 
     private static AxUserContext DevelopmentContext(ClaimsPrincipal principal)
@@ -81,11 +79,7 @@ public sealed class HttpUserContext(
             .Where(role => !string.IsNullOrWhiteSpace(role))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var user = new AxUserContext(
-            tenantId,
-            userName,
-            roles,
-            roles.Contains(HttpUserContextClaims.AdministratorRole));
+        var user = new AxUserContext(tenantId, userName, roles);
 
         return user;
     }

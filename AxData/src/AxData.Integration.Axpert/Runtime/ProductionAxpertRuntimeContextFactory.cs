@@ -21,7 +21,7 @@ public sealed class ProductionAxpertRuntimeContextFactory(
         {
             if (current.Common._dbHelper is null)
             {
-                var error = await current.Common.OpenDBConnectionAsync().ConfigureAwait(false);
+                var error = await current.Common.OpenDBConnectionAsync();
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!string.IsNullOrWhiteSpace(error))
                 {

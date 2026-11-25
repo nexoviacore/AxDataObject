@@ -48,10 +48,9 @@ public sealed record AxAuthorizationContext
 
         var relations = AxActorRelation.Unrelated;
 
-        if (string.Equals(actor.UserName, state.OwnerUserName, StringComparison.Ordinal) ||
-            string.Equals(actor.UserName, state.InitiatorUserName, StringComparison.Ordinal))
+        if (string.Equals(actor.UserName, state.InitiatorUserName, StringComparison.Ordinal))
         {
-            relations |= AxActorRelation.OwnerOrInitiator;
+            relations |= AxActorRelation.Initiator;
         }
 
         if (IsCurrentApprover(actor.UserName, state.Workflow))
@@ -62,11 +61,6 @@ public sealed record AxAuthorizationContext
         if (hasViewerAccess)
         {
             relations |= AxActorRelation.Viewer;
-        }
-
-        if (actor.IsAdministrator)
-        {
-            relations |= AxActorRelation.Administrator;
         }
 
         return new AxAuthorizationContext(

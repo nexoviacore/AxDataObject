@@ -7,25 +7,24 @@ For a new transaction, the client supplies TransId with an empty key. For an exi
 1. Authenticates and authorizes the caller.
 2. Loads the applicable StructDef.
 3. Creates a new data array or loads existing data through an adapter.
-4. Generates ObjectId and version `1`.
+4. Generates a cryptographically unpredictable ObjectId.
 5. Stores the active serialized state in Redis.
-6. Returns ObjectId, version, and relevant initial metadata.
+6. Returns ObjectId and relevant initial metadata without an object version.
 
 ### 8.2 Set
 
 For every submitted DC/row/field, AxData:
 
-1. Confirms ObjectId ownership and write permission.
+1. Confirms the trusted initiator/current-approver/admin relation and write permission after tenant-scoped loading.
 2. Acquires short-lived object concurrency protection.
-3. Confirms the request version is current.
+3. Loads the current StructDef without a stored definition binding.
 4. Applies the row action and field value.
 5. Validates the field.
 6. Evaluates dependent fields only when the source field succeeds.
 7. Runs applicable FillGrid rules.
 8. Continues across independent fields and collects all errors.
-9. Increments the object version and updates Redis atomically.
-10. Enqueues one complete snapshot after the Set request completes; it does not persist after every individual field evaluation.
-11. Returns success/errors and, when `GetDeps=true`, the fields changed by dependency processing.
+9. Atomically verifies the lease token, writes the complete Redis state once, and refreshes TTL.
+10. Returns success/errors and, when `GetDeps=true`, the fields changed by dependency processing.
 
 ### 8.3 Get/query
 
@@ -39,7 +38,7 @@ Get returns requested fields/DCs or the complete transaction. It applies permiss
 
 ### 8.4 Save
 
-Save performs final validation and executes the main tstruct, grids, child transactions, GenMaps, and MdMaps inside the available transactional boundary. It is idempotent; retrying the same logical request returns the stored result rather than writing again.
+AxTstructData AxPut performs final validation and executes the main tstruct, grids, child transactions, GenMaps, and MdMaps inside its provider transaction. Existing-object Save first establishes the shared persistent `Saving` claim. Timed-out AxPut requests are not automatically retried; idempotency is future work.
 
 Post-save printing, notification, and integration work is recorded through a transactional outbox and performed asynchronously.
 
@@ -49,6 +48,6 @@ Print accepts explicit print-form names or a tstruct field containing them. The 
 
 ### 8.6 Destroy or evict
 
-An active object can be removed from Redis after its lifecycle completes or its inactivity TTL expires. Durable snapshot and workflow records follow the configured retention policy. Redis eviction is not permanent deletion; the object can be reconstructed when its durable state is still valid.
+An active object remains in Redis until an explicit lifecycle action removes or closes it. Redis is the only active DataObject-state store in the current scope, so active keys have no inactivity TTL. Eviction or manual deletion makes the object unavailable and later access returns not found without database recovery.
 
-`AxOpen=true` keeps the logical object open beyond normal completion, subject to a configured maximum retention policy. Changing it to false permits cleanup.
+`AxOpen` remains a possible domain concept but is not persisted in the current compact active-state payload.

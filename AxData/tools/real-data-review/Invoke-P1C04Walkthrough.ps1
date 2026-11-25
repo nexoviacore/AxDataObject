@@ -55,19 +55,6 @@ function Invoke-RedisCli {
     return $text.TrimEnd()
 }
 
-function Set-RedisPayloadFromStdin {
-    param(
-        [Parameter(Mandatory)] [string] $Key,
-        [Parameter(Mandatory)] [string] $Value
-    )
-
-    $result = $Value | & $script:P1C04RedisCliPath -h $script:P1C04RedisHost -p $script:P1C04RedisPort -x HSET $Key payload 2>&1
-    $updated = (($result | ForEach-Object { [string] $_ }) -join "`n").Trim()
-    if ($LASTEXITCODE -ne 0 -or $updated -notin @("0", "1")) {
-        throw "Redis CLI could not replace the payload on the exact active-state key."
-    }
-}
-
 function Test-MinimumVersion {
     param([string] $Actual, [version] $Minimum)
 
@@ -149,56 +136,6 @@ function Wait-ForApi {
     } while ([DateTimeOffset]::UtcNow -lt $deadline)
 
     throw "AxData.Api did not become ready within $script:P1C04StartupTimeoutSeconds seconds."
-}
-
-function Wait-ForWorkerAcknowledgement {
-    param(
-        [System.Diagnostics.Process] $Process,
-        [string] $LogPath
-    )
-
-    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($script:P1C04PersistenceTimeoutSeconds)
-    do {
-        if ($Process.HasExited) {
-            throw "AxData.Workers exited before acknowledging a snapshot."
-        }
-
-        if (Test-Path -LiteralPath $LogPath) {
-            $log = Get-Content -Raw -LiteralPath $LogPath
-            $matches = [regex]::Matches($log, 'Snapshot batch: read=(?<read>\d+), acknowledged=(?<ack>\d+), dead-lettered=(?<dead>\d+)')
-            $acknowledged = 0
-            $deadLettered = 0
-            foreach ($match in $matches) {
-                $acknowledged += [int] $match.Groups['ack'].Value
-                $deadLettered += [int] $match.Groups['dead'].Value
-            }
-
-            foreach ($line in Get-Content -LiteralPath $LogPath) {
-                if (-not ([string] $line).TrimStart().StartsWith("{")) { continue }
-                try {
-                    $event = $line | ConvertFrom-Json
-                    if ([string] $event.name -eq "snapshot.ack.completed") { $acknowledged++ }
-                    if ([string] $event.name -eq "snapshot.deadletter.completed") { $deadLettered++ }
-                }
-                catch {
-                    # The worker may still be appending the current JSON line; retry on the next poll.
-                }
-            }
-
-            if ($deadLettered -gt 0) {
-                throw "The snapshot worker dead-lettered $deadLettered item(s)."
-            }
-
-            if ($acknowledged -gt $script:WorkerAcknowledgements) {
-                $script:WorkerAcknowledgements = $acknowledged
-                return $acknowledged
-            }
-        }
-
-        Start-Sleep -Milliseconds 250
-    } while ([DateTimeOffset]::UtcNow -lt $deadline)
-
-    throw "The snapshot worker did not acknowledge the new snapshot within $script:P1C04PersistenceTimeoutSeconds seconds."
 }
 
 function Get-StructDefReview {
@@ -313,11 +250,7 @@ function Get-FillGridReview {
 }
 
 function Invoke-WalkthroughCase {
-    param(
-        [Parameter(Mandatory)] [hashtable] $Case,
-        [Parameter(Mandatory)] [System.Diagnostics.Process] $Worker,
-        [Parameter(Mandatory)] [string] $WorkerLog
-    )
+    param([Parameter(Mandatory)] [hashtable] $Case)
 
     Require-Value "case Name" $Case.Name
     Require-Value "case TransId" $Case.TransId
@@ -326,14 +259,16 @@ function Invoke-WalkthroughCase {
 
     $structDef = Get-StructDefReview -TransId ([string] $Case.TransId)
     $initBody = [ordered]@{ transId = [string] $Case.TransId; key = $Case.Key }
-    $init = Invoke-SafeHttp -Method POST -Uri "$script:P1C04BaseUrl/api/v1/axdata" -Body $initBody
+    $init = Invoke-SafeHttp -Method POST -Uri "$script:P1C04BaseUrl/api/v1/axdata/init" -Body $initBody
     Require-Value "Init objectId" $init.objectId
     $objectId = [string] $init.objectId
     $activeKey = "AXD:{$($structDef.Tenant.ToUpperInvariant())}:$($objectId.ToUpperInvariant())"
 
-    $initialGet = Invoke-SafeHttp -Method GET -Uri "$script:P1C04BaseUrl/api/v1/axdata/$objectId"
-    if ([long] $initialGet.version -ne [long] $init.version) {
-        throw "Initial Get version does not match Init for case '$($Case.Name)'."
+    $initialGet = Invoke-SafeHttp -Method POST -Uri "$script:P1C04BaseUrl/api/v1/axdata/get" `
+        -Body ([ordered]@{ objectId = $objectId })
+    if ($init.PSObject.Properties.Name -contains "version" -or
+        $initialGet.PSObject.Properties.Name -contains "version") {
+        throw "Init/Get disclosed an object version for case '$($Case.Name)'."
     }
 
     $resolvedSetData = $Case.SetData | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100 -AsHashtable
@@ -354,12 +289,15 @@ function Invoke-WalkthroughCase {
     }
 
     $setBody = [ordered]@{
+        objectId = $objectId
         getDeps = $true
-        expectedVersion = [long] $init.version
         data = $resolvedSetData
     }
-    $set = Invoke-SafeHttp -Method POST -Uri "$script:P1C04BaseUrl/api/v1/axdata/$objectId/set" `
-        -Headers @{ 'If-Match' = "`"$($init.version)`"" } -Body $setBody
+    $set = Invoke-SafeHttp -Method POST -Uri "$script:P1C04BaseUrl/api/v1/axdata/set" -Body $setBody
+    if ($set.PSObject.Properties.Name -contains "version" -or
+        $set.PSObject.Properties.Name -contains "currentVersion") {
+        throw "Set disclosed object-version metadata for case '$($Case.Name)'."
+    }
     $changedCount = @($set.changed).Count
     $errorCount = @($set.errors).Count
     $dependencyChangeCount = @($set.changed | Where-Object { [string] $_.source -eq "dependency" }).Count
@@ -385,42 +323,22 @@ function Invoke-WalkthroughCase {
     if ($fillGridChangeCount -lt $minimumFillGridChanges) {
         throw "Set returned $fillGridChangeCount FillGrid change(s) for case '$($Case.Name)'; expected at least $minimumFillGridChanges."
     }
-    $acknowledged = Wait-ForWorkerAcknowledgement -Process $Worker -LogPath $WorkerLog
+    $snapshotJson = Invoke-RedisCli -Arguments @("--raw", "HGET", $activeKey, "payload")
+    $snapshot = $snapshotJson | ConvertFrom-Json -Depth 100
+    if ($snapshot.PSObject.Properties.Name -contains "schemaVersion" -or
+        $snapshot.PSObject.Properties.Name -contains "structDef" -or
+        $snapshot.PSObject.Properties.Name -contains "version" -or
+        $snapshot.PSObject.Properties.Name -contains "ownerUserName") {
+        throw "Redis state contains a removed header, version, or owner field for case '$($Case.Name)'."
+    }
 
     $deleted = [int] (Invoke-RedisCli -Arguments @("DEL", $activeKey))
     if ($deleted -ne 1) {
         throw "Expected to delete exactly one active-state key for case '$($Case.Name)'; deleted $deleted."
     }
-
-    $recovered = Invoke-SafeHttp -Method GET -Uri "$script:P1C04BaseUrl/api/v1/axdata/$objectId"
-    if ([long] $recovered.version -ne [long] $set.version) {
-        throw "Recovered version does not match the durable Set version for case '$($Case.Name)'."
-    }
-
-    $snapshotJson = Invoke-RedisCli -Arguments @("--raw", "HGET", $activeKey, "payload")
-    $snapshot = $snapshotJson | ConvertFrom-Json -Depth 100
-    $originalHash = [string] $snapshot.structDef.version
-    if ($originalHash -ne $structDef.Hash) {
-        throw "Recovered active state has an unexpected StructDef hash for case '$($Case.Name)'."
-    }
-
-    $mismatchHash = "0" * 64
-    if ($mismatchHash -eq $originalHash) { $mismatchHash = "1" * 64 }
-    $snapshot.structDef.version = $mismatchHash
-    Set-RedisPayloadFromStdin -Key $activeKey -Value ($snapshot | ConvertTo-Json -Depth 100 -Compress)
-
-    $null = Invoke-SafeHttp -Method GET -Uri "$script:P1C04BaseUrl/api/v1/axdata/$objectId" `
-        -ExpectedStatus 409 -ExpectedErrorCode "AXD-CONC-003"
-
-    $deletedAfterMismatch = [int] (Invoke-RedisCli -Arguments @("DEL", $activeKey))
-    if ($deletedAfterMismatch -ne 1) {
-        throw "Expected to delete exactly one hash-mismatched key for case '$($Case.Name)'."
-    }
-
-    $recoveredAfterMismatch = Invoke-SafeHttp -Method GET -Uri "$script:P1C04BaseUrl/api/v1/axdata/$objectId"
-    if ([long] $recoveredAfterMismatch.version -ne [long] $set.version) {
-        throw "Durable recovery after the D28 check returned an unexpected version for case '$($Case.Name)'."
-    }
+    $null = Invoke-SafeHttp -Method POST -Uri "$script:P1C04BaseUrl/api/v1/axdata/get" `
+        -Body ([ordered]@{ objectId = $objectId }) `
+        -ExpectedStatus 404 -ExpectedErrorCode "AXD-NOTFOUND-001"
 
     return [pscustomobject]@{
         Name = [string] $Case.Name
@@ -429,16 +347,13 @@ function Invoke-WalkthroughCase {
         Hash = $structDef.Hash
         UpdatedOn = $structDef.UpdatedOn
         RecordId = $init.recordId
-        InitVersion = [long] $init.version
-        SetVersion = [long] $set.version
         Changed = $changedCount
         DependencyChanges = $dependencyChangeCount
         FillGridChanges = $fillGridChangeCount
         Errors = $errorCount
         DefinedDependencies = $structDef.Dependencies
-        WorkerAcknowledged = $acknowledged
-        RecoveryVersion = [long] $recoveredAfterMismatch.version
-        D28 = "409 AXD-CONC-003; durable recovery succeeded"
+        RedisMiss = "404 AXD-NOTFOUND-001"
+        CurrentDefinition = "loaded without persisted binding"
     }
 }
 
@@ -460,11 +375,7 @@ foreach ($name in @(
     "AxData__RealDataReview__DatabaseType",
     "AxData__RealDataReview__ConnectionString",
     "AxData__RealDataReview__AllowedHosts__0",
-    "AxData__Redis__ConnectionString",
-    "AxData__Postgres__ConnectionString",
-    "AXDATA_REDIS_CONNECTION",
-    "AXDATA_POSTGRES_CONNECTION",
-    "AXDATA_TENANT_ID")) {
+    "AxData__Redis__ConnectionString")) {
     $null = Get-EnvironmentValue $name
 }
 
@@ -474,16 +385,6 @@ if ($env:ASPNETCORE_ENVIRONMENT -ne "Development") {
 if ($env:AxData__RealDataReview__Enabled -ne "true") {
     throw "P1C-04 requires AxData RealDataReview mode."
 }
-if ($env:AXDATA_TENANT_ID -ne $env:AxData__RealDataReview__TenantId) {
-    throw "The API and worker tenant identifiers must match."
-}
-if ($env:AXDATA_REDIS_CONNECTION -ne $env:AxData__Redis__ConnectionString) {
-    throw "The API and worker Redis connections must match."
-}
-if ($env:AXDATA_POSTGRES_CONNECTION -ne $env:AxData__Postgres__ConnectionString) {
-    throw "The API and worker snapshot-store connections must match."
-}
-
 Require-Value "P1C04BaseUrl" $P1C04BaseUrl
 Require-Value "P1C04RedisCliPath" $P1C04RedisCliPath
 Require-Value "P1C04RedisHost" $P1C04RedisHost
@@ -515,17 +416,13 @@ $script:P1C04RedisCliPath = [string] $P1C04RedisCliPath
 $script:P1C04RedisHost = [string] $P1C04RedisHost
 $script:P1C04RedisPort = [int] $P1C04RedisPort
 $startupTimeout = Get-Variable -Name P1C04StartupTimeoutSeconds -Scope Script -ValueOnly -ErrorAction SilentlyContinue
-$persistenceTimeout = Get-Variable -Name P1C04PersistenceTimeoutSeconds -Scope Script -ValueOnly -ErrorAction SilentlyContinue
 $script:P1C04StartupTimeoutSeconds = if ($null -ne $startupTimeout) { [int] $startupTimeout } else { 45 }
-$script:P1C04PersistenceTimeoutSeconds = if ($null -ne $persistenceTimeout) { [int] $persistenceTimeout } else { 30 }
-$script:WorkerAcknowledgements = 0
 # The non-admin Windows review runner uses the structured console sink. Prevent the
 # default Event Log provider from throwing and truncating otherwise valid HTTP responses.
 $env:Logging__EventLog__LogLevel__Default = "None"
 $axDataRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../.."))
 $script:ContractTestProject = Join-Path $axDataRoot "tests/AxData.ContractTests/AxData.ContractTests.csproj"
 $apiProject = Join-Path $axDataRoot "src/AxData.Api/AxData.Api.csproj"
-$workerProject = Join-Path $axDataRoot "src/AxData.Workers/AxData.Workers.csproj"
 $resolvedReport = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ReportPath)
 $fillGridCharacterizations = @($P1C05FillGridDefinitions | ForEach-Object {
     Get-FillGridReview -Definition $_
@@ -540,8 +437,8 @@ if (@($fillGridCharacterizations | Where-Object { $_.DuplicateParameters -gt 0 }
 $serverInfo = Invoke-RedisCli -Arguments @("INFO", "server")
 $redisVersionMatch = [regex]::Match($serverInfo, '(?m)^redis_version:(?<version>[^\r\n]+)')
 $memuraiVersionMatch = [regex]::Match($serverInfo, '(?m)^memurai_version:(?<version>[^\r\n]+)')
-if (-not $redisVersionMatch.Success -or -not (Test-MinimumVersion $redisVersionMatch.Groups['version'].Value.Trim() ([version] "6.2"))) {
-    throw "P1C-04 requires Redis protocol/server version 6.2 or later."
+if (-not $redisVersionMatch.Success) {
+    throw "P1C-04 could not determine the Redis server version."
 }
 $redisVersion = $redisVersionMatch.Groups['version'].Value.Trim()
 $memuraiVersion = if ($memuraiVersionMatch.Success) { $memuraiVersionMatch.Groups['version'].Value.Trim() } else { "not reported" }
@@ -550,10 +447,7 @@ $runDirectory = Join-Path ([IO.Path]::GetTempPath()) ("axdata-p1c04-" + [guid]::
 $null = New-Item -ItemType Directory -Path $runDirectory
 $apiOut = Join-Path $runDirectory "api.out.log"
 $apiErr = Join-Path $runDirectory "api.err.log"
-$workerOut = Join-Path $runDirectory "worker.out.log"
-$workerErr = Join-Path $runDirectory "worker.err.log"
 $api = $null
-$worker = $null
 $succeeded = $false
 
 try {
@@ -569,14 +463,12 @@ try {
         throw "The configured API base URL is already serving a response. Stop that process or select another local URL."
     }
 
-    $worker = Start-Process dotnet -ArgumentList @("run", "--no-restore", "--no-build", "--no-launch-profile", "--project", $workerProject) `
-        -WorkingDirectory $axDataRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput $workerOut -RedirectStandardError $workerErr
     $api = Start-Process dotnet -ArgumentList @("run", "--no-restore", "--no-build", "--no-launch-profile", "--project", $apiProject, "--urls", $script:P1C04BaseUrl) `
         -WorkingDirectory $axDataRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput $apiOut -RedirectStandardError $apiErr
 
     Wait-ForApi -Process $api
     $results = foreach ($case in $P1C04Cases) {
-        Invoke-WalkthroughCase -Case $case -Worker $worker -WorkerLog $workerOut
+        Invoke-WalkthroughCase -Case $case
     }
 
     $reportDirectory = Split-Path -Parent $resolvedReport
@@ -600,15 +492,15 @@ try {
         ""
         "## HTTP walkthrough"
         ""
-        "| Case | TransId | State path | StructDef hash | updatedon | RecordId | Init version | Set version | Changed | Dependency changes | FillGrid changes | Errors | Defined dependencies | Worker acknowledged | Recovery version | D28 |"
-        "|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"
+        "| Case | TransId | State path | StructDef hash | updatedon | RecordId | Changed | Dependency changes | FillGrid changes | Errors | Defined dependencies | Redis miss | Current definition |"
+        "|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|"
     )
     foreach ($result in $results) {
-        $report += "| $(ConvertTo-SafeCell $result.Name) | $(ConvertTo-SafeCell $result.TransId) | $($result.StatePath) | $($result.Hash) | $(ConvertTo-SafeCell $result.UpdatedOn) | $(ConvertTo-SafeCell $result.RecordId) | $($result.InitVersion) | $($result.SetVersion) | $($result.Changed) | $($result.DependencyChanges) | $($result.FillGridChanges) | $($result.Errors) | $($result.DefinedDependencies) | $($result.WorkerAcknowledged) | $($result.RecoveryVersion) | $($result.D28) |"
+        $report += "| $(ConvertTo-SafeCell $result.Name) | $(ConvertTo-SafeCell $result.TransId) | $($result.StatePath) | $($result.Hash) | $(ConvertTo-SafeCell $result.UpdatedOn) | $(ConvertTo-SafeCell $result.RecordId) | $($result.Changed) | $($result.DependencyChanges) | $($result.FillGridChanges) | $($result.Errors) | $($result.DefinedDependencies) | $($result.RedisMiss) | $($result.CurrentDefinition) |"
     }
     $report += @(
         ""
-        "Result: PASS. Real AddRows 1/2/3 metadata, multiple applicable definitions, duplicate-parameter normalization, parameterized PostgreSQL FillGrid execution, tenant-schema isolation, trusted identity, authorization, StructDef, AxGet/new state, Init, Get, Set, field evaluation, dependencies, Redis state, local SQL durability, exact-key eviction, recovery Get, and D28 fail-closed behavior completed."
+        "Result: PASS. Real AddRows 1/2/3 metadata, multiple applicable definitions, duplicate-parameter normalization, parameterized PostgreSQL FillGrid execution, tenant-schema isolation, trusted identity, authorization, current StructDef, AxGet/new state, Init, Get, Set, field evaluation, dependencies, version-free positional Redis state, exact-key deletion, and the documented Redis-miss response completed."
         ""
         "No field values, key values, credentials, connection strings, or tokens are included in this report."
     )
@@ -617,7 +509,7 @@ try {
     Write-Host "P1C-05 PASS. Safe report: $resolvedReport"
 }
 finally {
-    foreach ($process in @($api, $worker)) {
+    foreach ($process in @($api)) {
         if ($null -ne $process -and -not $process.HasExited) {
             Stop-Process -Id $process.Id -ErrorAction SilentlyContinue
             $process.WaitForExit(5000) | Out-Null

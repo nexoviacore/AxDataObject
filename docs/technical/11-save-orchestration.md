@@ -1,6 +1,6 @@
 ## 11. Save orchestration
 
-AxTstructData's `POST /api/v{version}/AxPut` owns business Save. AxData owns Init/Get/Set/Query and the active DataObject; it does not wrap AxPut in an external Save saga. AxPut and AxData share the versioned tenant-scoped DataObject contract stored at `AXD:{tenantId}:{objectId}`.
+AxTstructData's `POST /api/v{version}/AxPut` owns business Save. AxData owns Init/Get/Set/Query and the active DataObject; it does not wrap AxPut in an external Save saga. AxPut and AxData share the tenant-scoped DataObject contract stored at `AXD:{tenantId}:{objectId}`.
 
 PEG submission/approval remains distinct from business Save. A future `SaveOnApprove=true` final approval may call AxPut through a narrow trusted server client. No public bypass flag is accepted.
 
@@ -10,8 +10,8 @@ Every AxPut request is ObjectId-aware:
 
 1. Authenticate the ARM session and resolve trusted tenant, user, roles, Axpert session, and dimensions.
 2. If `objectid` is absent, generate a cryptographically unpredictable ULID. Omitted `retainDataObject` defaults to true.
-3. If `objectid` is present, load the tenant-scoped DataObject, authorize the actor, require `If-Match` or `expectedVersion`, and compare the current StructDef hash.
-4. If a new ObjectId is generated, require a `Data` item containing TransId/action, initialize StructDef state, and establish the initial object version.
+3. If `objectid` is present, atomically establish the persistent `Saving` claim, load the tenant-scoped DataObject, and authorize the actor.
+4. If a new ObjectId is generated, require a `Data` item containing TransId/action and initialize StructDef state.
 5. Hydrate one fresh StructDef/Validate/Parser runtime from the DataObject.
 6. If `Data.SubmitData` contains values, overlay them. Missing or `{}` SubmitData applies no overlay; AxPut may still save the hydrated or initialized/default values.
 7. Run dependency refresh and mandatory final-current-value validation. A failed operation never contributes a computed value or proceeds to SQL.
@@ -22,26 +22,19 @@ Missing `Data` is valid only for an existing ObjectId, where TransId/action/stat
 
 ### 11.2 Concurrency and definition consistency
 
-Object version and StructDef hash solve different problems:
+AxPut atomically establishes a persistent `Saving` claim while checking the shared Set lock. Set checks the claimed lifecycle and uses a token-owned short lease. Overlap returns `409 / AXD-CONC-002`; an expired Set holder cannot commit because its final Redis write verifies the current lease token.
 
-- Existing-object Save requires the client's expected object version. A stale request returns 409 and the current version; it never overwrites silently.
-- AxPut atomically claims the object for Saving so Set cannot mutate it during persistence. One successful logical Save produces one client-visible version advance.
-- AxPut compares the object's stored SHA-256 StructDef revision with the current authoritative raw definition. A mismatch returns the 409-class definition-conflict error and requires re-Init.
-- Snapshot `schemaVersion` is serialization compatibility only; it is not a concurrency version.
-
-Failure responses never serialize `version: null`. Return the current version when the object was loaded or initialized; otherwise omit the property. Always return a supplied/generated ObjectId when it is safe to do so.
+There is no client object version, `If-Match`, `expectedVersion`, or stale-tab rejection. Sequential requests are independent and last-completed wins. Do not automatically retry a timed-out AxPut request. Every operation loads the current StructDef without a stored definition binding. Responses omit object version and return a supplied/generated ObjectId when safe.
 
 ### 11.3 Transaction boundary
 
 AxPut already owns the provider transaction. Main data, grids, child transactions, GenMaps, MdMaps, and other same-database required writes remain inside that boundary. Do not introduce an AxData transaction writer or claim atomicity across another database/service.
 
-The first implementation slices establish correct ObjectId state, hydration/overlay, validation, transaction parity, versioning, and retention. Production durability is completed by later slices that add idempotency, transactional outbox, dispatch, retry, and recovery workers.
+The current implementation establishes ObjectId state, hydration/overlay, validation, transaction parity, server-side exclusion, and retention. Broader idempotency/outbox durability remains future work and is not part of the current HTTP contract.
 
-### 11.4 Idempotency and outbox (later slices)
+### 11.4 Idempotency and outbox (future work)
 
-ObjectId-aware Save will require `Idempotency-Key`. The canonical request hash includes tenant, supplied ObjectId when present, expected version, TransId/action, payload, and retention behavior. A generated ObjectId is stored in the result.
-
-Idempotency completion, business writes, same-database mappings, stored response, and outbox rows join AxPut's transaction. Same key/same hash returns the stored result; same key/different hash conflicts. Cross-database/service work is delivered from the outbox. Dispatch, backoff, poison handling, and cleanup/state-finalization retry are separate final slices.
+`Idempotency-Key` is not accepted or interpreted now. If duplicate-request replay is added later, its request identity, stored-result semantics, business-transaction boundary, and reconciliation rules require a separate approved design. Until then, callers must not automatically retry AxPut after a timeout.
 
 ### 11.5 Logging
 

@@ -53,19 +53,18 @@ public sealed class PortsAndFakesTests
     }
 
     [Fact]
-    public async Task In_memory_store_scopes_object_ids_by_tenant_and_checks_versions()
+    public async Task In_memory_store_scopes_object_ids_by_tenant_and_requires_a_mutation_token()
     {
         var store = new InMemoryAxDataStore();
         var state = SampleStructDefFixture.CreateState();
 
         var stored = await store.WriteAsync(state, null, CancellationToken.None);
         var anotherTenant = await store.LoadAsync("another-tenant", state.ObjectId, CancellationToken.None);
-        var stale = await store.WriteAsync(state, 99, CancellationToken.None);
+        var updated = await store.WriteAsync(state, "lock-token", CancellationToken.None);
 
         Assert.Equal(AxDataStoreWriteStatus.Stored, stored.Status);
         Assert.Null(anotherTenant);
-        Assert.Equal(AxDataStoreWriteStatus.StaleVersion, stale.Status);
-        Assert.Equal(1, stale.CurrentVersion);
+        Assert.Equal(AxDataStoreWriteStatus.Stored, updated.Status);
     }
 
     [Fact]

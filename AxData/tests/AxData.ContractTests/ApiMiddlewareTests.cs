@@ -4,7 +4,6 @@ using AxData.Api.Contracts;
 using AxData.Api.Errors;
 using AxData.Api.Identity;
 using AxData.Api.Middleware;
-using AxData.Api.Requests;
 using AxData.Api.Routing;
 using AxData.Application.Ports;
 using AxData.Domain.Errors;
@@ -62,19 +61,18 @@ public sealed class ApiMiddlewareTests
     }
 
     [Fact]
-    public async Task Known_stale_version_error_returns_409_and_current_version()
+    public async Task Known_active_conflict_returns_409()
     {
         var context = CreateContext();
         context.TraceIdentifier = "corr-conflict";
         var middleware = new ApiExceptionMiddleware(
-            _ => throw new AxDataApiException(AxDataErrors.StaleVersion, 14));
+            _ => throw new AxDataApiException(AxDataErrors.ActiveConflict));
 
         await middleware.InvokeAsync(context, NullLogger<ApiExceptionMiddleware>.Instance);
         var response = await ReadResponseAsync(context);
 
         Assert.Equal(StatusCodes.Status409Conflict, context.Response.StatusCode);
-        Assert.Equal("AXD-CONC-001", response.Code);
-        Assert.Equal(14, response.CurrentVersion);
+        Assert.Equal("AXD-CONC-002", response.Code);
     }
 
     [Fact]
@@ -83,6 +81,7 @@ public sealed class ApiMiddlewareTests
         var context = CreateContext();
         context.TraceIdentifier = "corr-complete";
         context.Response.StatusCode = StatusCodes.Status409Conflict;
+        RequestOperationalMetadata.SetObjectId(context, "object-body");
         var sink = new RecordingOperationalEventSink();
         var middleware = new RequestCompletionLoggingMiddleware(_ => Task.CompletedTask);
 
@@ -91,6 +90,7 @@ public sealed class ApiMiddlewareTests
         var operationalEvent = Assert.Single(sink.Events);
         Assert.Equal("api.request.completed", operationalEvent.Name);
         Assert.Equal("corr-complete", operationalEvent.CorrelationId);
+        Assert.Equal("object-body", operationalEvent.ObjectId);
         Assert.Equal(StatusCodes.Status409Conflict, operationalEvent.HttpStatusCode);
         Assert.Equal(OperationalLogLevel.Warning, operationalEvent.Level);
     }
@@ -108,13 +108,12 @@ public sealed class ApiMiddlewareTests
         ], "test"));
         context.Request.RouteValues["objectId"] = "object-a";
         context.Request.RouteValues["transId"] = "sales";
-        context.Request.Headers[RequestMetadataParser.IdempotencyKeyHeader] = "request-a";
         context.Request.Headers.Authorization = "Bearer must-not-log";
 
         var scope = SafeLoggingScope.Create(context);
 
         Assert.Equal(
-            ["CorrelationId", "IdempotencyKey", "ObjectId", "TenantId", "TransId", "UserName"],
+            ["CorrelationId", "ObjectId", "TenantId", "TransId", "UserName"],
             scope.Keys.Order(StringComparer.Ordinal));
         Assert.DoesNotContain(scope.Values, value => value.ToString()!.Contains("must-not-log", StringComparison.Ordinal));
     }

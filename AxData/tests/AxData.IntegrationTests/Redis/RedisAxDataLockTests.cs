@@ -1,7 +1,12 @@
 using AxData.Application.Ports;
+using AxData.Contracts.Snapshots;
 using AxData.Domain.Model;
 using AxData.Infrastructure.Redis;
 using AxData.Infrastructure.Serialization;
+using AxData.TestSupport.Fixtures;
+using AxTstructData;
+using System.Reflection;
+using System.Text;
 
 namespace AxData.IntegrationTests.Redis;
 
@@ -62,7 +67,7 @@ public sealed class RedisAxDataLockTests
     }
 
     [Fact]
-    public async Task Version_check_rejects_expired_holders_stale_write()
+    public async Task Token_check_rejects_expired_holders_write()
     {
         var dataLock = CreateLock();
         var store = CreateStore();
@@ -75,17 +80,120 @@ public sealed class RedisAxDataLockTests
 
         await using (var current = await AcquireAfterExpiryAsync(dataLock, initial.TenantId, objectId))
         {
-            var currentUpdate = CreateState(initial.TenantId, objectId, version: 2);
-            var stored = await store.WriteAsync(currentUpdate, 1, CancellationToken.None);
+            var currentUpdate = CreateState(initial.TenantId, objectId);
+            var stored = await store.WriteAsync(currentUpdate, current.Token, CancellationToken.None);
             Assert.Equal(AxDataStoreWriteStatus.Stored, stored.Status);
+
+            var expiredUpdate = CreateState(initial.TenantId, objectId);
+            var rejected = await store.WriteAsync(expiredUpdate, expired.Token, CancellationToken.None);
+            Assert.Equal(AxDataStoreWriteStatus.Conflict, rejected.Status);
         }
 
-        var staleUpdate = CreateState(initial.TenantId, objectId, version: 2);
-        var stale = await store.WriteAsync(staleUpdate, 1, CancellationToken.None);
         await expired.DisposeAsync();
+    }
 
-        Assert.Equal(AxDataStoreWriteStatus.StaleVersion, stale.Status);
-        Assert.Equal(2, stale.CurrentVersion);
+    [Fact]
+    public async Task AxPut_claim_rejects_state_changed_after_preparation()
+    {
+        var state = SampleStructDefFixture.CreateState();
+        var tenantId = state.TenantId;
+        var objectId = state.ObjectId;
+        var stateKey = $"AXD:{{{tenantId.ToUpperInvariant()}}}:{objectId.ToUpperInvariant()}";
+        var lockKey = $"AXD:LOCK:{{{tenantId.ToUpperInvariant()}}}:{objectId.ToUpperInvariant()}";
+        var database = _redis.Connection.GetDatabase();
+        await database.HashSetAsync(stateKey, "payload", "newer-state");
+        var script = (string)typeof(AxPutDataObjectStore)
+            .GetField("ClaimScript", BindingFlags.NonPublic | BindingFlags.Static)!
+            .GetRawConstantValue()!;
+
+        var result = await database.ScriptEvaluateAsync(
+            script,
+            [stateKey, lockKey],
+            [0, "stale-saving-state", "claim-token", "older-state"]);
+
+        Assert.Equal("busy", (string)result!);
+        Assert.Equal("newer-state", (string?)await database.HashGetAsync(stateKey, "payload"));
+        Assert.False(await database.HashExistsAsync(stateKey, "saveClaim"));
+    }
+
+    [Fact]
+    public void AxPut_expected_payload_is_byte_compatible_with_AxData_serialization()
+    {
+        var serializer = new AxDataSnapshotSerializer(new AxDataSnapshotOptions
+        {
+            MaximumSerializedBytes = 1024 * 1024,
+            MaximumGridRows = 100
+        });
+        var payload = Encoding.UTF8.GetString(serializer.Serialize(SampleStructDefFixture.CreateState()));
+        var snapshot = DataObjectSnapshotReader.ReadCurrent(payload);
+        var serialize = typeof(AxPutDataObjectStore)
+            .GetMethod("Serialize", BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        var axPutPayload = Assert.IsType<string>(serialize.Invoke(null, [snapshot]));
+
+        Assert.Equal(payload, axPutPayload);
+    }
+
+    [Fact]
+    public async Task AxPut_claim_release_and_finalize_preserve_the_shared_wire_shape()
+    {
+        if (!_redis.SupportsRedis62OrThrowWhenRequired()) return;
+        var state = SampleStructDefFixture.CreateState();
+        var tenantId = state.TenantId;
+        var objectId = state.ObjectId;
+        var serializer = new AxDataSnapshotSerializer(new AxDataSnapshotOptions
+        {
+            MaximumSerializedBytes = 1024 * 1024,
+            MaximumGridRows = 100
+        });
+        var payload = Encoding.UTF8.GetString(serializer.Serialize(state));
+        Assert.DoesNotContain("createdAtUtc", payload, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("lastAccessedAtUtc", payload, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("expiresAtUtc", payload, StringComparison.OrdinalIgnoreCase);
+        var database = _redis.Connection.GetDatabase();
+        var stateKey = $"AXD:{{{tenantId.ToUpperInvariant()}}}:{objectId.ToUpperInvariant()}";
+        var lockKey = $"AXD:LOCK:{{{tenantId.ToUpperInvariant()}}}:{objectId.ToUpperInvariant()}";
+        var streamKey = $"AXD:SNAPSHOTS:{{{tenantId.ToUpperInvariant()}}}";
+        var closedKey = $"AXD:CLOSED:{{{tenantId.ToUpperInvariant()}}}:{objectId.ToUpperInvariant()}";
+        await database.KeyDeleteAsync([stateKey, lockKey, streamKey, closedKey]);
+        await database.HashSetAsync(stateKey, "payload", payload);
+        await database.KeyExpireAsync(stateKey, TimeSpan.FromSeconds(30));
+
+        var claimScript = Script("ClaimScript");
+        var releaseScript = Script("ReleaseScript");
+        var finalizeScript = Script("FinalizeScript");
+
+        Assert.Equal("claimed", (string)(await database.ScriptEvaluateAsync(
+            claimScript, [stateKey, lockKey], [0, payload, "release-token", payload]))!);
+        Assert.Equal(payload, (string?)await database.HashGetAsync(stateKey, "payload"));
+        Assert.Equal("released", (string)(await database.ScriptEvaluateAsync(
+            releaseScript,
+            [stateKey, streamKey],
+            ["release-token", 0, payload, "event-release", tenantId, objectId, "2026-11-16T00:00:00Z"]))!);
+        Assert.Equal(payload, (string?)await database.HashGetAsync(stateKey, "payload"));
+        Assert.Null(await database.KeyTimeToLiveAsync(stateKey));
+
+        Assert.Equal("claimed", (string)(await database.ScriptEvaluateAsync(
+            claimScript, [stateKey, lockKey], [0, payload, "retain-token", payload]))!);
+        Assert.Equal("finalized", (string)(await database.ScriptEvaluateAsync(
+            finalizeScript,
+            [stateKey, streamKey, closedKey],
+            ["retain-token", payload, "event-retain", tenantId, objectId, "2026-11-16T00:00:00Z", 1]))!);
+        Assert.Equal(payload, (string?)await database.HashGetAsync(stateKey, "payload"));
+        Assert.Null(await database.KeyTimeToLiveAsync(stateKey));
+
+        Assert.Equal("claimed", (string)(await database.ScriptEvaluateAsync(
+            claimScript, [stateKey, lockKey], [0, payload, "close-token", payload]))!);
+        Assert.Equal("finalized", (string)(await database.ScriptEvaluateAsync(
+            finalizeScript,
+            [stateKey, streamKey, closedKey],
+            ["close-token", payload, "event-close", tenantId, objectId, "2026-11-16T00:00:00Z", 0]))!);
+        Assert.False(await database.KeyExistsAsync(stateKey));
+        Assert.Equal(payload, (string?)await database.StringGetAsync(closedKey));
+
+        static string Script(string name) => (string)typeof(AxPutDataObjectStore)
+            .GetField(name, BindingFlags.NonPublic | BindingFlags.Static)!
+            .GetRawConstantValue()!;
     }
 
     private RedisAxDataLock CreateLock() => new(
@@ -98,12 +206,10 @@ public sealed class RedisAxDataLockTests
         {
             MaximumSerializedBytes = 1024 * 1024,
             MaximumGridRows = 100
-        }),
-        CreateOptions());
+        }));
 
     private static AxDataRedisOptions CreateOptions() => new()
     {
-        InactivityTtl = TimeSpan.FromSeconds(5),
         LockLeaseDuration = LeaseDuration
     };
 
@@ -127,24 +233,12 @@ public sealed class RedisAxDataLockTests
         throw new TimeoutException("The Redis lock lease did not expire within the test timeout.");
     }
 
-    private static AxDataState CreateState(string tenantId, string objectId, int version = 1)
-    {
-        var state = new AxDataState(
+    private static AxDataState CreateState(string tenantId, string objectId) => new(
             objectId,
             tenantId,
             "sample-order",
             "owner",
-            "owner",
-            "1",
             DateTimeOffset.UtcNow);
-
-        while (state.Version < version)
-        {
-            state.RegisterMutation();
-        }
-
-        return state;
-    }
 
     private static string NewObjectId() => $"object-{Guid.NewGuid():N}";
 }

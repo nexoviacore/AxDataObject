@@ -23,10 +23,11 @@ public sealed class InitializeAxDataEndpointTests
         Assert.Equal(
             "/api/v1/axdata",
             Assert.Single(controller.GetCustomAttributes(typeof(RouteAttribute), inherit: true).Cast<RouteAttribute>()).Template);
-        Assert.Null(GetActionAttribute<HttpPostAttribute>(nameof(AxDataController.InitializeAsync)).Template);
-        Assert.Equal("{objectId}/query", GetActionAttribute<HttpPostAttribute>(nameof(AxDataController.QueryAsync)).Template);
-        Assert.Equal("{objectId}/set", GetActionAttribute<HttpPostAttribute>(nameof(AxDataController.SetAsync)).Template);
-        Assert.Equal("{objectId}", GetActionAttribute<HttpGetAttribute>(nameof(AxDataController.GetAsync)).Template);
+        Assert.Equal("init", GetActionAttribute<HttpPostAttribute>(nameof(AxDataController.InitializeAsync)).Template);
+        Assert.Equal("get", GetActionAttribute<HttpPostAttribute>(nameof(AxDataController.GetAsync)).Template);
+        Assert.Equal("set", GetActionAttribute<HttpPostAttribute>(nameof(AxDataController.SetAsync)).Template);
+        Assert.Empty(typeof(AxDataController).GetMethod(nameof(AxDataController.GetAsync))!
+            .GetCustomAttributes(typeof(HttpGetAttribute), inherit: true));
     }
 
     [Fact]
@@ -43,8 +44,11 @@ public sealed class InitializeAxDataEndpointTests
 
         Assert.Equal("success", response.Status);
         Assert.Equal("object-http", response.ObjectId);
-        Assert.Equal(1, response.Version);
         Assert.Equal("corr-init", response.CorrelationId);
+        Assert.DoesNotContain(
+            "expiresAt",
+            System.Text.Json.JsonSerializer.Serialize(response),
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -67,15 +71,17 @@ public sealed class InitializeAxDataEndpointTests
         {
             Result = new AxDataLoadResult(true, SampleStructDefFixture.CreateState(), null)
         };
+        var initializer = new PortBasedAxpertInitializer(
+            new FakeStructDefProvider(SampleStructDefFixture.Definition),
+            loader,
+            new FakeAxpertFieldEngine(SampleStructDefFixture.Definition));
         return new InitializeAxDataHandler(
             new FakeUserContext(new AxUserContext(
                 SampleStructDefFixture.TenantId,
                 "owner",
                 new HashSet<string>())),
             new FakeAxpertAuthorizationProvider(),
-            new FakeStructDefProvider(SampleStructDefFixture.Definition),
-            loader,
-            new FakeAxpertFieldEngine(SampleStructDefFixture.Definition),
+            initializer,
             new InMemoryAxDataStore(),
             new FakeObjectIdGenerator("object-http"),
             new FakeClock(DateTimeOffset.Parse("2026-09-25T08:00:00Z")),

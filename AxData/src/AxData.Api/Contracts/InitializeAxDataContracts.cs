@@ -10,11 +10,9 @@ public sealed record InitializeAxDataKeyRequest(string? Field, string? Value, lo
 public sealed record InitializeAxDataApiResponse(
     string Status,
     string ObjectId,
-    long Version,
     string TransId,
     long? RecordId,
     bool ReadOnly,
-    DateTimeOffset ExpiresAt,
     string CorrelationId)
 {
     public static InitializeAxDataApiResponse From(
@@ -23,11 +21,9 @@ public sealed record InitializeAxDataApiResponse(
         new(
             "success",
             response.ObjectId,
-            response.Version,
             response.TransId,
             response.RecordId,
             response.ReadOnly,
-            response.ExpiresAt,
             correlationId);
 }
 

@@ -11,7 +11,7 @@ One slice = one Codex thread. Details for each slice are in the phase file; Code
 
 ```
 Task: P2-01 Shared DataObject contract and AxPut request contract
-Read docs/PROGRESS.md and only the P2-01 block in docs/slices/phase-2-durable-save.md, then only the files that block lists, plus tools/postman/README.md because this slice changes the AxPut contract.
+Read docs/PROGRESS.md and only the P2-01 block in docs/slices/phase-2-durable-save.md, then only the files that block lists, plus AxData/tools/postman/README.md because this slice changes the AxPut contract.
 If this slice touches an endpoint, update the Postman collection per the README rule.
 Read docs/DECISIONS.md or docs/contracts/axpert-notes.md or docs/SALVAGE.md if required.
 Plan first, list assumptions, wait for my OK.
@@ -27,76 +27,89 @@ If the slice changes or adds an HTTP endpoint or response shape, update tools/po
 
 ## All slices
 
-| ID     | Slice                                                    | Effort   | Needs              | File                             |
-| ------ | -------------------------------------------------------- | -------- | ------------------ | -------------------------------- |
-| P0-01  | Decisions (you, no Codex)                                | you      |                    | phase-0-prep.md                  |
-| P0-02  | Solution skeleton and guard rails                        | Light    |                    | phase-0-prep.md                  |
-| P0-03  | Axpert discovery spike (you, no Codex)                   | you      |                    | phase-0-prep.md                  |
-| P0-04  | Salvage assessment (report only, no new code)            | Standard |                    | phase-0-prep.md                  |
-| P1-01  | Domain model, lifecycle, error catalog                   | Standard |                    | phase-1-foundation.md            |
-| P1-02  | Snapshot serialization                                   | Standard | D8                 | phase-1-foundation.md            |
-| P1-03  | Ports, in-memory fakes, sample fixture                   | Standard |                    | phase-1-foundation.md            |
-| P1-04  | Redis store: atomic compare-and-set and TTL              | Deep     | D11                | phase-1-foundation.md            |
-| P1-05  | Redis short lock (token-owned lease)                     | Deep     |                    | phase-1-foundation.md            |
-| P1-06  | API conventions and cross-cutting                        | Standard | D4                 | phase-1-foundation.md            |
-| P1-07  | Authorization policy (security tests first)              | Deep     |                    | phase-1-foundation.md            |
-| P1-08  | Init                                                     | Standard | D4                 | phase-1-foundation.md            |
-| P1-09  | Get / query                                              | Standard |                    | phase-1-foundation.md            |
-| P1-10  | Set A: request handling, row actions, versioning         | Standard | D4, D7             | phase-1-foundation.md            |
-| P1-11  | Set B: validate, dependencies, error collection          | Deep     | D3                 | phase-1-foundation.md            |
-| P1-12  | Set C: FillGrid                                          | Standard |                    | phase-1-foundation.md            |
-| P1-13  | Snapshot table and version-guarded upsert                | Deep     | D11                | phase-1-foundation.md            |
-| P1-14  | Snapshot publish/consume and recovery on Redis miss      | Deep     | D5, D8             | phase-1-foundation.md            |
-| P1-15  | Local composition and M1 real-infrastructure walkthrough | Standard |                    | phase-1-foundation.md            |
-| P1B-01 | StructDef provider, cache, AxGet loader                  | Standard | D12                | phase-1b-real-read-adapters.md   |
-| P1B-02 | Field engine adapter (Validate and Parser)               | Deep     |                    | phase-1b-real-read-adapters.md   |
-| P1B-03 | FillGrid adapter                                         | Standard |                    | phase-1b-real-read-adapters.md   |
-| P1C-00 | Compatibility gate (done)                                | Standard | D8, D25-27         | phase-1c-real-data-review.md     |
-| P1C-01 | Real StructDef/runtime source, smoke harness (done)      | Standard | D8, D26            | phase-1c-real-data-review.md     |
-| P1C-02 | Real authorization (done)                                | Deep     | D12, D19           | phase-1c-real-data-review.md     |
-| P1C-03 | Real-data review composition                             | Standard | D25, D27           | phase-1c-real-data-review.md     |
-| P1C-04 | HTTP walkthrough and report                              | Standard | D27, D28           | phase-1c-real-data-review.md     |
-| P1C-05 | AxData-native FillGrid                                   | Deep     | D24                | phase-1c-real-data-review.md     |
-| P1D-01 | Production authentication and composition                | Deep     |                    | phase-1d-readiness-gate.md       |
-| P1D-02 | Deterministic build, dependency/secret audit             | Standard |                    | phase-1d-readiness-gate.md       |
-| P1D-03 | E2E automation and Redis 6.2+ verification               | Standard | D31                | phase-1d-readiness-gate.md       |
-| P1D-04 | DB provider matrix                                       | Standard |                    | phase-1d-readiness-gate.md       |
-| P1D-05A | Field-engine parity, state, and performance design       | Standard |                    | phase-1d-readiness-gate.md       |
-| P1D-05B | Operation-scoped field runtime and snapshot v3          | Deep     | P1D-05A            | phase-1d-readiness-gate.md       |
-| P1D-06 | ARM change regression                                    | Light    |                    | phase-1d-readiness-gate.md       |
-| P1D-07 | Operational logging                                      | Standard |                    | phase-1d-readiness-gate.md       |
-| P1D-08 | Stable DC and row addressing                             | Standard | D32                | phase-1d-readiness-gate.md       |
-| P2-01  | Shared DataObject and AxPut request contracts            | Deep     | D28, D32, D34-D36  | phase-2-durable-save.md          |
-| P2-02  | ObjectId load/init, authorization, hydration, overlay    | Deep     | D28, D29, D32-D36  | phase-2-durable-save.md          |
-| P2-03  | AxPut transaction parity and Save result                 | Deep     | D10, D20, D32, D36 | phase-2-durable-save.md          |
-| P2-04  | Version claim, lifecycle, retention/destruction          | Deep     | D5, D28, D32, D36  | phase-2-durable-save.md          |
-| P2-05  | Core HTTP and real-provider review                       | Standard | D27, D36           | phase-2-durable-save.md          |
-| P2-06  | AxPut idempotency store and transactional completion     | Deep     | D2, D11, D13, D36  | phase-2-durable-save.md          |
-| P2-07  | AxPut transactional outbox writer                        | Standard | D2, D36            | phase-2-durable-save.md          |
-| P2-08  | Outbox dispatcher, backoff, poison handling              | Deep     |                    | phase-2-durable-save.md          |
-| P2-09  | Save recovery and state-finalization workers             | Deep     | D30, D36           | phase-2-durable-save.md          |
-| P3-01  | PEG state machine (pure logic)                           | Deep     |                    | phase-3-peg.md                   |
-| P3-02  | PEG active state in Redis, versioned                     | Deep     |                    | phase-3-peg.md                   |
-| P3-03  | PEG authorization (security tests first)                 | Deep     |                    | phase-3-peg.md                   |
-| P3-04  | Submit                                                   | Standard |                    | phase-3-peg.md                   |
-| P3-05  | Approve and Reject                                       | Deep     |                    | phase-3-peg.md                   |
-| P3-06  | Return and Recall                                        | Standard |                    | phase-3-peg.md                   |
-| P3-07  | Save state matrix and SaveOnApprove = false              | Deep     |                    | phase-3-peg.md                   |
-| P3-08  | SaveOnApprove = true final approval                      | Deep     |                    | phase-3-peg.md                   |
-| P3-09  | PEG history adapter and Redis/DB consistency             | Deep     | D6                 | phase-3-peg.md                   |
-| P3-10  | PEG recovery                                             | Deep     |                    | phase-3-peg.md                   |
-| P4-01  | File references and validation                           | Standard |                    | phase-4-files-post-processing.md |
-| P4-02  | AFL adapter                                              | Deep     |                    | phase-4-files-post-processing.md |
-| P4-03  | Secure downloads                                         | Standard |                    | phase-4-files-post-processing.md |
-| P4-04  | Print request API and event                              | Standard | D2, D9             | phase-4-files-post-processing.md |
-| P4-05  | Print worker and Delphi print-service adapter            | Standard |                    | phase-4-files-post-processing.md |
-| P4-06  | Notification and integration workers                     | Standard |                    | phase-4-files-post-processing.md |
-| P4-07  | Audit trail                                              | Standard |                    | phase-4-files-post-processing.md |
-| P5-01  | Observability: metrics, traces, health checks            | Standard |                    | phase-5-hardening.md             |
-| P5-02  | Eviction, TTL, retention, cleanup                        | Deep     |                    | phase-5-hardening.md             |
-| P5-03  | Concurrency and failure tests                            | Standard |                    | phase-5-hardening.md             |
-| P5-04  | Load test and size measurement                           | Standard |                    | phase-5-hardening.md             |
-| P5-05  | Security suite and dependency/secret audit               | Deep     |                    | phase-5-hardening.md             |
-| P5-06  | Deployment config and runbooks                           | Light    |                    | phase-5-hardening.md             |
+| ID           | Slice                                                    | Effort   | Needs              | File                             |
+| ------------ | -------------------------------------------------------- | -------- | ------------------ | -------------------------------- |
+| P0-01        | Decisions (you, no Codex)                                | you      |                    | phase-0-prep.md                  |
+| P0-02        | Solution skeleton and guard rails                        | Light    |                    | phase-0-prep.md                  |
+| P0-03        | Axpert discovery spike (you, no Codex)                   | you      |                    | phase-0-prep.md                  |
+| P0-04        | Salvage assessment (report only, no new code)            | Standard |                    | phase-0-prep.md                  |
+| P1-01        | Domain model, lifecycle, error catalog                   | Standard |                    | phase-1-foundation.md            |
+| P1-02        | Snapshot serialization                                   | Standard | D8                 | phase-1-foundation.md            |
+| P1-03        | Ports, in-memory fakes, sample fixture                   | Standard |                    | phase-1-foundation.md            |
+| P1-04        | Redis store: atomic compare-and-set and TTL              | Deep     | D11                | phase-1-foundation.md            |
+| P1-05        | Redis short lock (token-owned lease)                     | Deep     |                    | phase-1-foundation.md            |
+| P1-06        | API conventions and cross-cutting                        | Standard | D4                 | phase-1-foundation.md            |
+| P1-07        | Authorization policy (security tests first)              | Deep     |                    | phase-1-foundation.md            |
+| P1-08        | Init                                                     | Standard | D4                 | phase-1-foundation.md            |
+| P1-09        | Get / query                                              | Standard |                    | phase-1-foundation.md            |
+| P1-10        | Set A: request handling, row actions, versioning         | Standard | D4, D7             | phase-1-foundation.md            |
+| P1-11        | Set B: validate, dependencies, error collection          | Deep     | D3                 | phase-1-foundation.md            |
+| P1-12        | Set C: FillGrid                                          | Standard |                    | phase-1-foundation.md            |
+| P1-13        | Snapshot table and version-guarded upsert                | Deep     | D11                | phase-1-foundation.md            |
+| P1-14        | Snapshot publish/consume and recovery on Redis miss      | Deep     | D5, D8             | phase-1-foundation.md            |
+| P1-15        | Local composition and M1 real-infrastructure walkthrough | Standard |                    | phase-1-foundation.md            |
+| P1B-01       | StructDef provider, cache, AxGet loader                  | Standard | D12                | phase-1b-real-read-adapters.md   |
+| P1B-02       | Field engine adapter (Validate and Parser)               | Deep     |                    | phase-1b-real-read-adapters.md   |
+| P1B-03       | FillGrid adapter                                         | Standard |                    | phase-1b-real-read-adapters.md   |
+| P1C-00       | Compatibility gate (done)                                | Standard | D8, D25-27         | phase-1c-real-data-review.md     |
+| P1C-01       | Real StructDef/runtime source, smoke harness (done)      | Standard | D8, D26            | phase-1c-real-data-review.md     |
+| P1C-02       | Real authorization (done)                                | Deep     | D12, D19           | phase-1c-real-data-review.md     |
+| P1C-03       | Real-data review composition                             | Standard | D25, D27           | phase-1c-real-data-review.md     |
+| P1C-04       | HTTP walkthrough and report                              | Standard | D27, D28           | phase-1c-real-data-review.md     |
+| P1C-05       | AxData-native FillGrid                                   | Deep     | D24                | phase-1c-real-data-review.md     |
+| P1D-01       | Production authentication and composition                | Deep     |                    | phase-1d-readiness-gate.md       |
+| P1D-02       | Deterministic build, dependency/secret audit             | Standard |                    | phase-1d-readiness-gate.md       |
+| P1D-03       | E2E automation and Redis 6.2+ verification               | Standard | D31                | phase-1d-readiness-gate.md       |
+| P1D-04       | DB provider matrix                                       | Standard |                    | phase-1d-readiness-gate.md       |
+| P1D-05A      | Field-engine parity, state, and performance design       | Standard |                    | phase-1d-readiness-gate.md       |
+| P1D-05B      | Operation-scoped field runtime and snapshot v3           | Deep     | P1D-05A            | phase-1d-readiness-gate.md       |
+| P1D-06       | ARM change regression                                    | Light    |                    | phase-1d-readiness-gate.md       |
+| P1D-07       | Operational logging                                      | Standard |                    | phase-1d-readiness-gate.md       |
+| P1D-08       | Stable DC and row addressing                             | Standard | D32                | phase-1d-readiness-gate.md       |
+| P2-01        | Shared DataObject and AxPut request contracts            | Deep     | D28, D32, D34-D36  | phase-2-durable-save.md          |
+| P2-02        | ObjectId load/init, authorization, hydration, overlay    | Deep     | D28, D29, D32-D36  | phase-2-durable-save.md          |
+| P2-03        | AxPut transaction parity and Save result                 | Deep     | D10, D20, D32, D36 | phase-2-durable-save.md          |
+| P2-04        | Version claim, lifecycle, retention/destruction          | Deep     | D5, D28, D32, D36  | phase-2-durable-save.md          |
+| P2-05        | Core HTTP and real-provider review                       | Standard | D27, D36           | phase-2-durable-save.md          |
+| P2-06        | AxPut idempotency store and transactional completion     | Deep     | D2, D11, D13, D36  | phase-2-durable-save.md          |
+| P2-07        | AxPut transactional outbox writer                        | Standard | D2, D36            | phase-2-durable-save.md          |
+| P2-08        | Outbox dispatcher, backoff, poison handling              | Deep     |                    | phase-2-durable-save.md          |
+| P2-09        | Save recovery and state-finalization workers             | Deep     | D30, D36           | phase-2-durable-save.md          |
+| P3-01        | PEG state machine (pure logic)                           | Deep     |                    | phase-3-peg.md                   |
+| P3-02        | PEG active state in Redis, versioned                     | Deep     |                    | phase-3-peg.md                   |
+| P3-03        | PEG authorization (security tests first)                 | Deep     |                    | phase-3-peg.md                   |
+| P3-04        | Submit                                                   | Standard |                    | phase-3-peg.md                   |
+| P3-05        | Approve and Reject                                       | Deep     |                    | phase-3-peg.md                   |
+| P3-06        | Return and Recall                                        | Standard |                    | phase-3-peg.md                   |
+| P3-07        | Save state matrix and SaveOnApprove = false              | Deep     |                    | phase-3-peg.md                   |
+| P3-08        | SaveOnApprove = true final approval                      | Deep     |                    | phase-3-peg.md                   |
+| P3-09        | PEG history adapter and Redis/DB consistency             | Deep     | D6                 | phase-3-peg.md                   |
+| P3-10        | PEG recovery                                             | Deep     |                    | phase-3-peg.md                   |
+| P4-01        | File references and validation                           | Standard |                    | phase-4-files-post-processing.md |
+| P4-02        | AFL adapter                                              | Deep     |                    | phase-4-files-post-processing.md |
+| P4-03        | Secure downloads                                         | Standard |                    | phase-4-files-post-processing.md |
+| P4-04        | Print request API and event                              | Standard | D2, D9             | phase-4-files-post-processing.md |
+| P4-05        | Print worker and Delphi print-service adapter            | Standard |                    | phase-4-files-post-processing.md |
+| P4-06        | Notification and integration workers                     | Standard |                    | phase-4-files-post-processing.md |
+| P4-07        | Audit trail                                              | Standard |                    | phase-4-files-post-processing.md |
+| P5-01        | Observability: metrics, traces, health checks            | Standard |                    | phase-5-hardening.md             |
+| P5-02        | Eviction, TTL, retention, cleanup                        | Deep     |                    | phase-5-hardening.md             |
+| P5-03        | Concurrency and failure tests                            | Standard |                    | phase-5-hardening.md             |
+| P5-04        | Load test and size measurement                           | Standard |                    | phase-5-hardening.md             |
+| P5-05        | Security suite and dependency/secret audit               | Deep     |                    | phase-5-hardening.md             |
+| P5-06        | Deployment config and runbooks                           | Light    |                    | phase-5-hardening.md             |
+| AXD-STATE-01 | Defer the snapshot worker                                | Standard | D37                | dataobject-state-redesign.md     |
+| AXD-STATE-02 | Disable schema validation and StructDef version binding  | Deep     | D38                | dataobject-state-redesign.md     |
+| AXD-STATE-03 | Compact positional DataObject state                      | Deep     | AXD-STATE-02, D39  | dataobject-state-redesign.md     |
+| AXD-STATE-03A | Correct native values and sparse array pairs            | Deep     | AXD-STATE-03, D42  | dataobject-state-redesign.md     |
+| AXD-STATE-03B | Establish a clean Init baseline                         | Standard | AXD-STATE-03A, D43 | dataobject-state-redesign.md     |
+| AXD-STATE-03C | Remove active-state timestamps                          | Standard | AXD-STATE-03B, D44 | dataobject-state-redesign.md     |
+| AXD-STATE-04 | Remove ownerUserName with replacement access rule        | Deep     | D40                | dataobject-state-redesign.md     |
+| AXD-STATE-05 | Remove object version with concurrency replacement       | Deep     | D41                | dataobject-state-redesign.md     |
+| AXD-SET-01   | Set runtime reconstruction and flow consolidation         | Deep     | D3, D38, D40-D41, D46-D49 | set-runtime-reconstruction.md |
+| AXD-STATE-06 | Cross-flow regression and documentation closeout         | Standard | AXD-STATE-01..05, 03A..03C, AXD-SET-01 | dataobject-state-redesign.md |
 
 Milestones (you review, no Codex): M1 after P1-15, M1.5 after P1C-05, M1.6 after all P1D readiness slices, functional Phase 2 review after P2-05, M2 after P2-09, M3 after P3-10, M4 after P4-07.
+
+Cross-cutting reviews, optimization ideas, known gaps, and retained safeguards are tracked in the
+[AxData follow-up register](axdata-follow-ups.md). Scheduled feature work remains in the slice table above.

@@ -38,7 +38,6 @@ public sealed class OperationalLoggingContractTests
             TenantId: "tenant-a",
             TransId: "sales",
             ObjectId: "object-a",
-            Version: 2,
             ErrorCode: "AXD-VAL-001",
             Count: 1,
             DurationMs: 12.5));

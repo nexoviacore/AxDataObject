@@ -11,7 +11,7 @@ public sealed class ArmSessionConsistencyMiddleware(RequestDelegate next)
     {
         if (context.User.Identity?.IsAuthenticated == true &&
             IsJsonRequest(context.Request) &&
-            await ReadBodySessionIdAsync(context.Request, context.RequestAborted).ConfigureAwait(false) is { } bodySessionId)
+            await ReadBodySessionIdAsync(context.Request, context.RequestAborted) is { } bodySessionId)
         {
             var tokenSessionId = context.User.FindFirstValue(HttpUserContextClaims.ArmSessionId);
             if (string.IsNullOrWhiteSpace(tokenSessionId) ||
@@ -23,12 +23,12 @@ public sealed class ArmSessionConsistencyMiddleware(RequestDelegate next)
                         AxDataErrors.AuthenticationRequired.Code,
                         AxDataErrors.AuthenticationRequired.Message,
                         context.TraceIdentifier),
-                    context.RequestAborted).ConfigureAwait(false);
+                    context.RequestAborted);
                 return;
             }
         }
 
-        await next(context).ConfigureAwait(false);
+        await next(context);
     }
 
     private static bool IsJsonRequest(HttpRequest request) =>
@@ -45,7 +45,7 @@ public sealed class ArmSessionConsistencyMiddleware(RequestDelegate next)
             request.Body.Position = 0;
             using var document = await JsonDocument.ParseAsync(
                 request.Body,
-                cancellationToken: cancellationToken).ConfigureAwait(false);
+                cancellationToken: cancellationToken);
             if (document.RootElement.ValueKind != JsonValueKind.Object)
             {
                 return null;

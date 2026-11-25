@@ -2,7 +2,6 @@ using System.Diagnostics;
 using AxData.Application.Authorization;
 using AxData.Application.Ports;
 using AxData.Application.Ports.Axpert;
-using AxData.Application.Recovery;
 using AxData.Domain.Errors;
 using AxData.Domain.Lifecycle;
 using AxData.Domain.Model;
@@ -20,14 +19,12 @@ public sealed record SetDataContainerValue(string Name, IReadOnlyList<SetRowValu
 
 public sealed record SetAxDataCommand(
     string ObjectId,
-    long ExpectedVersion,
     bool GetDeps,
     IReadOnlyList<SetDataContainerValue> DataContainers,
     string? CorrelationId = null);
 
 public sealed record SetAxDataResponse(
     string ObjectId,
-    long Version,
     IReadOnlyList<SetCreatedRow> CreatedRows,
     IReadOnlyList<FieldChange> Changed,
     IReadOnlyList<FieldEvaluationError> Errors);
@@ -36,31 +33,27 @@ public sealed record SetCreatedRow(string DcId, int RequestRowIndex, string RowI
 
 public sealed record SetAxDataResult(
     SetAxDataResponse? Response,
-    AxDataErrorDefinition? Error,
-    long? CurrentVersion = null)
+    AxDataErrorDefinition? Error)
 {
     public bool Succeeded => Response is not null;
 
     public static SetAxDataResult Success(SetAxDataResponse response) => new(response, null);
 
-    public static SetAxDataResult Failure(AxDataErrorDefinition error, long? currentVersion = null) =>
-        new(null, error, currentVersion);
+    public static SetAxDataResult Failure(AxDataErrorDefinition error) => new(null, error);
 }
 
 public sealed class SetAxDataHandler(
     IUserContext userContext,
     IAxDataStore store,
     IAxDataLock dataLock,
-    IStructDefProvider structDefProvider,
     IAxpertAuthorizationProvider authorizationProvider,
     IAxpertFieldEngine fieldEngine,
-    IAxpertFillGridEngine fillGridEngine,
-    ISnapshotTransport snapshotTransport,
     IRowIdGenerator rowIdGenerator,
-    IClock clock,
-    AxDataRecoveryService recoveryService,
     IOperationalEventSink? operationalLog = null)
 {
+    /// <summary>Validates, authorizes, evaluates, and atomically stores a mutation of one tenant-scoped AxData object.</summary>
+    /// <returns>Created rows, requested dependent changes, and field errors; or a safe operation-level error.</returns>
+    /// <remarks>The object is loaded before permission evaluation, but no mutation runs without authorization and a token-owned lease.</remarks>
     public async Task<SetAxDataResult> HandleAsync(
         SetAxDataCommand command,
         CancellationToken cancellationToken)
@@ -71,27 +64,23 @@ public sealed class SetAxDataHandler(
             return SetAxDataResult.Failure(AxDataErrors.InvalidRequest);
         }
 
-        var actor = await userContext.GetCurrentAsync(cancellationToken).ConfigureAwait(false);
+        var actor = await userContext.GetCurrentAsync(cancellationToken);
         var redisStarted = Stopwatch.GetTimestamp();
-        var state = await store.LoadAsync(actor.TenantId, command.ObjectId, cancellationToken).ConfigureAwait(false);
+        var state = await store.LoadAsync(actor.TenantId, command.ObjectId, cancellationToken);
         Log.Write(new OperationalEvent(
             "redis.load.completed", "set", state is null ? "miss" : "hit",
             Detail: OperationalLogDetail.Diagnostic, CorrelationId: command.CorrelationId,
-            TenantId: actor.TenantId, ObjectId: command.ObjectId, Version: state?.Version,
+            TenantId: actor.TenantId, ObjectId: command.ObjectId,
             DurationMs: Stopwatch.GetElapsedTime(redisStarted).TotalMilliseconds));
         if (state is null)
         {
-            var recovery = await recoveryService.RecoverAsync(
-                actor,
-                command.ObjectId,
-                AxAuthorizationOperation.Set,
-                cancellationToken).ConfigureAwait(false);
-            if (!recovery.Succeeded)
-            {
-                return SetAxDataResult.Failure(recovery.Error!);
-            }
+            return SetAxDataResult.Failure(AxDataErrors.ObjectNotFound);
+        }
 
-            state = recovery.State!;
+        if (!string.Equals(state.TenantId, actor.TenantId, StringComparison.Ordinal) ||
+            !string.Equals(state.ObjectId, command.ObjectId, StringComparison.Ordinal))
+        {
+            return SetAxDataResult.Failure(AxDataErrors.ObjectNotFound);
         }
 
         if (state.Status == AxDataLifecycleStatus.Expired)
@@ -104,24 +93,24 @@ public sealed class SetAxDataHandler(
             return SetAxDataResult.Failure(AxDataErrors.ObjectNotFound);
         }
 
-        if (state.Status is AxDataLifecycleStatus.Saving or AxDataLifecycleStatus.Saved)
+        if (state.Status != AxDataLifecycleStatus.Active)
         {
-            return SetAxDataResult.Failure(AxDataErrors.ActiveConflict, state.Version);
+            return SetAxDataResult.Failure(AxDataErrors.ActiveConflict);
         }
 
         var authorizationStarted = Stopwatch.GetTimestamp();
         var permission = await authorizationProvider.GetSetPermissionAsync(
             actor.TenantId,
             state.TransId,
-            new AxRecordKey(state.KeyField, state.KeyValue, state.RecordId),
+            new AxRecordKey(null, null, state.RecordId),
             actor,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         var isAuthorized = IsAuthorized(actor, state, permission);
         Log.Write(new OperationalEvent(
             "authorization.completed", "set", isAuthorized ? "allowed" : "denied",
             isAuthorized ? OperationalLogLevel.Information : OperationalLogLevel.Warning,
             CorrelationId: command.CorrelationId, TenantId: actor.TenantId, TransId: state.TransId,
-            ObjectId: state.ObjectId, Version: state.Version,
+            ObjectId: state.ObjectId,
             ReasonCode: isAuthorized ? "policy-allowed" : "policy-denied",
             DurationMs: Stopwatch.GetElapsedTime(authorizationStarted).TotalMilliseconds));
         if (!isAuthorized)
@@ -129,115 +118,55 @@ public sealed class SetAxDataHandler(
             return SetAxDataResult.Failure(AxDataErrors.AccessDenied);
         }
 
-        var definition = await structDefProvider.GetAsync(
-            actor.TenantId,
-            state.TransId,
-            cancellationToken).ConfigureAwait(false);
-        if (definition is null)
-        {
-            return SetAxDataResult.Failure(AxDataErrors.DependencyUnavailable);
-        }
-
-        if (!MatchesDefinition(state, definition))
-        {
-            return SetAxDataResult.Failure(AxDataErrors.StructDefChanged);
-        }
-
         var lockStarted = Stopwatch.GetTimestamp();
         await using var lease = await dataLock.TryAcquireAsync(
             actor.TenantId,
             command.ObjectId,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         Log.Write(new OperationalEvent(
             "lock.acquire.completed", "set", lease is null ? "conflict" : "acquired",
             lease is null ? OperationalLogLevel.Warning : OperationalLogLevel.Information,
             CorrelationId: command.CorrelationId, TenantId: actor.TenantId, TransId: state.TransId,
-            ObjectId: state.ObjectId, Version: state.Version,
+            ObjectId: state.ObjectId,
             DurationMs: Stopwatch.GetElapsedTime(lockStarted).TotalMilliseconds));
         if (lease is null)
         {
             return SetAxDataResult.Failure(AxDataErrors.ActiveConflict);
         }
 
-        state = await store.LoadAsync(actor.TenantId, command.ObjectId, cancellationToken).ConfigureAwait(false);
-        if (state is null)
+        state = CloneState(state);
+        var started = await fieldEngine.CreateOperationAsync(state, actor, cancellationToken);
+        if (!started.Succeeded || started.Operation is null || started.Operation.Definition is null)
         {
-            var recovery = await recoveryService.RecoverAsync(
-                actor,
-                command.ObjectId,
-                AxAuthorizationOperation.Set,
-                cancellationToken).ConfigureAwait(false);
-            if (!recovery.Succeeded)
-            {
-                return SetAxDataResult.Failure(recovery.Error!);
-            }
-
-            state = recovery.State!;
+            return SetAxDataResult.Failure(AxDataErrors.DependencyUnavailable);
         }
 
+        await using var operation = started.Operation;
+        var definition = operation.Definition;
+        Log.Write(new OperationalEvent(
+            "structdef.binding.bypassed", "set", "current-definition",
+            Detail: OperationalLogDetail.Diagnostic,
+            CorrelationId: command.CorrelationId ?? Activity.Current?.TraceId.ToString(),
+            TenantId: actor.TenantId, TransId: state.TransId, ObjectId: state.ObjectId));
 
-        if (state.Status == AxDataLifecycleStatus.Closed)
+        var preparation = PrepareRequest(
+            command,
+            state,
+            definition,
+            permission,
+            rowIdGenerator);
+        if (preparation.Error is not null)
         {
-            return SetAxDataResult.Failure(AxDataErrors.ObjectNotFound);
-        }
-
-        if (state.Status is AxDataLifecycleStatus.Saving or AxDataLifecycleStatus.Saved)
-        {
-            return SetAxDataResult.Failure(AxDataErrors.ActiveConflict, state.Version);
-        }
-
-        if (state.Version != command.ExpectedVersion)
-        {
-            return SetAxDataResult.Failure(AxDataErrors.StaleVersion, state.Version);
-        }
-
-        if (!MatchesDefinition(state, definition))
-        {
-            return SetAxDataResult.Failure(AxDataErrors.StructDefChanged);
-        }
-
-        var metadataError = ValidateMetadata(command, state, definition, permission);
-        if (metadataError is not null)
-        {
-            return SetAxDataResult.Failure(metadataError);
+            return SetAxDataResult.Failure(preparation.Error);
         }
 
         var changes = new List<FieldChange>();
         var errors = new List<FieldEvaluationError>();
         var createdRows = new List<SetCreatedRow>();
         var changedParents = new List<FieldAddress>();
-        var hasMutations = false;
+        var hasMutations = preparation.HasStructuralMutation;
         var fieldEvaluationStarted = Stopwatch.GetTimestamp();
-        var preparedRows = new List<PreparedRow>();
-        foreach (var containerDefinition in definition.DataContainers.Where(definition =>
-                     command.DataContainers.Any(candidate =>
-                         string.Equals(candidate.Name, definition.Name, StringComparison.OrdinalIgnoreCase))))
-        {
-            var submittedContainer = command.DataContainers.Single(candidate =>
-                string.Equals(candidate.Name, containerDefinition.Name, StringComparison.OrdinalIgnoreCase));
-            var container = state.DataContainers[submittedContainer.Name];
-
-            for (var submittedRowIndex = 0; submittedRowIndex < submittedContainer.Rows.Count; submittedRowIndex++)
-            {
-                var submittedRow = submittedContainer.Rows[submittedRowIndex];
-                var row = ResolveRow(container, containerDefinition, submittedRow, rowIdGenerator);
-                var isNewRow = submittedRow.Action == AxRowAction.New;
-                if (submittedRow.Action == AxRowAction.Delete)
-                {
-                    container.ApplyRowState(row.RowId, AxRowState.Deleted);
-                    hasMutations = true;
-                    continue;
-                }
-
-                preparedRows.Add(new PreparedRow(
-                    container,
-                    row,
-                    submittedRow,
-                    submittedRowIndex,
-                    submittedRow.Action == AxRowAction.New,
-                    OrderFields(submittedRow, containerDefinition).ToArray()));
-            }
-        }
+        var preparedRows = preparation.Rows;
 
         var submissions = preparedRows
             .SelectMany(prepared => prepared.Fields.Select(field => new PreparedField(
@@ -247,84 +176,45 @@ public sealed class SetAxDataHandler(
             .ToArray();
         if (submissions.Length > 0)
         {
-            var started = await fieldEngine.CreateOperationAsync(state, actor, cancellationToken).ConfigureAwait(false);
-            if (!started.Succeeded || started.Operation is null)
+            var rejectedSources = new List<FieldAddress>();
+            for (var submissionIndex = 0; submissionIndex < submissions.Length; submissionIndex++)
             {
-                if (started.FailureKind == FieldOperationFailureKind.DefinitionChanged)
+                var submission = submissions[submissionIndex];
+                if (IsBlockedByRejectedSource(submission.Address, rejectedSources, definition, state))
                 {
-                    return SetAxDataResult.Failure(AxDataErrors.StructDefChanged);
+                    continue;
                 }
 
-                errors.Add(new FieldEvaluationError(
-                    submissions[0].Address,
-                    AxDataErrors.ValidationFailed.Code,
-                    started.Error ?? AxDataErrors.ValidationFailed.Message));
-            }
-            else
-            {
-                await using var operation = started.Operation;
-                var rejectedSources = new List<FieldAddress>();
-                for (var submissionIndex = 0; submissionIndex < submissions.Length; submissionIndex++)
+                var evaluation = await operation.EvaluateAsync(
+                    submission.Address,
+                    submission.Value,
+                    cancellationToken);
+                if (!evaluation.Succeeded)
                 {
-                    var submission = submissions[submissionIndex];
-                    if (IsBlockedByRejectedSource(submission.Address, rejectedSources, definition, state))
+                    errors.AddRange(evaluation.Errors.Count == 0
+                        ? [new FieldEvaluationError(submission.Address, AxDataErrors.ValidationFailed.Code, AxDataErrors.ValidationFailed.Message)]
+                        : evaluation.Errors);
+                    rejectedSources.Add(submission.Address);
+                    var hasEligibleContinuation = submissions
+                        .Skip(submissionIndex + 1)
+                        .Any(candidate => !IsBlockedByRejectedSource(
+                            candidate.Address,
+                            rejectedSources,
+                            definition,
+                            state));
+                    if (hasEligibleContinuation)
                     {
-                        continue;
-                    }
-
-                    var evaluation = await operation.EvaluateAsync(
-                        submission.Address,
-                        submission.Value,
-                        cancellationToken).ConfigureAwait(false);
-                    if (!evaluation.Succeeded)
-                    {
-                        errors.AddRange(evaluation.Errors.Count == 0
-                            ? [new FieldEvaluationError(submission.Address, AxDataErrors.ValidationFailed.Code, AxDataErrors.ValidationFailed.Message)]
-                            : evaluation.Errors);
-                        rejectedSources.Add(submission.Address);
-                        var hasEligibleContinuation = submissions
-                            .Skip(submissionIndex + 1)
-                            .Any(candidate => !IsBlockedByRejectedSource(
-                                candidate.Address,
-                                rejectedSources,
-                                definition,
-                                state));
-                        if (hasEligibleContinuation)
+                        var rebuilt = await operation.RebuildAsync(cancellationToken);
+                        if (!rebuilt.Succeeded)
                         {
-                            var rebuilt = await operation.RebuildAsync(cancellationToken).ConfigureAwait(false);
-                            if (!rebuilt.Succeeded)
-                            {
-                                return SetAxDataResult.Failure(
-                                    rebuilt.FailureKind == FieldOperationFailureKind.DefinitionChanged
-                                        ? AxDataErrors.StructDefChanged
-                                        : AxDataErrors.DependencyUnavailable);
-                            }
+                            return SetAxDataResult.Failure(AxDataErrors.DependencyUnavailable);
                         }
-
-                        continue;
                     }
 
-                    submission.PreparedRow.HasValidField = true;
+                    continue;
                 }
 
-                if (preparedRows.Any(row => row.HasValidField))
-                {
-                    var completed = await operation.CompleteAsync(cancellationToken).ConfigureAwait(false);
-                    if (!completed.Succeeded)
-                    {
-                        return SetAxDataResult.Failure(completed.Errors.Any(error =>
-                            string.Equals(error.Code, AxDataErrors.StructDefChanged.Code, StringComparison.Ordinal))
-                            ? AxDataErrors.StructDefChanged
-                            : AxDataErrors.DependencyUnavailable);
-                    }
-
-                    changedParents.AddRange(completed.Changes.Select(change => change.Address));
-                    if (command.GetDeps)
-                    {
-                        changes.AddRange(completed.Changes.Where(change =>
-                            change.Source != FieldChangeSource.Submitted));
-                    }
-                }
+                submission.PreparedRow.HasValidField = true;
             }
         }
 
@@ -344,7 +234,9 @@ public sealed class SetAxDataHandler(
                     prepared.Row.RowId));
             }
 
-            if (prepared.Submitted.Action == AxRowAction.Edit && prepared.HasValidField)
+            if (prepared.Submitted.Action == AxRowAction.Edit &&
+                prepared.HasValidField &&
+                prepared.Row.State != AxRowState.New)
             {
                 prepared.Row.TransitionTo(AxRowState.Edited);
             }
@@ -352,54 +244,74 @@ public sealed class SetAxDataHandler(
             hasMutations |= prepared.HasValidField;
         }
 
+        var completed = await operation.CompleteAsync(cancellationToken);
+        if (!completed.Succeeded)
+        {
+            return SetAxDataResult.Failure(AxDataErrors.DependencyUnavailable);
+        }
+
+        changedParents.AddRange(completed.Changes.Select(change => change.Address));
+        if (command.GetDeps)
+        {
+            changes.AddRange(completed.Changes.Where(change =>
+                change.Source != FieldChangeSource.Submitted));
+        }
+
         var fieldEvaluationDuration = Stopwatch.GetElapsedTime(fieldEvaluationStarted).TotalMilliseconds;
         Log.Write(new OperationalEvent(
             "validation.completed", "set", errors.Count == 0 ? "succeeded" : "validation-errors",
             errors.Count == 0 ? OperationalLogLevel.Information : OperationalLogLevel.Warning,
             CorrelationId: command.CorrelationId, TenantId: actor.TenantId, TransId: state.TransId,
-            ObjectId: state.ObjectId, Version: state.Version, ErrorCode: errors.Count == 0 ? null : AxDataErrors.ValidationFailed.Code,
+            ObjectId: state.ObjectId, ErrorCode: errors.Count == 0 ? null : AxDataErrors.ValidationFailed.Code,
             Count: errors.Count, DurationMs: fieldEvaluationDuration));
         Log.Write(new OperationalEvent(
             "dependency.evaluation.completed", "set", "completed",
             Detail: OperationalLogDetail.Diagnostic, CorrelationId: command.CorrelationId,
-            TenantId: actor.TenantId, TransId: state.TransId, ObjectId: state.ObjectId, Version: state.Version,
+            TenantId: actor.TenantId, TransId: state.TransId, ObjectId: state.ObjectId,
             Count: changedParents.Count, DurationMs: fieldEvaluationDuration));
 
         if (!hasMutations)
         {
-            return SetAxDataResult.Success(new SetAxDataResponse(state.ObjectId, state.Version, createdRows, changes, errors));
+            return SetAxDataResult.Success(new SetAxDataResponse(state.ObjectId, createdRows, changes, errors));
         }
 
         var fillGridStarted = Stopwatch.GetTimestamp();
-        var fillGrid = await fillGridEngine.ExecuteApplicableAsync(
+        var fillGrid = await operation.ExecuteApplicableFillGridAsync(
             state,
             changedParents,
             actor,
-            cancellationToken).ConfigureAwait(false);
-        var fillGridChanges = new List<FieldChange>();
+            cancellationToken);
         if (!fillGrid.Succeeded)
         {
             LogFillGrid("failed", OperationalLogLevel.Warning, 0, 0);
             return SetAxDataResult.Failure(AxDataErrors.DependencyUnavailable);
         }
 
-        if (fillGrid.Operations.Any(operation =>
-                !operation.Succeeded || !CanApplyFillGrid(state, definition, operation)))
+        if (!TryBuildFillGridPlan(
+                state,
+                definition,
+                fillGrid.Operations,
+                rowIdGenerator,
+                out var fillGridPlan))
         {
             LogFillGrid("invalid-result", OperationalLogLevel.Warning, fillGrid.Operations.Count, 0);
             return SetAxDataResult.Failure(AxDataErrors.DependencyUnavailable);
         }
 
-        foreach (var operation in fillGrid.Operations)
+        var fillGridChanges = new List<FieldChange>();
+        foreach (var planned in fillGridPlan)
         {
-            if (!operation.Succeeded ||
-                !TryApplyFillGrid(state, definition, operation, rowIdGenerator, out var operationChanges))
+            if (planned.Mode == FillGridMode.Replace)
             {
-                LogFillGrid("invalid-result", OperationalLogLevel.Warning, fillGrid.Operations.Count, fillGridChanges.Count);
-                return SetAxDataResult.Failure(AxDataErrors.DependencyUnavailable);
+                planned.Container.Rows.Clear();
             }
 
-            fillGridChanges.AddRange(operationChanges);
+            foreach (var row in planned.Rows)
+            {
+                planned.Container.AddRow(row);
+            }
+
+            fillGridChanges.AddRange(planned.Changes);
         }
 
         if (command.GetDeps)
@@ -410,37 +322,29 @@ public sealed class SetAxDataHandler(
         LogFillGrid("succeeded", OperationalLogLevel.Information, fillGrid.Operations.Count, fillGridChanges.Count);
 
         state.RegisterMutation();
-        var envelope = new SnapshotEnvelope(
-            Guid.NewGuid().ToString("N"),
-            state.TenantId,
-            state.ObjectId,
-            state.Version,
+        var writeStarted = Stopwatch.GetTimestamp();
+        var write = await store.WriteAsync(
             state,
-            clock.UtcNow,
-            command.CorrelationId ?? string.Empty);
-        var publishStarted = Stopwatch.GetTimestamp();
-        var write = await snapshotTransport.PublishAsync(
-            envelope,
-            command.ExpectedVersion,
-            cancellationToken).ConfigureAwait(false);
+            lease.Token,
+            cancellationToken);
         Log.Write(new OperationalEvent(
-            "snapshot.publish.completed", "set",
-            write.Status == AxDataStoreWriteStatus.Stored ? "stored" : "stale",
+            "redis.write.completed", "set",
+            write.Status == AxDataStoreWriteStatus.Stored ? "stored" : "ownership-lost",
             write.Status == AxDataStoreWriteStatus.Stored ? OperationalLogLevel.Information : OperationalLogLevel.Warning,
             CorrelationId: command.CorrelationId, TenantId: actor.TenantId, TransId: state.TransId,
-            ObjectId: state.ObjectId, Version: state.Version, CurrentVersion: write.CurrentVersion,
-            DurationMs: Stopwatch.GetElapsedTime(publishStarted).TotalMilliseconds));
-        if (write.Status == AxDataStoreWriteStatus.StaleVersion)
+            ObjectId: state.ObjectId,
+            DurationMs: Stopwatch.GetElapsedTime(writeStarted).TotalMilliseconds));
+        if (write.Status == AxDataStoreWriteStatus.Conflict)
         {
-            return SetAxDataResult.Failure(AxDataErrors.StaleVersion, write.CurrentVersion);
+            return SetAxDataResult.Failure(AxDataErrors.ActiveConflict);
         }
 
-        return SetAxDataResult.Success(new SetAxDataResponse(state.ObjectId, state.Version, createdRows, changes, errors));
+        return SetAxDataResult.Success(new SetAxDataResponse(state.ObjectId, createdRows, changes, errors));
 
         void LogFillGrid(string outcome, OperationalLogLevel level, int operationCount, int changeCount) =>
             Log.Write(new OperationalEvent(
                 "fillgrid.completed", "set", outcome, level, OperationalLogDetail.Diagnostic,
-                command.CorrelationId, actor.TenantId, state.TransId, state.ObjectId, state.Version,
+                command.CorrelationId, actor.TenantId, state.TransId, state.ObjectId,
                 ErrorCode: level == OperationalLogLevel.Warning ? AxDataErrors.DependencyUnavailable.Code : null,
                 Count: operationCount, SecondaryCount: changeCount,
                 DurationMs: Stopwatch.GetElapsedTime(fillGridStarted).TotalMilliseconds));
@@ -459,62 +363,97 @@ public sealed class SetAxDataHandler(
         return AxAuthorizationPolicy.IsAllowed(context, AxAuthorizationOperation.Set);
     }
 
-    private static bool MatchesDefinition(AxDataState state, StructDefHandle definition) =>
-        string.Equals(state.TransId, definition.TransId, StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(state.StructDefVersion, definition.Version, StringComparison.OrdinalIgnoreCase);
-
-    private static AxDataErrorDefinition? ValidateMetadata(
+    /// <summary>Validates requested containers, rows, fields, and permissions while preparing an isolated state mutation.</summary>
+    /// <returns>Prepared rows and structural-mutation state, or the first request-level error.</returns>
+    private static PreparedRequest PrepareRequest(
         SetAxDataCommand command,
         AxDataState state,
         StructDefHandle definition,
-        AxQueryPermission permission)
+        AxQueryPermission permission,
+        IRowIdGenerator rowIdGenerator)
     {
+        var definitions = definition.DataContainers.ToDictionary(
+            container => container.Name,
+            StringComparer.OrdinalIgnoreCase);
+        var containers = state.DataContainers.Values.ToDictionary(
+            container => container.Name,
+            StringComparer.OrdinalIgnoreCase);
+        var definitionFields = definitions.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value.Fields.ToDictionary(field => field.Name, StringComparer.OrdinalIgnoreCase),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var container in containers.Values)
+        {
+            if (!definitions.TryGetValue(container.Name, out var containerDefinition) ||
+                container.Fields.Count != containerDefinition.Fields.Count)
+            {
+                return PreparedRequest.Failure(AxDataErrors.RecoveryFailed);
+            }
+
+            var currentFields = definitionFields[container.Name];
+            if (container.Fields.Any(field =>
+                    !currentFields.TryGetValue(field.Name, out var current) ||
+                    field.IsSourceKey != current.SourceKey ||
+                    field.IsReadOnly != current.IsReadOnly))
+            {
+                return PreparedRequest.Failure(AxDataErrors.RecoveryFailed);
+            }
+        }
+
+        var plans = new List<PreparedRowPlan>();
         foreach (var submittedContainer in command.DataContainers)
         {
-            var containerDefinition = definition.DataContainers.SingleOrDefault(candidate =>
-                string.Equals(candidate.Name, submittedContainer.Name, StringComparison.OrdinalIgnoreCase));
-            if (containerDefinition is null || !state.DataContainers.TryGetValue(submittedContainer.Name, out var container))
+            if (!definitions.TryGetValue(submittedContainer.Name, out var containerDefinition) ||
+                !containers.TryGetValue(submittedContainer.Name, out var container))
             {
-                return AxDataErrors.InvalidRequest;
+                return PreparedRequest.Failure(AxDataErrors.InvalidRequest);
             }
 
             if (!CanWriteContainer(submittedContainer.Name, permission))
             {
-                return AxDataErrors.AccessDenied;
+                return PreparedRequest.Failure(AxDataErrors.AccessDenied);
             }
 
-            foreach (var submittedRow in submittedContainer.Rows)
+            var rows = container.Rows.ToDictionary(row => row.RowId, StringComparer.OrdinalIgnoreCase);
+            var fields = definitionFields[container.Name];
+            var declaredOrder = containerDefinition.EvaluationOrder ?? [];
+            var evaluationOrder = declaredOrder
+                .Concat(containerDefinition.Fields
+                    .Select(field => field.Name)
+                    .Where(name => !declaredOrder.Contains(name, StringComparer.OrdinalIgnoreCase)))
+                .Select((name, index) => (name, index))
+                .ToDictionary(item => item.name, item => item.index, StringComparer.OrdinalIgnoreCase);
+            for (var rowIndex = 0; rowIndex < submittedContainer.Rows.Count; rowIndex++)
             {
-                var existing = string.IsNullOrWhiteSpace(submittedRow.RowId)
-                    ? null
-                    : container.Rows.SingleOrDefault(row =>
-                        string.Equals(row.RowId, submittedRow.RowId, StringComparison.OrdinalIgnoreCase));
+                var submittedRow = submittedContainer.Rows[rowIndex];
+                var existing = !string.IsNullOrWhiteSpace(submittedRow.RowId) &&
+                               rows.TryGetValue(submittedRow.RowId, out var found)
+                    ? found
+                    : null;
                 if (submittedRow.Action == AxRowAction.New)
                 {
                     if (!string.IsNullOrWhiteSpace(submittedRow.RowId) || existing is not null ||
                         !container.IsGrid && container.Rows.Count != 0)
                     {
-                        return AxDataErrors.InvalidRequest;
+                        return PreparedRequest.Failure(AxDataErrors.InvalidRequest);
                     }
                 }
-                else if (existing is null || existing.PersistedRecordId is null ||
-                         existing.State == AxRowState.Deleted)
+                else if (existing is null || existing.State == AxRowState.Deleted)
                 {
-                    return AxDataErrors.InvalidRequest;
+                    return PreparedRequest.Failure(AxDataErrors.InvalidRequest);
                 }
 
                 if (submittedRow.Action == AxRowAction.Delete && submittedRow.Fields.Count != 0)
                 {
-                    return AxDataErrors.InvalidRequest;
+                    return PreparedRequest.Failure(AxDataErrors.InvalidRequest);
                 }
 
                 foreach (var submittedField in submittedRow.Fields)
                 {
-                    var fieldDefinition = containerDefinition.Fields.SingleOrDefault(field =>
-                        string.Equals(field.Name, submittedField.Name, StringComparison.OrdinalIgnoreCase));
-                    if (fieldDefinition is null)
+                    if (!fields.TryGetValue(submittedField.Name, out var fieldDefinition))
                     {
-                        return AxDataErrors.InvalidRequest;
+                        return PreparedRequest.Failure(AxDataErrors.InvalidRequest);
                     }
 
                     if (fieldDefinition.IsReadOnly ||
@@ -522,51 +461,61 @@ public sealed class SetAxDataHandler(
                         IsReadOnlyField(submittedContainer.Name, submittedField.Name, permission) ||
                         !IsIncludedField(submittedContainer.Name, submittedField.Name, permission))
                     {
-                        return AxDataErrors.AccessDenied;
+                        return PreparedRequest.Failure(AxDataErrors.AccessDenied);
                     }
                 }
+
+                plans.Add(new PreparedRowPlan(
+                    container,
+                    containerDefinition,
+                    submittedRow,
+                    rowIndex,
+                    existing,
+                    submittedRow.Fields
+                        .OrderBy(field => evaluationOrder[field.Name])
+                        .ToArray()));
             }
         }
 
-        return null;
-    }
-
-    private static AxDataRow ResolveRow(
-        AxDataContainer container,
-        DataContainerDefinition definition,
-        SetRowValue submitted,
-        IRowIdGenerator rowIdGenerator)
-    {
-        var row = string.IsNullOrWhiteSpace(submitted.RowId)
-            ? null
-            : container.Rows.SingleOrDefault(candidate =>
-                string.Equals(candidate.RowId, submitted.RowId, StringComparison.OrdinalIgnoreCase));
-        if (row is not null)
+        var prepared = new List<PreparedRow>();
+        var hasStructuralMutation = false;
+        foreach (var plan in plans)
         {
-            return row;
+            var row = plan.Existing;
+            if (plan.Submitted.Action == AxRowAction.New)
+            {
+                var rowFields = plan.Definition.Fields.ToDictionary(
+                    field => field.Name,
+                    field => new AxFieldValue(null, field.IsReadOnly, isSourceKey: field.SourceKey),
+                    StringComparer.OrdinalIgnoreCase);
+                row = new AxDataRow(
+                    NewUniqueRowId(plan.Container, [], rowIdGenerator),
+                    AxRowState.New,
+                    fields: rowFields);
+                plan.Container.AddRow(row);
+                hasStructuralMutation = true;
+            }
+
+            if (plan.Submitted.Action == AxRowAction.Delete)
+            {
+                plan.Container.ApplyRowState(row!.RowId, AxRowState.Deleted);
+                hasStructuralMutation = true;
+                continue;
+            }
+
+            prepared.Add(new PreparedRow(
+                plan.Container,
+                row!,
+                plan.Submitted,
+                plan.RequestRowIndex,
+                plan.Submitted.Action == AxRowAction.New,
+                plan.OrderedFields));
         }
 
-        var fields = definition.Fields.ToDictionary(
-            field => field.Name,
-            field => new AxFieldValue(null, field.IsReadOnly),
-            StringComparer.OrdinalIgnoreCase);
-        row = new AxDataRow(NewUniqueRowId(container, [], rowIdGenerator), AxRowState.New, fields: fields);
-        container.AddRow(row);
-        return row;
+        return new PreparedRequest(prepared, hasStructuralMutation, null);
     }
 
-    private static IEnumerable<SetFieldValue> OrderFields(
-        SetRowValue submittedRow,
-        DataContainerDefinition containerDefinition)
-    {
-        var orderedNames = containerDefinition.EvaluationOrder ?? containerDefinition.Fields.Select(field => field.Name).ToArray();
-        return orderedNames
-            .Where(name => submittedRow.Fields.Any(field =>
-                string.Equals(field.Name, name, StringComparison.OrdinalIgnoreCase)))
-            .Select(name => submittedRow.Fields.Single(field =>
-                string.Equals(field.Name, name, StringComparison.OrdinalIgnoreCase)));
-    }
-
+    /// <summary>Determines whether a field transitively depends on any source rejected earlier in this operation.</summary>
     private static bool IsBlockedByRejectedSource(
         FieldAddress candidate,
         IReadOnlyCollection<FieldAddress> rejectedSources,
@@ -574,6 +523,7 @@ public sealed class SetAxDataHandler(
         AxDataState state) =>
         rejectedSources.Any(rejected => IsReachable(rejected, candidate, definition, state));
 
+    /// <summary>Traverses the field-dependency graph while mapping parent and grid-row addresses.</summary>
     private static bool IsReachable(
         FieldAddress source,
         FieldAddress candidate,
@@ -673,53 +623,62 @@ public sealed class SetAxDataHandler(
     private static string AddressKey(FieldAddress address) =>
         $"{address.DataContainer}\n{address.RowId}\n{address.FieldName}";
 
-    private static bool TryApplyFillGrid(
+    /// <summary>Builds a permission-filtered FillGrid response plan without exposing hidden containers or fields.</summary>
+    private static bool TryBuildFillGridPlan(
         AxDataState state,
         StructDefHandle definition,
-        FillGridResult fillGrid,
+        IReadOnlyList<FillGridResult> operations,
         IRowIdGenerator rowIdGenerator,
-        out IReadOnlyList<FieldChange> changes)
+        out IReadOnlyList<PreparedFillGridOperation> plan)
     {
-        changes = [];
-        if (!CanApplyFillGrid(state, definition, fillGrid))
+        var prepared = new List<PreparedFillGridOperation>(operations.Count);
+        var pendingRows = new Dictionary<string, List<AxDataRow>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var operation in operations)
         {
-            return false;
+            if (!operation.Succeeded || !CanApplyFillGrid(state, definition, operation))
+            {
+                plan = [];
+                return false;
+            }
+
+            var containerDefinition = definition.DataContainers.Single(candidate =>
+                string.Equals(candidate.Name, operation.TargetContainer, StringComparison.OrdinalIgnoreCase));
+            var container = state.DataContainers[containerDefinition.Name];
+            if (!pendingRows.TryGetValue(container.Name, out var allPending))
+            {
+                allPending = [];
+                pendingRows.Add(container.Name, allPending);
+            }
+
+            var generatedRows = new List<AxDataRow>(operation.Rows.Count);
+            var generatedChanges = new List<FieldChange>();
+            foreach (var fillGridRow in operation.Rows)
+            {
+                var id = NewUniqueRowId(container, allPending, rowIdGenerator);
+                var fields = containerDefinition.Fields.ToDictionary(
+                    field => field.Name,
+                    field => new AxFieldValue(
+                        fillGridRow.Values.TryGetValue(field.Name, out var value) ? value : null,
+                        field.IsReadOnly,
+                        isSourceKey: field.SourceKey),
+                    StringComparer.OrdinalIgnoreCase);
+                var row = new AxDataRow(id, AxRowState.New, fields: fields);
+                generatedRows.Add(row);
+                allPending.Add(row);
+                generatedChanges.AddRange(fillGridRow.Values.Select(value => new FieldChange(
+                    new FieldAddress(container.Name, id, value.Key),
+                    value.Value,
+                    FieldChangeSource.FillGrid)));
+            }
+
+            prepared.Add(new PreparedFillGridOperation(
+                container,
+                operation.Mode,
+                generatedRows,
+                generatedChanges));
         }
 
-        var containerDefinition = definition.DataContainers.SingleOrDefault(candidate =>
-            string.Equals(candidate.Name, fillGrid.TargetContainer, StringComparison.OrdinalIgnoreCase));
-        var container = state.DataContainers[containerDefinition!.Name];
-
-        var generatedRows = new List<AxDataRow>();
-        var generatedChanges = new List<FieldChange>();
-        foreach (var fillGridRow in fillGrid.Rows)
-        {
-            var id = NewUniqueRowId(container, generatedRows, rowIdGenerator);
-
-            var fields = containerDefinition.Fields.ToDictionary(
-                field => field.Name,
-                field => new AxFieldValue(
-                    fillGridRow.Values.TryGetValue(field.Name, out var value) ? value : null,
-                    field.IsReadOnly),
-                StringComparer.OrdinalIgnoreCase);
-            generatedRows.Add(new AxDataRow(id, AxRowState.New, fields: fields));
-            generatedChanges.AddRange(fillGridRow.Values.Select(value => new FieldChange(
-                new FieldAddress(container.Name, id, value.Key),
-                value.Value,
-                FieldChangeSource.FillGrid)));
-        }
-
-        if (fillGrid.Mode == FillGridMode.Replace)
-        {
-            container.Rows.Clear();
-        }
-
-        foreach (var row in generatedRows)
-        {
-            container.AddRow(row);
-        }
-
-        changes = generatedChanges;
+        plan = prepared;
         return true;
     }
 
@@ -730,7 +689,8 @@ public sealed class SetAxDataHandler(
     {
         var containerDefinition = definition.DataContainers.SingleOrDefault(candidate =>
             string.Equals(candidate.Name, fillGrid.TargetContainer, StringComparison.OrdinalIgnoreCase));
-        if (containerDefinition is null || !containerDefinition.IsGrid ||
+        if (fillGrid.Mode is not (FillGridMode.Append or FillGridMode.Replace) ||
+            containerDefinition is null || !containerDefinition.IsGrid ||
             !state.DataContainers.TryGetValue(containerDefinition.Name, out var container) || !container.IsGrid)
         {
             return false;
@@ -739,12 +699,22 @@ public sealed class SetAxDataHandler(
         var knownFields = containerDefinition.Fields
             .Select(field => field.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return fillGrid.Rows.All(row => row.Values.Keys.All(knownFields.Contains));
+        return fillGrid.Rows.All(row =>
+            row.Values.Keys.All(knownFields.Contains) &&
+            row.Values.Values.All(IsSupportedFieldValue));
     }
+
+    private static bool IsSupportedFieldValue(object? value) => value switch
+    {
+        float typed => float.IsFinite(typed),
+        double typed => double.IsFinite(typed),
+        null or string or bool or byte or short or int or long or decimal or
+            DateTime or DateTimeOffset or DateOnly or TimeOnly or Guid or byte[] => true,
+        _ => false
+    };
 
     private static bool IsValid(SetAxDataCommand command) =>
         !string.IsNullOrWhiteSpace(command.ObjectId) &&
-        command.ExpectedVersion > 0 &&
         command.DataContainers is { Count: > 0 } &&
         command.DataContainers.All(container =>
             !string.IsNullOrWhiteSpace(container.Name) &&
@@ -762,6 +732,61 @@ public sealed class SetAxDataHandler(
                 .Select(row => row.RowId).Distinct(StringComparer.OrdinalIgnoreCase).Count() ==
             container.Rows.Count(row => row.Action != AxRowAction.New)) &&
         command.DataContainers.Select(container => container.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() == command.DataContainers.Count;
+
+    /// <summary>Creates the isolated working copy mutated under the object lease.</summary>
+    private static AxDataState CloneState(AxDataState source)
+    {
+        var containers = source.DataContainers.Values.Select(container =>
+            new AxDataContainer(
+                container.Name,
+                container.IsGrid,
+                container.Rows.Select(row => new AxDataRow(
+                    row.RowId,
+                    row.State,
+                    row.PersistedRecordId,
+                    row.Fields.ToDictionary(
+                        pair => pair.Key,
+                        pair => AxFieldValue.Rehydrate(
+                            pair.Value.Value,
+                            pair.Value.OriginalValue,
+                            pair.Value.IsDirty,
+                            pair.Value.IsReadOnly,
+                            pair.Value.SourceId,
+                            pair.Value.OriginalSourceId,
+                            pair.Value.IsSourceKey),
+                        StringComparer.OrdinalIgnoreCase))),
+                container.Fields.Select(field => new AxDataFieldMetadata(
+                    field.Name,
+                    field.IsReadOnly,
+                    field.IsSourceKey))));
+        var workflow = source.Workflow is null
+            ? null
+            : new PegActiveState
+            {
+                WorkflowInstanceId = source.Workflow.WorkflowInstanceId,
+                CurrentTaskId = source.Workflow.CurrentTaskId,
+                InitiatorUserName = source.Workflow.InitiatorUserName,
+                Status = source.Workflow.Status,
+                ApprovalLevel = source.Workflow.ApprovalLevel,
+                Approvers = source.Workflow.Approvers.ToArray(),
+                WorkflowVersion = source.Workflow.WorkflowVersion,
+                PendingFromUtc = source.Workflow.PendingFromUtc
+            };
+
+        return AxDataState.Rehydrate(
+            source.ObjectId,
+            source.TenantId,
+            source.TransId,
+            source.RecordId,
+            source.InitiatorUserName,
+            source.CreatedAtUtc,
+            source.LastAccessedAtUtc,
+            source.Status,
+            containers,
+            workflow,
+            source.Files.ToArray(),
+            source.AxOpen);
+    }
 
     private static string NewUniqueRowId(
         AxDataContainer container,
@@ -814,6 +839,29 @@ public sealed class SetAxDataHandler(
         public IReadOnlyList<SetFieldValue> Fields { get; } = fields;
         public bool HasValidField { get; set; }
     }
+
+    private sealed record PreparedRowPlan(
+        AxDataContainer Container,
+        DataContainerDefinition Definition,
+        SetRowValue Submitted,
+        int RequestRowIndex,
+        AxDataRow? Existing,
+        IReadOnlyList<SetFieldValue> OrderedFields);
+
+    private sealed record PreparedRequest(
+        IReadOnlyList<PreparedRow> Rows,
+        bool HasStructuralMutation,
+        AxDataErrorDefinition? Error)
+    {
+        public static PreparedRequest Failure(AxDataErrorDefinition error) =>
+            new([], false, error);
+    }
+
+    private sealed record PreparedFillGridOperation(
+        AxDataContainer Container,
+        FillGridMode Mode,
+        IReadOnlyList<AxDataRow> Rows,
+        IReadOnlyList<FieldChange> Changes);
 
     private sealed record PreparedField(PreparedRow PreparedRow, FieldAddress Address, object? Value);
 }

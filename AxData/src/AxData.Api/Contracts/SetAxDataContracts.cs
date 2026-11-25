@@ -4,22 +4,23 @@ using AxData.Application.Set;
 
 namespace AxData.Api.Contracts;
 
+/// <summary>Addresses an active DataObject and submits field changes for server-side evaluation.</summary>
 public sealed record SetAxDataRequest(
+    string ObjectId,
     bool GetDeps,
-    long? ExpectedVersion,
     IReadOnlyDictionary<string, SetDataContainerRequest> Data)
 {
-    public bool TryToCommand(string objectId, long expectedVersion, out SetAxDataCommand command)
-        => TryToCommand(objectId, expectedVersion, correlationId: null, out command);
+    /// <summary>Validates the body address and maps submitted changes to an application command.</summary>
+    public bool TryToCommand(out SetAxDataCommand command)
+        => TryToCommand(correlationId: null, out command);
 
+    /// <summary>Validates and maps the request while attaching safe request correlation metadata.</summary>
     public bool TryToCommand(
-        string objectId,
-        long expectedVersion,
         string? correlationId,
         out SetAxDataCommand command)
     {
-        command = new SetAxDataCommand(objectId, expectedVersion, GetDeps, [], correlationId);
-        if (Data is null || Data.Count == 0)
+        command = new SetAxDataCommand(ObjectId, GetDeps, [], correlationId);
+        if (string.IsNullOrWhiteSpace(ObjectId) || Data is null || Data.Count == 0)
         {
             return false;
         }
@@ -31,7 +32,7 @@ public sealed record SetAxDataRequest(
                 row.Action,
                 row.Fields?.Select(field => new SetFieldValue(field.Key, ToValue(field.Value))).ToArray() ?? [])).ToArray() ?? []))
             .ToArray();
-        command = new SetAxDataCommand(objectId, expectedVersion, GetDeps, containers, correlationId);
+        command = new SetAxDataCommand(ObjectId, GetDeps, containers, correlationId);
         return true;
     }
 
@@ -68,19 +69,19 @@ public sealed record SetFieldEvaluationErrorApiResponse(
     string Code,
     string Message);
 
+/// <summary>Returns accepted Set changes and field-level evaluation failures.</summary>
 public sealed record SetAxDataApiResponse(
     string Status,
     string ObjectId,
-    long Version,
     IReadOnlyList<SetCreatedRow> CreatedRows,
     IReadOnlyList<SetChangedFieldApiResponse> Changed,
     IReadOnlyList<SetFieldEvaluationErrorApiResponse> Errors,
     string CorrelationId)
 {
+    /// <summary>Maps the completed Set result and attaches the request correlation identifier.</summary>
     public static SetAxDataApiResponse From(SetAxDataResponse response, string correlationId) => new(
         response.Errors.Count == 0 ? "success" : "validation_error",
         response.ObjectId,
-        response.Version,
         response.CreatedRows,
         response.Changed.Select(change => new SetChangedFieldApiResponse(
             change.Address.DataContainer,

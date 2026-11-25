@@ -5,11 +5,11 @@ using AxData.Application.Ports;
 using AxData.Application.Ports.Axpert;
 using AxData.Infrastructure.Redis;
 using AxData.Infrastructure.Serialization;
-using AxData.Infrastructure.Sql;
 using AxData.Integration.Axpert.Authorization;
 using AxData.Integration.Axpert.AxGet;
 using AxData.Integration.Axpert.FieldEngine;
 using AxData.Integration.Axpert.FillGrid;
+using AxData.Integration.Axpert.Initialization;
 using AxData.Integration.Axpert.Runtime;
 using AxData.Integration.Axpert.StructDef;
 using StackExchange.Redis;
@@ -25,13 +25,8 @@ public static class ProductionServices
         var redisConnection = Required(
             configuration["AxData:Redis:ConnectionString"],
             "AxData:Redis:ConnectionString");
-        var snapshotConnection = Required(
-            configuration["AxData:Postgres:ConnectionString"],
-            "AxData:Postgres:ConnectionString");
         var redisOptions = new AxDataRedisOptions
         {
-            InactivityTtl = TimeSpan.FromMinutes(
-                configuration.GetValue("AxData:Redis:InactivityTtlMinutes", 30)),
             LockLeaseDuration = TimeSpan.FromSeconds(
                 configuration.GetValue("AxData:Redis:LockLeaseSeconds", 10))
         };
@@ -65,14 +60,6 @@ public static class ProductionServices
         services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisConnection));
         services.AddSingleton<IAxDataStore, RedisAxDataStore>();
         services.AddSingleton<IAxDataLock, RedisAxDataLock>();
-        services.AddSingleton<ISnapshotTransport, RedisSnapshotTransport>();
-        services.AddScoped<IDbHelper>(_ =>
-        {
-            var helper = DBHelper.CreateDbHelper("postgre");
-            helper.ConnectionString = snapshotConnection;
-            return helper;
-        });
-        services.AddScoped<IAxDataSnapshotRepository, AxDataSnapshotStore>();
 
         services.AddSingleton<IAppSettingsService, AppSettingsService>();
         services.AddSingleton<IAppSettingsHelper, AppSettingsHelper>();
@@ -83,14 +70,23 @@ public static class ProductionServices
         services.AddScoped<IAxpertSessionRuntimeAccessor>(provider =>
             provider.GetRequiredService<AxpertSessionResolver>());
         services.AddScoped<IAxpertRuntimeContextFactory, ProductionAxpertRuntimeContextFactory>();
-        services.AddScoped<IAxpertStructDefSource, AxpertStructDefSource>();
+        services.AddScoped<AxpertStructDefSource>();
+        services.AddScoped<IAxpertStructDefSource>(provider =>
+            provider.GetRequiredService<AxpertStructDefSource>());
+        services.AddScoped<IAxpertStructDefRuntimeSource>(provider =>
+            provider.GetRequiredService<AxpertStructDefSource>());
         services.AddScoped<IStructDefProvider, AxpertStructDefProvider>();
         services.AddScoped<IAxpertPermissionSource, AxpertPermissionSource>();
         services.AddScoped<IAxpertAuthorizationProvider, AxpertAuthorizationProvider>();
         services.AddScoped<IAxpertDataSource, AxpertDataSource>();
-        services.AddScoped<IAxpertDataLoader, AxpertDataLoader>();
+        services.AddScoped<AxpertDataLoader>();
+        services.AddScoped<IAxpertDataLoader>(provider =>
+            provider.GetRequiredService<AxpertDataLoader>());
         services.AddScoped<IAxpertFieldRuntimeFactory, AxpertFieldRuntimeFactory>();
-        services.AddScoped<IAxpertFieldEngine, AxpertFieldEngine>();
+        services.AddScoped<AxpertFieldEngine>();
+        services.AddScoped<IAxpertFieldEngine>(provider =>
+            provider.GetRequiredService<AxpertFieldEngine>());
+        services.AddScoped<IAxpertInitializer, AxpertInitializer>();
         services.AddScoped<IAxpertFillGridRuntimeFactory, AxpertFillGridRuntimeFactory>();
         services.AddScoped<IAxpertFillGridEngine, AxpertFillGridEngine>();
         return services;

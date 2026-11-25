@@ -63,7 +63,6 @@ public sealed class SnapshotConsumerTests
             "event-1",
             state.TenantId,
             state.ObjectId,
-            state.Version,
             state,
             DateTimeOffset.UtcNow,
             "corr-worker");

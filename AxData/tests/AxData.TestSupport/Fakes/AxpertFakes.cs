@@ -7,11 +7,6 @@ namespace AxData.TestSupport.Fakes;
 
 public sealed class FakeStructDefProvider(params StructDefHandle[] definitions) : IStructDefProvider
 {
-    private readonly Dictionary<(string TenantId, string TransId, string Version), StructDefHandle> _definitions = definitions
-        .ToDictionary(
-            definition => (Normalize(definition.TenantId), Normalize(definition.TransId), Normalize(definition.Version)),
-            definition => definition);
-
     private readonly Dictionary<(string TenantId, string TransId), StructDefHandle> _latestDefinitions = definitions
         .GroupBy(definition => (Normalize(definition.TenantId), Normalize(definition.TransId)))
         .ToDictionary(group => group.Key, group => group.Last());
@@ -26,20 +21,6 @@ public sealed class FakeStructDefProvider(params StructDefHandle[] definitions) 
         cancellationToken.ThrowIfCancellationRequested();
         CallCount++;
         _latestDefinitions.TryGetValue((Normalize(tenantId), Normalize(transId)), out var definition);
-        return Task.FromResult(definition);
-    }
-
-    public Task<StructDefHandle?> GetVersionAsync(
-        string tenantId,
-        string transId,
-        string version,
-        CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        CallCount++;
-        _definitions.TryGetValue(
-            (Normalize(tenantId), Normalize(transId), Normalize(version)),
-            out var definition);
         return Task.FromResult(definition);
     }
 
@@ -62,6 +43,8 @@ public sealed class FakeAxpertAuthorizationProvider : IAxpertAuthorizationProvid
 
     public AxRecordKey? LastQueryKey { get; private set; }
 
+    public IReadOnlyList<AxPermissionDataContainer>? LastQueryDataContainers { get; private set; }
+
     public AxRecordKey? LastSetKey { get; private set; }
 
     public Task<AxCreatePermission> GetCreatePermissionAsync(
@@ -80,11 +63,13 @@ public sealed class FakeAxpertAuthorizationProvider : IAxpertAuthorizationProvid
         string transId,
         AxRecordKey key,
         AxUserContext user,
+        IReadOnlyList<AxPermissionDataContainer> dataContainers,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         QueryCallCount++;
         LastQueryKey = key;
+        LastQueryDataContainers = dataContainers;
         return Task.FromResult(QueryPermission);
     }
 
@@ -153,7 +138,9 @@ public sealed class FakeAxpertDataLoader : IAxpertDataLoader
     }
 }
 
-public sealed class FakeAxpertFieldEngine(StructDefHandle definition) : IAxpertFieldEngine
+public sealed class FakeAxpertFieldEngine(
+    StructDefHandle definition,
+    FakeAxpertFillGridEngine? fillGridEngine = null) : IAxpertFieldEngine
 {
     public List<FieldAddress> EvaluatedFields { get; } = [];
 
@@ -183,7 +170,8 @@ public sealed class FakeAxpertFieldEngine(StructDefHandle definition) : IAxpertF
                 "The user and state tenant do not match."));
         }
 
-        return Task.FromResult(FieldOperationStartResult.Success(new Operation(this, state)));
+        return Task.FromResult(FieldOperationStartResult.Success(
+            new Operation(this, state, definition, fillGridEngine)));
     }
 
     private Task<FieldEvaluationResult> EvaluateAsync(
@@ -247,9 +235,15 @@ public sealed class FakeAxpertFieldEngine(StructDefHandle definition) : IAxpertF
         return Task.FromResult(new FieldEvaluationResult(true, changes, []));
     }
 
-    private sealed class Operation(FakeAxpertFieldEngine owner, AxDataState state) : IAxpertFieldOperation
+    private sealed class Operation(
+        FakeAxpertFieldEngine owner,
+        AxDataState state,
+        StructDefHandle definition,
+        FakeAxpertFillGridEngine? fillGridEngine) : IAxpertFieldOperation
     {
         private readonly List<FieldChange> _changes = [];
+
+        public StructDefHandle? Definition => definition;
 
         public Task<FieldEvaluationResult> InitializeOnLoadAsync(
             CancellationToken cancellationToken)
@@ -265,7 +259,7 @@ public sealed class FakeAxpertFieldEngine(StructDefHandle definition) : IAxpertF
             object? value,
             CancellationToken cancellationToken)
         {
-            var result = await owner.EvaluateAsync(state, field, value, cancellationToken).ConfigureAwait(false);
+            var result = await owner.EvaluateAsync(state, field, value, cancellationToken);
             if (result.Succeeded)
             {
                 _changes.AddRange(result.Changes);
@@ -287,6 +281,14 @@ public sealed class FakeAxpertFieldEngine(StructDefHandle definition) : IAxpertF
             owner.CompleteCount++;
             return Task.FromResult(new FieldEvaluationResult(true, _changes.ToArray(), []));
         }
+
+        public Task<FillGridExecutionResult> ExecuteApplicableFillGridAsync(
+            AxDataState candidate,
+            IReadOnlyCollection<FieldAddress> changedParents,
+            AxUserContext user,
+            CancellationToken cancellationToken) =>
+            fillGridEngine?.ExecuteApplicableAsync(candidate, changedParents, user, cancellationToken) ??
+            Task.FromResult(new FillGridExecutionResult(true, []));
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

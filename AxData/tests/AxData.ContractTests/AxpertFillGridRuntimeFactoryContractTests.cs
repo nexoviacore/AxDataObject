@@ -15,34 +15,31 @@ public sealed class AxpertFillGridRuntimeFactoryContractTests
         new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
     [Fact]
-    public async Task Hash_mismatch_fails_before_runtime_is_created()
+    public async Task Runtime_creation_is_attempted_without_preloading_a_second_definition()
     {
         var runtime = new StubRuntimeFactory();
         var factory = new AxpertFillGridRuntimeFactory(
             runtime,
-            new StubStructDefSource("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             new AxpertFillGridQueryOptions());
 
         var result = await factory.CreateAsync(
-            new AxpertFillGridRuntimeRequest("uat2", "dtchk", "different", User),
+            new AxpertFillGridRuntimeRequest("uat2", "dtchk", User),
             CancellationToken.None);
 
         Assert.False(result.Succeeded);
-        Assert.False(runtime.WasCalled);
+        Assert.True(runtime.WasCalled);
     }
 
     [Fact]
     public async Task Failed_runtime_is_not_consumed()
     {
-        const string hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         var runtime = new StubRuntimeFactory();
         var factory = new AxpertFillGridRuntimeFactory(
             runtime,
-            new StubStructDefSource(hash),
             new AxpertFillGridQueryOptions());
 
         var result = await factory.CreateAsync(
-            new AxpertFillGridRuntimeRequest("uat2", "dtchk", hash, User),
+            new AxpertFillGridRuntimeRequest("uat2", "dtchk", User),
             CancellationToken.None);
 
         Assert.False(result.Succeeded);
@@ -101,21 +98,4 @@ public sealed class AxpertFillGridRuntimeFactoryContractTests
         }
     }
 
-    private sealed class StubStructDefSource(string hash) : IAxpertStructDefSource
-    {
-        public Task<AxpertStructDefSnapshot?> LoadCurrentAsync(
-            string tenantId,
-            string transId,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<AxpertStructDefSnapshot?>(new AxpertStructDefSnapshot(
-                tenantId,
-                transId,
-                hash,
-                [],
-                [],
-                []));
-        }
-    }
 }

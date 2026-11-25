@@ -23,14 +23,14 @@ public sealed class AxAuthorizationPolicyTests
 
     public static TheoryData<AxActorRelation, AxAuthorizationOperation, bool> RelationMatrix => new()
     {
-        { AxActorRelation.OwnerOrInitiator, AxAuthorizationOperation.Query, true },
-        { AxActorRelation.OwnerOrInitiator, AxAuthorizationOperation.Set, true },
-        { AxActorRelation.OwnerOrInitiator, AxAuthorizationOperation.Save, true },
-        { AxActorRelation.OwnerOrInitiator, AxAuthorizationOperation.Approve, false },
-        { AxActorRelation.OwnerOrInitiator, AxAuthorizationOperation.Reject, false },
-        { AxActorRelation.OwnerOrInitiator, AxAuthorizationOperation.Return, false },
-        { AxActorRelation.OwnerOrInitiator, AxAuthorizationOperation.Recall, true },
-        { AxActorRelation.OwnerOrInitiator, AxAuthorizationOperation.Print, false },
+        { AxActorRelation.Initiator, AxAuthorizationOperation.Query, true },
+        { AxActorRelation.Initiator, AxAuthorizationOperation.Set, true },
+        { AxActorRelation.Initiator, AxAuthorizationOperation.Save, true },
+        { AxActorRelation.Initiator, AxAuthorizationOperation.Approve, false },
+        { AxActorRelation.Initiator, AxAuthorizationOperation.Reject, false },
+        { AxActorRelation.Initiator, AxAuthorizationOperation.Return, false },
+        { AxActorRelation.Initiator, AxAuthorizationOperation.Recall, true },
+        { AxActorRelation.Initiator, AxAuthorizationOperation.Print, false },
 
         { AxActorRelation.CurrentApprover, AxAuthorizationOperation.Query, true },
         { AxActorRelation.CurrentApprover, AxAuthorizationOperation.Set, false },
@@ -50,15 +50,6 @@ public sealed class AxAuthorizationPolicyTests
         { AxActorRelation.Viewer, AxAuthorizationOperation.Recall, false },
         { AxActorRelation.Viewer, AxAuthorizationOperation.Print, false },
 
-        { AxActorRelation.Administrator, AxAuthorizationOperation.Query, true },
-        { AxActorRelation.Administrator, AxAuthorizationOperation.Set, true },
-        { AxActorRelation.Administrator, AxAuthorizationOperation.Save, true },
-        { AxActorRelation.Administrator, AxAuthorizationOperation.Approve, true },
-        { AxActorRelation.Administrator, AxAuthorizationOperation.Reject, true },
-        { AxActorRelation.Administrator, AxAuthorizationOperation.Return, true },
-        { AxActorRelation.Administrator, AxAuthorizationOperation.Recall, true },
-        { AxActorRelation.Administrator, AxAuthorizationOperation.Print, true },
-
         { AxActorRelation.Unrelated, AxAuthorizationOperation.Query, false },
         { AxActorRelation.Unrelated, AxAuthorizationOperation.Set, false },
         { AxActorRelation.Unrelated, AxAuthorizationOperation.Save, false },
@@ -76,15 +67,14 @@ public sealed class AxAuthorizationPolicyTests
         AxAuthorizationOperation operation,
         bool expected)
     {
-        var hasPermission = operation != AxAuthorizationOperation.Print ||
-                            relation == AxActorRelation.Administrator;
+        var hasPermission = operation != AxAuthorizationOperation.Print;
         var context = new AxAuthorizationContext(true, relation, hasPermission, isEditable: true);
 
         Assert.Equal(expected, AxAuthorizationPolicy.IsAllowed(context, operation));
     }
 
     [Theory]
-    [InlineData(AxActorRelation.OwnerOrInitiator)]
+    [InlineData(AxActorRelation.Initiator)]
     [InlineData(AxActorRelation.CurrentApprover)]
     [InlineData(AxActorRelation.Viewer)]
     public void Print_requires_an_explicit_permission(AxActorRelation relation)
@@ -101,7 +91,7 @@ public sealed class AxAuthorizationPolicyTests
     {
         var context = new AxAuthorizationContext(
             tenantMatches: true,
-            AxActorRelation.OwnerOrInitiator,
+            AxActorRelation.Initiator,
             hasOperationPermission: true,
             isEditable: false);
 
@@ -109,21 +99,24 @@ public sealed class AxAuthorizationPolicyTests
     }
 
     [Fact]
-    public void Missing_operation_permission_denies_even_an_administrator()
+    public void Former_admin_role_does_not_create_a_relation()
     {
-        var context = new AxAuthorizationContext(
-            tenantMatches: true,
-            AxActorRelation.Administrator,
-            hasOperationPermission: false,
+        var state = CreateState(initiator: "owner");
+        var context = AxAuthorizationContext.FromState(
+            CreateActor("tenant-a", "other", isAdministrator: true),
+            state,
+            hasViewerAccess: false,
+            hasOperationPermission: true,
             isEditable: true);
 
+        Assert.Equal(AxActorRelation.Unrelated, context.Relations);
         Assert.False(AxAuthorizationPolicy.IsAllowed(context, AxAuthorizationOperation.Query));
     }
 
     [Fact]
     public void Guessing_another_users_object_id_does_not_authorize_access()
     {
-        var state = CreateState(owner: "owner-a", initiator: "owner-a");
+        var state = CreateState(initiator: "owner-a");
         var actor = CreateActor("tenant-a", "user-b");
         var context = AxAuthorizationContext.FromState(
             actor,
@@ -141,7 +134,7 @@ public sealed class AxAuthorizationPolicyTests
     [InlineData(true)]
     public void Cross_tenant_access_always_denies(bool isAdministrator)
     {
-        var state = CreateState(owner: "same-user", initiator: "same-user");
+        var state = CreateState(initiator: "same-user");
         var actor = CreateActor("tenant-b", "same-user", isAdministrator);
         var context = AxAuthorizationContext.FromState(
             actor,
@@ -160,7 +153,7 @@ public sealed class AxAuthorizationPolicyTests
     [Fact]
     public void Assigned_pending_approver_gets_query_and_workflow_actions_only_by_default()
     {
-        var state = CreateState(owner: "owner", initiator: "owner");
+        var state = CreateState(initiator: "owner");
         state.Workflow = CreatePendingWorkflow("approver");
         var context = AxAuthorizationContext.FromState(
             CreateActor("tenant-a", "approver"),
@@ -182,7 +175,7 @@ public sealed class AxAuthorizationPolicyTests
     [Fact]
     public void Approver_cannot_access_a_task_assigned_to_someone_else()
     {
-        var state = CreateState(owner: "owner", initiator: "owner");
+        var state = CreateState(initiator: "owner");
         state.Workflow = CreatePendingWorkflow("assigned-approver");
         var context = AxAuthorizationContext.FromState(
             CreateActor("tenant-a", "different-approver"),
@@ -203,7 +196,7 @@ public sealed class AxAuthorizationPolicyTests
         string? currentTaskId,
         PegWorkflowStatus status)
     {
-        var state = CreateState(owner: "owner", initiator: "owner");
+        var state = CreateState(initiator: "owner");
         state.Workflow = CreatePendingWorkflow("approver");
         state.Workflow.CurrentTaskId = currentTaskId;
         state.Workflow.Status = status;
@@ -221,9 +214,9 @@ public sealed class AxAuthorizationPolicyTests
     }
 
     [Fact]
-    public void Owner_who_is_also_the_current_approver_keeps_both_relations()
+    public void Initiator_who_is_also_the_current_approver_keeps_both_relations()
     {
-        var state = CreateState(owner: "owner", initiator: "owner");
+        var state = CreateState(initiator: "owner");
         state.Workflow = CreatePendingWorkflow("owner");
 
         var context = AxAuthorizationContext.FromState(
@@ -233,7 +226,7 @@ public sealed class AxAuthorizationPolicyTests
             hasOperationPermission: true,
             isEditable: true);
 
-        Assert.True(context.Relations.HasFlag(AxActorRelation.OwnerOrInitiator));
+        Assert.True(context.Relations.HasFlag(AxActorRelation.Initiator));
         Assert.True(context.Relations.HasFlag(AxActorRelation.CurrentApprover));
         Assert.True(AxAuthorizationPolicy.IsAllowed(context, AxAuthorizationOperation.Save));
         Assert.True(AxAuthorizationPolicy.IsAllowed(context, AxAuthorizationOperation.Approve));
@@ -254,16 +247,19 @@ public sealed class AxAuthorizationPolicyTests
     }
 
     private static AxUserContext CreateActor(string tenantId, string userName, bool isAdministrator = false) =>
-        new(tenantId, userName, new HashSet<string>(StringComparer.Ordinal), isAdministrator);
+        new(
+            tenantId,
+            userName,
+            isAdministrator
+                ? new HashSet<string>(["admin"], StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.Ordinal));
 
-    private static AxDataState CreateState(string owner, string initiator) =>
+    private static AxDataState CreateState(string initiator) =>
         new(
             "object-1",
             "tenant-a",
             "sales-order",
-            owner,
             initiator,
-            "struct-v1",
             DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
 
     private static PegActiveState CreatePendingWorkflow(string approver) => new()

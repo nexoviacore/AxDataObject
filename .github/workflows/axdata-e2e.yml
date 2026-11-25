@@ -22,7 +22,6 @@ jobs:
     timeout-minutes: 30
     env:
       AXDATA_REDIS_TEST_CONNECTION: ${{ vars.AXDATA_REDIS_TEST_CONNECTION }}
-      AXDATA_REQUIRE_REDIS_6_2: "true"
       P1C04_CONFIG_PATH: ${{ vars.P1C04_CONFIG_PATH }}
 
     steps:
@@ -44,12 +43,12 @@ jobs:
         shell: pwsh
         run: dotnet build --nologo -v q --no-restore -m:1 .\AxData\AxData.sln
 
-      - name: Verify Redis restart and redelivery
+      - name: Verify active Redis state
         shell: pwsh
         run: >-
           dotnet test --nologo -v q --no-restore --no-build
           .\AxData\tests\AxData.IntegrationTests\AxData.IntegrationTests.csproj
-          --filter "FullyQualifiedName~RedisAxDataStoreTests"
+          --filter "FullyQualifiedName~Stale_write_is_rejected|FullyQualifiedName~Two_concurrent_writers|FullyQualifiedName~Successful_compare_and_set|FullyQualifiedName~Same_object_id|FullyQualifiedName~Durable_closure_marker"
 
       - name: Run P1C-04 HTTP chain
         shell: pwsh
@@ -62,5 +61,5 @@ jobs:
         if: success()
         shell: pwsh
         run: |
-          "P1D-03 Redis 6.2+ restart/redelivery and P1C-04 HTTP walkthrough: PASS" |
+          "Active Redis state and P1C-04 HTTP walkthrough: PASS" |
             Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY

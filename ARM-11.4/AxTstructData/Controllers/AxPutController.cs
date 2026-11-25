@@ -1,5 +1,6 @@
 ﻿using ARMCommon.ActionFilter;
 using ARMCommon.Model;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using ARMCommon.Interface;
@@ -36,7 +37,21 @@ namespace AxTstructData
                 return BadRequest(result);
             }
 
-            putData.IfMatch = Request.Headers.IfMatch.ToString();
+            string? tokenSessionId = User.FindFirstValue("sid") ??
+                                     User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrWhiteSpace(tokenSessionId) ||
+                !string.Equals(tokenSessionId, putData.ARMSessionId, StringComparison.Ordinal))
+            {
+                result.result.Add("status", false);
+                result.result.Add("messagetype", "Custom");
+                result.result.Add("message", "The authenticated session does not match ARMSessionId.");
+                result.result.Add("errorcode", AxPutObjectErrors.AuthenticationRequired);
+                if (!string.IsNullOrWhiteSpace(putData.ObjectId))
+                    result.result.Add("objectid", putData.ObjectId);
+                return Unauthorized(result);
+            }
+
+            putData.RequestTraceId = HttpContext.TraceIdentifier;
 
             APIResult getDataResult = await _putData.AxPut(putData);
 
@@ -65,10 +80,6 @@ namespace AxTstructData
 
                 if (getDataResult.data != null && getDataResult.data.ContainsKey("objectid"))
                     result.result.Add("objectid", getDataResult.data?["objectid"]?.ToString());
-
-                if (getDataResult.data != null && getDataResult.data.TryGetValue("version", out var failureVersion)
-                    && failureVersion != null)
-                    result.result.Add("version", failureVersion);
 
                 if (getDataResult.data != null && getDataResult.data.TryGetValue("dataObjectRetained", out var failureRetained)
                     && failureRetained != null)
@@ -110,10 +121,6 @@ namespace AxTstructData
 
                 if (getDataResult.data != null && getDataResult.data.ContainsKey("objectid"))
                     result.result.Add("objectid", getDataResult.data?["objectid"]?.ToString());
-
-                if (getDataResult.data != null && getDataResult.data.TryGetValue("version", out var dataFailureVersion)
-                    && dataFailureVersion != null)
-                    result.result.Add("version", dataFailureVersion);
 
                 if (getDataResult.data != null && getDataResult.data.TryGetValue("dataObjectRetained", out var dataFailureRetained)
                     && dataFailureRetained != null)

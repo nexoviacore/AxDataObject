@@ -434,7 +434,7 @@ try {
     foreach ($fullValidationContract in @(
         'if (!fld.Cvalexp.IsNullOrEmpty())',
         'if (fld.NoDuplicate)',
-        'if (!fld.Empty)',
+        'if (!fld.Empty && !deferRequiredValidation)',
         '&& !_validateHelper.CheckWidth(fld, fieldValue)',
         'await ValidateCurrentFieldAsync(',
         'bool prepareCurrentData'
@@ -459,7 +459,7 @@ try {
     Assert-Contains $axGet 'LoadDataCore(getData, accessResult, validate, refreshFieldsOnLoad: true)' 'Existing AxGet no longer enables its compatibility on-load refresh.'
     Assert-Contains $axGet 'LoadDataCore(getData, accessResult, validate, refreshFieldsOnLoad: false)' 'Trusted AxData baseline load entry point is missing.'
     Assert-Contains $axGet 'if (refreshFieldsOnLoad)' 'AxGet baseline load no longer gates its compatibility on-load refresh.'
-    Add-Observation 'arm-dep-03-compatibility' 'existing AxGet retains its refresh; trusted AxData baseline load skips it so Init owns exactly one New/Existing field-processing pass'
+    Add-Observation 'arm-dep-03-compatibility' 'existing AxGet retains its refresh; trusted AxData baseline load skips it so Init owns exactly one New/Existing field-processing pass; New Init defers required-value validation until edit/save'
 
     foreach ($integrationContract in @(
         'private async Task<OperationResult> ValidateForPersistence(',

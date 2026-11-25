@@ -9,13 +9,17 @@ Compare the SHA-256 fingerprints below with `Get-FileHash`. When they match, reu
 source. When one changes, inspect only that file's diff and affected symbols, update the trace if behavior changed, and
 refresh all fingerprints after verification.
 
-Fingerprints were refreshed after P2-04 implementation and verification on 2026-11-06.
+Fingerprints were refreshed after AXD-STATE-03F compact field-metadata verification on 2026-11-18.
 
 ## Authoritative sequence
 
 1. Validate the ARM session, restore trusted tenant/user/roles/Axpert session, and resolve the ObjectId request contract.
-2. Load tenant-scoped shared state when ObjectId was supplied; check actor relation, expected version, current StructDef
-   hash, and current transaction/DC/field permission.
+2. For an existing ObjectId, atomically establish the persistent `Saving` claim while the shared Set lock is absent,
+   then load tenant-scoped current positional state, validate compact `[name,flags]` metadata against current StructDef,
+   decode only source-key `value~sourceId` entries,
+   derive changed fields from aligned `values`/`oldValues`, and check actor relation plus current transaction/DC/field permission
+   against a freshly loaded StructDef. Business-key locators are not stored; an edit derives the trusted legacy
+   `recordid` key pair from the snapshot's positive `RecordId`. Generated ObjectIds initialize new state without a prior claim.
 3. Load one fresh StructDef/Validate/Parser runtime, hydrate stored values, apply an optional overlay, run targeted
    dependency work, and perform mandatory final-current-value validation. Failed computation is never consumed.
 4. Preallocate required record IDs, then build create/edit main and DC commands. Main/grid/child identities are registered
@@ -30,8 +34,9 @@ Fingerprints were refreshed after P2-04 implementation and verification on 2026-
    the final commit and rolls back the shared database transaction.
 9. Commit once after all batches succeed, or roll back for ValidateOnly/failure. Axpert logging remains post-result and
    best-effort; connection close rolls back any dangling transaction.
-10. ObjectId metadata augments, but does not replace, the existing AxPut response structure. Known versions are numeric;
-    unknown versions are omitted and never serialized as null.
+10. ObjectId metadata augments, but does not replace, the existing AxPut response structure. Responses omit `version`
+    and `currentVersion`. A retained successful Save returns the DataObject to `Active`; a non-retained Save durably
+    closes and removes active state. Overlap returns `409 / AXD-CONC-002`; sequential requests are last-completed-wins.
 
 ## Deliberately excluded
 
@@ -39,15 +44,16 @@ Fingerprints were refreshed after P2-04 implementation and verification on 2026-
 - No restoration or comparison of the retired AxDataObject project.
 - No claim that filesystem attachments, independently executed attachment SQL, record-ID sequences, or cross-database
   mappings are atomic with the business transaction.
-- No version claim/finalization, retention/destruction, idempotency, outbox, or recovery behavior before their owning
-  slices.
+- No AxData-owned Save claim/finalization, client object version, idempotency, outbox, or recovery behavior.
+- No automatic retry of timed-out AxPut requests; the business transaction outcome may be unknown.
+- No persisted Init/AxGet business-key locator; ObjectId-aware edits use the server-derived `recordid` pair.
 - No parser, validation, StructDef, ARMCommon, or provider-helper behavior change without a separately approved plan.
 
 ## Source fingerprints
 
 | File | SHA-256 |
 | --- | --- |
-| `ARM-11.4/AxTstructData/Service/AxPutService.cs` | `051E25994B0BA99E139304A0772482C4A49B11BE6393E083BB39F50FBE01DA62` |
-| `ARM-11.4/AxTstructData/Repositories/AxPutRepository.cs` | `08089CD9ABA01F7A1A21845CDB9ABBD4F65B241493B9E6E9D7EEF3F9EF708A54` |
-| `ARM-11.4/AxTstructData/Controllers/AxPutController.cs` | `0A239E42DD7AB078D463BF9F53E8952B7923AAA000CD27241AC0C46F6D863816` |
-| `ARM-11.4/AxTstructData/Service/AxPutDataObjectProjection.cs` | `2313D55291D7DCAE883DCB4346984DE5F6287EFB209EF4DD8328242D75A54051` |
+| `ARM-11.4/AxTstructData/Service/AxPutService.cs` | `7E4484D355D85A2F439001E943E293F5B725C622A2866B2038E8E71308D51062` |
+| `ARM-11.4/AxTstructData/Repositories/AxPutRepository.cs` | `600041FD91D7E5F443594DCD9C9675472AF7300D6C669F2A2B7BC98C704EECE5` |
+| `ARM-11.4/AxTstructData/Controllers/AxPutController.cs` | `7529429F0DC66A0285C96C8D890FACA930323B229B6317DAAF11E1E860660D52` |
+| `ARM-11.4/AxTstructData/Service/AxPutDataObjectProjection.cs` | `926F157B324C27FD6A373C4BC748926A5B2863B3B2ED4B8267045EF398EB0DC2` |

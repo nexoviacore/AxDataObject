@@ -70,8 +70,7 @@ internal sealed class AxpertFillGridQueryExecutor : IAxpertFillGridQueryExecutor
         try
         {
             var timeout = await _dbHelper.ExecuteNonQueryAsync(
-                $"SET statement_timeout = {_options.StatementTimeoutMilliseconds.ToString(CultureInfo.InvariantCulture)}")
-                .ConfigureAwait(false);
+                $"SET statement_timeout = {_options.StatementTimeoutMilliseconds.ToString(CultureInfo.InvariantCulture)}");
             cancellationToken.ThrowIfCancellationRequested();
             if (!string.IsNullOrWhiteSpace(timeout.error))
             {
@@ -89,7 +88,7 @@ internal sealed class AxpertFillGridQueryExecutor : IAxpertFillGridQueryExecutor
                 cappedSql,
                 prepared.Value.ParameterNames.Select(name => $"@{name}").ToArray(),
                 values.Select(GetDbType).ToArray(),
-                values.Select(value => value ?? DBNull.Value).ToArray()).ConfigureAwait(false);
+                values.Select(value => value ?? DBNull.Value).ToArray());
             cancellationToken.ThrowIfCancellationRequested();
             if (!string.IsNullOrWhiteSpace(result.error))
             {

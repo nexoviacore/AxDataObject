@@ -54,7 +54,7 @@ public sealed class AxpertRuntimeContextFactory(
         {
             var common = CreateCommon(tenantId);
             common._appName = tenantId;
-            var session = await common.GetSessionData(options.SessionId).ConfigureAwait(false);
+            var session = await common.GetSessionData(options.SessionId);
             cancellationToken.ThrowIfCancellationRequested();
             if (session.Count == 0 ||
                 !TryGet(session, SESSION_DATA.USERNAME.ToString(), out var sessionUser) ||
@@ -63,16 +63,16 @@ public sealed class AxpertRuntimeContextFactory(
                 return Failure("The configured Axpert review session is missing or belongs to another user.");
             }
 
-            await common._dbHelper.OpenDBConnectionAsync().ConfigureAwait(false);
+            await common._dbHelper.OpenDBConnectionAsync();
             var readOnlyResult = await common._dbHelper.ExecuteNonQueryAsync(
-                "SET default_transaction_read_only = on").ConfigureAwait(false);
+                "SET default_transaction_read_only = on");
             if (!string.IsNullOrWhiteSpace(readOnlyResult.error))
             {
                 return Failure("The Axpert review database session could not be made read-only.");
             }
 
             var schemaResult = await common._dbHelper.ExecuteNonQueryAsync(
-                $"SET search_path TO \"{tenantId}\"").ConfigureAwait(false);
+                $"SET search_path TO \"{tenantId}\"");
             if (!string.IsNullOrWhiteSpace(schemaResult.error))
             {
                 return Failure("The Axpert review tenant schema could not be selected.");

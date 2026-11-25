@@ -12,18 +12,18 @@ public sealed class AxDataSnapshotStore : IAxDataSnapshotRepository
 {
     private static readonly string[] ParameterNames =
     [
-        "TenantId", "ObjectId", "TransId", "KeyField", "KeyValue", "RecordId",
-        "DataObjectJson", "ObjectVersion", "StructDefVersion", "OwnerUserName",
-        "InitiatorUserName", "PersistDateTimeUtc", "LastAccessedDateTimeUtc",
+        "TenantId", "ObjectId", "TransId", "RecordId",
+        "DataObjectJson", "InitiatorUserName",
+        "PersistDateTimeUtc", "LastAccessedDateTimeUtc",
         "LifecycleStatus", "ApprovalStatus", "PendingWith", "PendingFromDateTimeUtc",
         "CurrentTaskId", "AxOpen"
     ];
 
     private static readonly DbType[] ParameterTypes =
     [
-        DbType.String, DbType.String, DbType.String, DbType.String, DbType.String,
-        DbType.Int64, DbType.Object, DbType.Int64, DbType.String, DbType.String,
-        DbType.String, DbType.DateTime, DbType.DateTime, DbType.String, DbType.String,
+        DbType.String, DbType.String, DbType.String, DbType.Int64,
+        DbType.Object, DbType.String,
+        DbType.DateTime, DbType.DateTime, DbType.String, DbType.String,
         DbType.Object, DbType.DateTime, DbType.String, DbType.Int32
     ];
 
@@ -38,6 +38,8 @@ public sealed class AxDataSnapshotStore : IAxDataSnapshotRepository
         _serializer = serializer;
     }
 
+    /// <summary>Upserts serialized snapshot data using provider-specific monotonic timestamp rules.</summary>
+    /// <returns>Whether the payload was stored or ignored as stale.</returns>
     public async Task<AxDataSnapshotUpsertStatus> UpsertAsync(
         AxDataSnapshotWrite write,
         CancellationToken cancellationToken)
@@ -63,13 +65,8 @@ public sealed class AxDataSnapshotStore : IAxDataSnapshotRepository
             state.TenantId,
             state.ObjectId,
             state.TransId,
-            DbValue(state.KeyField),
-            DbValue(state.KeyValue),
             DbValue(state.RecordId),
             payload,
-            state.Version,
-            state.StructDefVersion,
-            state.OwnerUserName,
             state.InitiatorUserName,
             DatabaseTimestamp(write.PersistedAtUtc, isPostgres),
             DatabaseTimestamp(state.LastAccessedAtUtc, isPostgres),
@@ -86,8 +83,7 @@ public sealed class AxDataSnapshotStore : IAxDataSnapshotRepository
                 ParameterNames,
                 parameterTypes,
                 parameterValues)
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
+            .WaitAsync(cancellationToken);
 
         if (!string.IsNullOrWhiteSpace(result.error))
         {
@@ -99,6 +95,7 @@ public sealed class AxDataSnapshotStore : IAxDataSnapshotRepository
             : AxDataSnapshotUpsertStatus.Ignored;
     }
 
+    /// <summary>Serializes and idempotently persists a snapshot envelope.</summary>
     public async Task<SnapshotPersistStatus> UpsertAsync(
         SnapshotEnvelope envelope,
         CancellationToken cancellationToken)
@@ -108,7 +105,7 @@ public sealed class AxDataSnapshotStore : IAxDataSnapshotRepository
         {
             var status = await UpsertAsync(
                 new AxDataSnapshotWrite(envelope.EventId, envelope.Snapshot, envelope.PersistedAtUtc),
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken);
             return status == AxDataSnapshotUpsertStatus.Stored
                 ? SnapshotPersistStatus.Stored
                 : SnapshotPersistStatus.Ignored;
@@ -123,6 +120,7 @@ public sealed class AxDataSnapshotStore : IAxDataSnapshotRepository
         }
     }
 
+    /// <summary>Loads and validates the latest durable snapshot for a tenant-scoped object.</summary>
     public async Task<SnapshotReadResult> LoadLatestAsync(
         string tenantId,
         string objectId,
@@ -139,8 +137,7 @@ public sealed class AxDataSnapshotStore : IAxDataSnapshotRepository
                     ["TenantId", "ObjectId"],
                     [DbType.String, DbType.String],
                     [tenantId, objectId])
-                .WaitAsync(cancellationToken)
-                .ConfigureAwait(false);
+                .WaitAsync(cancellationToken);
             if (!string.IsNullOrWhiteSpace(result.error))
             {
                 return new SnapshotReadResult(SnapshotReadStatus.Unavailable);
@@ -166,8 +163,6 @@ public sealed class AxDataSnapshotStore : IAxDataSnapshotRepository
             var state = _serializer.Deserialize(Encoding.UTF8.GetBytes(payload));
             var metadataMatches = string.Equals(Convert.ToString(row["TenantId"]), state.TenantId, StringComparison.OrdinalIgnoreCase) &&
                                   string.Equals(Convert.ToString(row["ObjectId"]), state.ObjectId, StringComparison.OrdinalIgnoreCase) &&
-                                  Convert.ToInt64(row["ObjectVersion"], System.Globalization.CultureInfo.InvariantCulture) == state.Version &&
-                                  string.Equals(Convert.ToString(row["StructDefVersion"]), state.StructDefVersion, StringComparison.Ordinal) &&
                                   string.Equals(Convert.ToString(row["LifecycleStatus"]), state.Status.ToString(), StringComparison.Ordinal);
             return metadataMatches
                 ? SnapshotReadResult.Found(state)
@@ -201,9 +196,9 @@ public sealed class AxDataSnapshotStore : IAxDataSnapshotRepository
     private static DbType[] PostgresParameterTypes()
     {
         var types = (DbType[])ParameterTypes.Clone();
+        types[6] = DbType.String;
+        types[7] = DbType.String;
         types[11] = DbType.String;
-        types[12] = DbType.String;
-        types[16] = DbType.String;
         return types;
     }
 

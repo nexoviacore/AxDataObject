@@ -34,7 +34,7 @@ internal static partial class AxpertFillGridSqlSource
             $"FROM \"{schema}\".tstructs WHERE LOWER(name) = @name ORDER BY blobno",
             ["@name"],
             [DbType.String],
-            [transId.ToLowerInvariant()]).ConfigureAwait(false);
+            [transId.ToLowerInvariant()]);
         cancellationToken.ThrowIfCancellationRequested();
         if (!string.IsNullOrWhiteSpace(result.error) || result.data.Rows.Count == 0)
         {
@@ -53,7 +53,7 @@ internal static partial class AxpertFillGridSqlSource
             chunks.Add(bytes);
         }
 
-        return await ParseAsync(chunks, cancellationToken).ConfigureAwait(false);
+        return await ParseAsync(chunks, cancellationToken);
     }
 
     internal static async Task<AxpertOperationResult<IReadOnlyDictionary<string, string>>> ParseAsync(
@@ -65,12 +65,12 @@ internal static partial class AxpertFillGridSqlSource
             await using var compressed = new MemoryStream();
             foreach (var chunk in chunks)
             {
-                await compressed.WriteAsync(chunk, cancellationToken).ConfigureAwait(false);
+                await compressed.WriteAsync(chunk, cancellationToken);
             }
 
             compressed.Position = 0;
             var sizeBytes = new byte[sizeof(uint)];
-            if (await compressed.ReadAsync(sizeBytes, cancellationToken).ConfigureAwait(false) != sizeBytes.Length)
+            if (await compressed.ReadAsync(sizeBytes, cancellationToken) != sizeBytes.Length)
             {
                 return Failure("The FillGrid StructDef XML has an invalid compression header.");
             }
@@ -84,7 +84,7 @@ internal static partial class AxpertFillGridSqlSource
             await using var decompressed = new MemoryStream((int)expectedLength);
             await using (var zlib = new ZLibStream(compressed, CompressionMode.Decompress, leaveOpen: true))
             {
-                await zlib.CopyToAsync(decompressed, cancellationToken).ConfigureAwait(false);
+                await zlib.CopyToAsync(decompressed, cancellationToken);
             }
 
             if (decompressed.Length != expectedLength)

@@ -8,6 +8,7 @@ public sealed class AxpertFillGridEngine(IAxpertFillGridRuntimeFactory runtimeFa
 {
     private static readonly SemaphoreSlim LegacyRuntimeGate = new(1, 1);
 
+    /// <summary>Loads the transaction definition and executes FillGrid rules affected by changed parents.</summary>
     public async Task<FillGridExecutionResult> ExecuteApplicableAsync(
         AxDataState state,
         IReadOnlyCollection<FieldAddress> changedParents,
@@ -23,50 +24,25 @@ public sealed class AxpertFillGridEngine(IAxpertFillGridRuntimeFactory runtimeFa
             return Failure("The FillGrid runtime tenant does not match the trusted user tenant.");
         }
 
-        await LegacyRuntimeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await LegacyRuntimeGate.WaitAsync(cancellationToken);
         try
         {
             var runtimeResult = await runtimeFactory.CreateAsync(
                 new AxpertFillGridRuntimeRequest(
                     state.TenantId,
                     state.TransId,
-                    state.StructDefVersion,
                     user),
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken);
             if (!runtimeResult.Succeeded || runtimeResult.Value is null)
             {
                 return Failure(runtimeResult.Error ?? "The Axpert FillGrid runtime could not be created.");
             }
 
-            var applicable = runtimeResult.Value.Queries
-                .Where(query => IsApplicable(query, state, changedParents))
-                .ToArray();
-            if (applicable.Length == 0)
-            {
-                return new FillGridExecutionResult(true, []);
-            }
-
-            if (applicable
-                .GroupBy(query => query.TargetContainer, StringComparer.OrdinalIgnoreCase)
-                .Any(group => group.Count() > 1))
-            {
-                return Failure("More than one applicable Axpert FillGrid definition targets the same data container.");
-            }
-
-            var operations = new List<FillGridResult>(applicable.Length);
-            foreach (var query in applicable)
-            {
-                var operation = await ExecuteAsync(runtimeResult.Value, query, state, cancellationToken)
-                    .ConfigureAwait(false);
-                if (!operation.Succeeded)
-                {
-                    return Failure(operation.Error ?? "The Axpert FillGrid query failed.");
-                }
-
-                operations.Add(operation);
-            }
-
-            return new FillGridExecutionResult(true, operations);
+            return await ExecuteLoadedAsync(
+                runtimeResult.Value,
+                state,
+                changedParents,
+                cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -80,6 +56,43 @@ public sealed class AxpertFillGridEngine(IAxpertFillGridRuntimeFactory runtimeFa
         {
             LegacyRuntimeGate.Release();
         }
+    }
+
+    /// <summary>Executes applicable rules from an already loaded definition and aggregates their results.</summary>
+    internal static async Task<FillGridExecutionResult> ExecuteLoadedAsync(
+        AxpertFillGridRuntime runtime,
+        AxDataState state,
+        IReadOnlyCollection<FieldAddress> changedParents,
+        CancellationToken cancellationToken)
+    {
+        var applicable = runtime.Queries
+            .Where(query => IsApplicable(query, state, changedParents))
+            .ToArray();
+        if (applicable.Length == 0)
+        {
+            return new FillGridExecutionResult(true, []);
+        }
+
+        if (applicable
+            .GroupBy(query => query.TargetContainer, StringComparer.OrdinalIgnoreCase)
+            .Any(group => group.Count() > 1))
+        {
+            return Failure("More than one applicable Axpert FillGrid definition targets the same data container.");
+        }
+
+        var operations = new List<FillGridResult>(applicable.Length);
+        foreach (var query in applicable)
+        {
+            var operation = await ExecuteAsync(runtime, query, state, cancellationToken);
+            if (!operation.Succeeded)
+            {
+                return Failure(operation.Error ?? "The Axpert FillGrid query failed.");
+            }
+
+            operations.Add(operation);
+        }
+
+        return new FillGridExecutionResult(true, operations);
     }
 
     private static bool IsApplicable(
@@ -121,8 +134,7 @@ public sealed class AxpertFillGridEngine(IAxpertFillGridRuntimeFactory runtimeFa
             return Failure(query.TargetContainer, mode, "The Axpert FillGrid definition is incomplete.");
         }
 
-        var execution = await runtime.Executor.ExecuteAsync(query, parameters, cancellationToken)
-            .ConfigureAwait(false);
+        var execution = await runtime.Executor.ExecuteAsync(query, parameters, cancellationToken);
         if (!execution.Succeeded || execution.Value is null)
         {
             return Failure(query.TargetContainer, mode, execution.Error ?? "The Axpert FillGrid query failed.");
@@ -148,6 +160,7 @@ public sealed class AxpertFillGridEngine(IAxpertFillGridRuntimeFactory runtimeFa
         return new FillGridResult(true, query.TargetContainer, mode, rows);
     }
 
+    /// <summary>Binds FillGrid parameters from state and fails without executing when a required value is unavailable.</summary>
     private static bool TryBindParameters(
         AxpertFillGridQuery query,
         AxDataState state,

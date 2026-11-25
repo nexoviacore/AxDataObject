@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using AxData.Application.Authorization;
 using AxData.Application.Ports;
 using AxData.Application.Ports.Axpert;
 using AxData.Domain.Errors;
@@ -11,11 +10,9 @@ public sealed record InitializeAxDataCommand(string TransId, AxRecordKey? Key);
 
 public sealed record InitializeAxDataResponse(
     string ObjectId,
-    long Version,
     string TransId,
     long? RecordId,
-    bool ReadOnly,
-    DateTimeOffset ExpiresAt);
+    bool ReadOnly);
 
 public sealed record InitializeAxDataResult(
     InitializeAxDataResponse? Response,
@@ -30,23 +27,92 @@ public sealed record InitializeAxDataResult(
 
 public sealed record InitializeAxDataOptions
 {
-    public TimeSpan InactivityTtl { get; init; } = TimeSpan.FromMinutes(30);
-
     public int ObjectIdCollisionRetries { get; init; } = 3;
+}
+
+public sealed class PortBasedAxpertInitializer(
+    IStructDefProvider structDefProvider,
+    IAxpertDataLoader dataLoader,
+    IAxpertFieldEngine fieldEngine) : IAxpertInitializer
+{
+    /// <summary>Loads the transaction definition and state, runs load-time Axpert rules, and accepts the resulting baseline.</summary>
+    /// <returns>Initialized data on success; otherwise a categorized dependency, transaction, or validation failure.</returns>
+    public async Task<AxpertInitializationResult> InitializeAsync(
+        string tenantId,
+        string transId,
+        AxRecordKey key,
+        AxUserContext user,
+        CancellationToken cancellationToken)
+    {
+        var definition = await structDefProvider.GetAsync(
+            tenantId,
+            transId,
+            cancellationToken);
+        if (definition is null)
+        {
+            return AxpertInitializationResult.Failure(
+                AxpertInitializationFailureKind.UnknownTransaction);
+        }
+
+        var loaded = await dataLoader.LoadAsync(definition, key, user, cancellationToken);
+        if (!loaded.Succeeded || loaded.State is null)
+        {
+            return AxpertInitializationResult.Failure(
+                AxpertInitializationFailureKind.DependencyUnavailable,
+                loaded.Error);
+        }
+
+        var fieldOperation = await fieldEngine.CreateOperationAsync(
+            loaded.State,
+            user,
+            cancellationToken);
+        if (!fieldOperation.Succeeded || fieldOperation.Operation is null)
+        {
+            return AxpertInitializationResult.Failure(
+                AxpertInitializationFailureKind.DependencyUnavailable,
+                fieldOperation.Error);
+        }
+
+        await using (fieldOperation.Operation)
+        {
+            var initialized = await fieldOperation.Operation.InitializeOnLoadAsync(cancellationToken);
+            if (!initialized.Succeeded)
+            {
+                return AxpertInitializationResult.Failure(
+                    AxpertInitializationFailureKind.ValidationFailed,
+                    initialized.Errors.FirstOrDefault()?.Message);
+            }
+
+            AcceptBaseline(loaded.State);
+            return AxpertInitializationResult.Success(AxpertInitializedData.FromState(loaded.State));
+        }
+    }
+
+    /// <summary>Marks every initialized field as the unchanged baseline for subsequent mutation tracking.</summary>
+    private static void AcceptBaseline(AxDataState state)
+    {
+        foreach (var field in state.DataContainers.Values
+                     .SelectMany(container => container.Rows)
+                     .SelectMany(row => row.Fields.Values))
+        {
+            field.AcceptChanges();
+        }
+    }
 }
 
 public sealed class InitializeAxDataHandler(
     IUserContext userContext,
     IAxpertAuthorizationProvider authorizationProvider,
-    IStructDefProvider structDefProvider,
-    IAxpertDataLoader dataLoader,
-    IAxpertFieldEngine fieldEngine,
+    IAxpertInitializer initializer,
     IAxDataStore store,
     IObjectIdGenerator objectIdGenerator,
     IClock clock,
     InitializeAxDataOptions options,
     IOperationalEventSink? operationalLog = null)
 {
+    /// <summary>Authorizes and initializes a transaction, assigns an opaque object ID, and stores it tenant-scoped.</summary>
+    /// <returns>A reference to the initialized object, or a safe application error.</returns>
+    /// <remarks>Authorization precedes initialization and storage. Object-ID collisions are retried with newly generated IDs.</remarks>
     public async Task<InitializeAxDataResult> HandleAsync(
         InitializeAxDataCommand command,
         CancellationToken cancellationToken)
@@ -57,19 +123,14 @@ public sealed class InitializeAxDataHandler(
             return InitializeAxDataResult.Failure(AxDataErrors.InvalidRequest);
         }
 
-        var user = await userContext.GetCurrentAsync(cancellationToken).ConfigureAwait(false);
+        var user = await userContext.GetCurrentAsync(cancellationToken);
         var authorizationStarted = Stopwatch.GetTimestamp();
         var permission = await authorizationProvider.GetCreatePermissionAsync(
             user.TenantId,
             command.TransId,
             user,
-            cancellationToken).ConfigureAwait(false);
-        var authorization = new AxAuthorizationContext(
-            tenantMatches: true,
-            AxActorRelation.Unrelated,
-            permission.IsAllowed,
-            isEditable: !permission.IsReadOnly);
-        var isAuthorized = AxAuthorizationPolicy.IsAllowed(authorization, AxAuthorizationOperation.Initialize);
+            cancellationToken);
+        var isAuthorized = permission.IsAllowed;
         Log.Write(new OperationalEvent(
             "authorization.completed", "initialize", isAuthorized ? "allowed" : "denied",
             isAuthorized ? OperationalLogLevel.Information : OperationalLogLevel.Warning,
@@ -81,79 +142,61 @@ public sealed class InitializeAxDataHandler(
             return InitializeAxDataResult.Failure(AxDataErrors.AccessDenied);
         }
 
-        var definition = await structDefProvider.GetAsync(
+        var key = command.Key ?? new AxRecordKey(null, null, null);
+        var initialized = await initializer.InitializeAsync(
             user.TenantId,
             command.TransId,
-            cancellationToken).ConfigureAwait(false);
-        if (definition is null)
+            key,
+            user,
+            cancellationToken);
+        if (!initialized.Succeeded || initialized.Data is null)
         {
-            return InitializeAxDataResult.Failure(AxDataErrors.InvalidRequest);
-        }
-
-        var key = command.Key ?? new AxRecordKey(null, null, null);
-        var loaded = await dataLoader.LoadAsync(definition, key, user, cancellationToken).ConfigureAwait(false);
-        if (!loaded.Succeeded || loaded.State is null)
-        {
-            return InitializeAxDataResult.Failure(AxDataErrors.DependencyUnavailable);
+            return InitializeAxDataResult.Failure(initialized.FailureKind switch
+            {
+                AxpertInitializationFailureKind.UnknownTransaction => AxDataErrors.InvalidRequest,
+                AxpertInitializationFailureKind.ValidationFailed => AxDataErrors.ValidationFailed,
+                _ => AxDataErrors.DependencyUnavailable
+            });
         }
 
         ValidateOptions();
         var now = clock.UtcNow;
         var state = CreateState(
-            loaded.State,
-            definition,
+            initialized.Data,
             user,
             objectIdGenerator.NewObjectId(),
             now);
-        var fieldOperation = await fieldEngine.CreateOperationAsync(
-            state,
-            user,
-            cancellationToken).ConfigureAwait(false);
-        if (!fieldOperation.Succeeded || fieldOperation.Operation is null)
-        {
-            return InitializeAxDataResult.Failure(AxDataErrors.DependencyUnavailable);
-        }
+        Log.Write(new OperationalEvent(
+            "structdef.binding.bypassed", "initialize", "current-definition",
+            Detail: OperationalLogDetail.Diagnostic,
+            CorrelationId: Activity.Current?.TraceId.ToString(),
+            TenantId: user.TenantId, TransId: state.TransId, ObjectId: state.ObjectId));
 
-        await using (fieldOperation.Operation)
-        {
-            var initialized = await fieldOperation.Operation.InitializeOnLoadAsync(
-                cancellationToken).ConfigureAwait(false);
-            if (!initialized.Succeeded)
-            {
-                return InitializeAxDataResult.Failure(AxDataErrors.ValidationFailed);
-            }
-        }
-
-        state.ExpiresAtUtc = now.Add(options.InactivityTtl);
         for (var attempt = 0; attempt < options.ObjectIdCollisionRetries; attempt++)
         {
-            var write = await store.WriteAsync(state, expectedVersion: null, cancellationToken).ConfigureAwait(false);
+            var write = await store.WriteAsync(state, lockToken: null, cancellationToken);
             Log.Write(new OperationalEvent(
-                "redis.cas.completed", "initialize", write.Status == AxDataStoreWriteStatus.Stored ? "stored" : "conflict",
+                "redis.create.completed", "initialize", write.Status == AxDataStoreWriteStatus.Stored ? "stored" : "conflict",
                 write.Status == AxDataStoreWriteStatus.Stored ? OperationalLogLevel.Information : OperationalLogLevel.Warning,
                 TenantId: user.TenantId, TransId: state.TransId, ObjectId: state.ObjectId,
-                Version: state.Version, CurrentVersion: write.CurrentVersion, Attempt: attempt + 1));
+                Attempt: attempt + 1));
             if (write.Status == AxDataStoreWriteStatus.Stored)
             {
                 return InitializeAxDataResult.Success(new InitializeAxDataResponse(
                     state.ObjectId,
-                    state.Version,
                     state.TransId,
                     state.RecordId,
-                    permission.IsReadOnly,
-                    state.ExpiresAtUtc.Value));
+                    permission.IsReadOnly));
             }
 
             if (attempt + 1 < options.ObjectIdCollisionRetries)
             {
                 now = clock.UtcNow;
                 state = CreateState(
-                    state,
-                    definition,
+                    initialized.Data,
                     user,
                     objectIdGenerator.NewObjectId(),
                     now);
-                state.ExpiresAtUtc = now.Add(options.InactivityTtl);
             }
         }
 
@@ -169,15 +212,14 @@ public sealed class InitializeAxDataHandler(
 
     private void ValidateOptions()
     {
-        if (options.InactivityTtl <= TimeSpan.Zero || options.ObjectIdCollisionRetries <= 0)
+        if (options.ObjectIdCollisionRetries <= 0)
         {
-            throw new InvalidOperationException("Initialize options must contain a positive TTL and retry count.");
+            throw new InvalidOperationException("Initialize options must contain a positive retry count.");
         }
     }
 
     private static AxDataState CreateState(
-        AxDataState loaded,
-        StructDefHandle definition,
+        AxpertInitializedData initialized,
         AxUserContext user,
         string objectId,
         DateTimeOffset now)
@@ -185,24 +227,20 @@ public sealed class InitializeAxDataHandler(
         var state = new AxDataState(
             objectId,
             user.TenantId,
-            definition.TransId,
+            initialized.TransId,
             user.UserName,
-            user.UserName,
-            definition.Version,
             now)
         {
-            KeyField = loaded.KeyField,
-            KeyValue = loaded.KeyValue,
-            RecordId = loaded.RecordId,
-            AxOpen = loaded.AxOpen
+            RecordId = initialized.RecordId,
+            AxOpen = initialized.AxOpen
         };
 
-        foreach (var container in loaded.DataContainers.Values)
+        foreach (var container in initialized.DataContainers)
         {
             state.DataContainers.Add(container.Name, container);
         }
 
-        state.Files.AddRange(loaded.Files);
+        state.Files.AddRange(initialized.Files);
         return state;
     }
 }

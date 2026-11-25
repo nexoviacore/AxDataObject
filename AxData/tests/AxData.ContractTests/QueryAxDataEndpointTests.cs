@@ -25,9 +25,8 @@ public sealed class QueryAxDataEndpointTests
             allowedOperations: FakeAxpertAuthorizationProvider.Set("query"));
         using var select = JsonDocument.Parse("\"*\"");
 
-        var result = await CreateController(context).QueryAsync(
-            "object-1",
-            new QueryAxDataRequest(select.RootElement.Clone()),
+        var result = await CreateController(context).GetAsync(
+            new GetAxDataRequest("object-1", select.RootElement.Clone()),
             handler,
             CancellationToken.None);
 
@@ -48,7 +47,7 @@ public sealed class QueryAxDataEndpointTests
         authorization.QueryPermission = AxData.Application.Ports.Axpert.AxQueryPermission.Denied;
 
         var result = await CreateController(context).GetAsync(
-            "object-1",
+            new GetAxDataRequest("object-1", default),
             handler,
             CancellationToken.None);
 
@@ -61,19 +60,16 @@ public sealed class QueryAxDataEndpointTests
     }
 
     [Fact]
-    public async Task StructDef_hash_mismatch_returns_safe_409_envelope()
+    public async Task Get_does_not_require_current_StructDef()
     {
         var context = CreateHttpContext("corr-definition");
-        var mismatch = SampleStructDefFixture.Definition with { Version = "changed" };
-        var (handler, _) = await CreateHandlerAsync("owner", mismatch);
+        var (handler, _) = await CreateHandlerAsync("owner");
 
         var result = await CreateController(context).GetAsync(
-            "object-1", handler, CancellationToken.None);
+            new GetAxDataRequest("object-1", default), handler, CancellationToken.None);
 
-        var error = Assert.IsType<ObjectResult>(result);
-        using var response = ToJsonDocument(error);
-        Assert.Equal(StatusCodes.Status409Conflict, error.StatusCode);
-        Assert.Equal("AXD-CONC-003", response.RootElement.GetProperty("code").GetString());
+        using var response = ToJsonDocument(Assert.IsType<OkObjectResult>(result));
+        Assert.Equal("success", response.RootElement.GetProperty("status").GetString());
         Assert.Equal("corr-definition", response.RootElement.GetProperty("correlationId").GetString());
     }
 
@@ -83,9 +79,9 @@ public sealed class QueryAxDataEndpointTests
         using var document = JsonDocument.Parse("""
             [{"dcId":"dc1","fields":["customer"]},{"dcId":"dc2","fields":["*"]}]
             """);
-        var request = new QueryAxDataRequest(document.RootElement.Clone());
+        var request = new GetAxDataRequest("object-1", document.RootElement.Clone());
 
-        var mapped = request.TryToCommand("object-1", out var command);
+        var mapped = request.TryToCommand(out var command);
 
         Assert.True(mapped);
         Assert.False(command.SelectAll);
@@ -93,25 +89,43 @@ public sealed class QueryAxDataEndpointTests
         Assert.Equal("customer", command.Selections[0].Fields[0]);
     }
 
+    [Fact]
+    public void Missing_selection_defaults_to_complete_get()
+    {
+        var request = new GetAxDataRequest("object-1", default);
+
+        var mapped = request.TryToCommand(out var command);
+
+        Assert.True(mapped);
+        Assert.True(command.SelectAll);
+        Assert.Equal("object-1", command.ObjectId);
+    }
+
+    [Fact]
+    public void Blank_object_id_is_rejected()
+    {
+        var request = new GetAxDataRequest(" ", default);
+
+        Assert.False(request.TryToCommand(out _));
+    }
+
     private static async Task<(QueryAxDataHandler Handler, FakeAxpertAuthorizationProvider Authorization)> CreateHandlerAsync(
-        string userName,
-        StructDefHandle? currentDefinition = null)
+        string userName)
     {
         var state = SampleStructDefFixture.CreateState();
-        state.DataContainers["dc1"].Rows[0].Fields.Add("secret", new AxFieldValue("classified"));
+        AxDataContainer header = state.DataContainers["dc1"];
+        header.Rows[0].Fields.Add("secret", new AxFieldValue("classified"));
+        state.DataContainers["dc1"] = new AxDataContainer(header.Name, header.IsGrid, header.Rows);
         var store = new InMemoryAxDataStore();
         await store.WriteAsync(state, null, CancellationToken.None);
         var authorization = new FakeAxpertAuthorizationProvider();
-        var definitionProvider = new FakeStructDefProvider(currentDefinition ?? SampleStructDefFixture.Definition);
         return (new QueryAxDataHandler(
             new FakeUserContext(new AxUserContext(
                 SampleStructDefFixture.TenantId,
                 userName,
                 new HashSet<string>())),
             store,
-            definitionProvider,
-            authorization,
-            FakeRecovery.Create(store, authorization, definitionProvider)), authorization);
+            authorization), authorization);
     }
 
     private static DefaultHttpContext CreateHttpContext(string correlationId)

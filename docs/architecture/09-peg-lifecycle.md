@@ -43,7 +43,7 @@ Intermediate approvals
       ↓
 Final approver action
       ↓
-Idempotent AxData Save
+Trusted AxPut Save
       ↓
 Save succeeds
       ↓
@@ -54,7 +54,7 @@ Complete workflow
 
 The business transaction is persisted to the business database as part of the final approval process.
 
-If the AxData Save fails:
+If trusted AxPut Save fails:
 
 - The workflow must not be marked as successfully Approved.
 - Validation/save errors are returned.
@@ -67,7 +67,7 @@ AxData Object created/updated
         ↓
 Data remains in redis.
         ↓
-AxSaveData() -> When saving data to DB
+AxPut -> when explicitly saving data to DB
         ↓
 Initiate PEG
         ↓
@@ -83,25 +83,25 @@ In this mode, PEG approval does **not automatically persist the AxData transacti
 
 The current AxData runtime state remains available in Redis after approval, subject to the configured object lifecycle and retention policy.
 
-A separate **AxData Save API** is exposed to explicitly persist the current AxData runtime state:
+A separate **AxPut Save API** persists the current DataObject state explicitly:
 
 ```text
 AxData Runtime State
         ↓
-     Save API
+     AxPut API
         ↓
 Business Database
         +
 Updated Redis Runtime State
 ```
 
-When the Save API is successfully executed:
+When AxPut Save is successfully executed:
 
 - The current transaction data is persisted to the business database.
 - The corresponding AxData runtime state remains in Redis.
 - Subsequent operations continue to use the Redis runtime object until its lifecycle is completed or the configured cleanup/retention policy removes it.
 
-Therefore, with `SaveOnApprove = false`, **PEG approval completion and business-data persistence are separate operations**. The business data is persisted only when the explicit AxData Save API is invoked.
+Therefore, with `SaveOnApprove = false`, **PEG approval completion and business-data persistence are separate operations**. The business data is persisted only when AxPut is invoked explicitly.
 
 ### 9.4 Reject
 

@@ -40,7 +40,7 @@ It then atomically updates the Redis PEG state and completes any configured dura
 
 ### 12.2 Final approval with deferred save
 
-In the initial same-deployment model, the PEG application service orchestrates a trusted internal AxData Save. The permission/PEG-initiation checks already established by PEG may be skipped internally, but final validation, transaction rules, and idempotency cannot be skipped.
+In the initial same-deployment model, the PEG application service will orchestrate a narrow trusted AxPut call. The permission/PEG-initiation checks already established by PEG may be skipped only through trusted server code, while final validation and AxPut transaction rules cannot be skipped. Save idempotency remains a prerequisite for production retry/recovery rather than a current capability.
 
 Required outcome:
 
@@ -59,9 +59,9 @@ For `SaveOnApprove=false`, PEG is initiated and completed while the current AxDa
 4. Does not call the business-data writer.
 5. Returns success with an explicit indication that database Save is still required.
 
-The authorized client subsequently calls `POST /api/v1/axdata/{objectId}/save`. That call reloads the approved Redis state, verifies the object/workflow versions and authorization, then performs the transactional and idempotent business Save. After success, AxData becomes `Saved`.
+The authorized client subsequently calls `POST /api/v{version}/AxPut`. AxPut loads the approved tenant-scoped Redis state, verifies the current workflow state and authorization, establishes its server-owned `Saving` claim, then performs the business Save. Retained state returns to `Active`; no DataObject version participates.
 
-The PEG completion and later Save use different idempotency keys because they are separate logical operations. Recovery must preserve the `ApprovedAwaitingSave` state so an approved object is not lost before explicit Save.
+PEG completion and later Save are separate logical operations. Their future idempotency identities must also remain separate. Recovery must preserve `ApprovedAwaitingSave` according to the eventual PEG persistence design.
 
 ### 12.4 Redis and outbox consistency
 

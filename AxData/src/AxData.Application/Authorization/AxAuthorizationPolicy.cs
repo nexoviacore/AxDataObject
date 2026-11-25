@@ -2,6 +2,8 @@ namespace AxData.Application.Authorization;
 
 public static class AxAuthorizationPolicy
 {
+    /// <summary>Evaluates whether the actor relationship satisfies the requested AxData operation.</summary>
+    /// <remarks>Administrative access is explicit; an object reference alone never grants access.</remarks>
     public static bool IsAllowed(
         AxAuthorizationContext context,
         AxAuthorizationOperation operation)
@@ -18,28 +20,23 @@ public static class AxAuthorizationPolicy
             return true;
         }
 
-        if (HasRelation(context, AxActorRelation.Administrator))
-        {
-            return operation != AxAuthorizationOperation.Set || context.IsEditable;
-        }
-
         return operation switch
         {
             AxAuthorizationOperation.Query => HasAnyRelation(
                 context,
-                AxActorRelation.OwnerOrInitiator |
+                AxActorRelation.Initiator |
                 AxActorRelation.CurrentApprover |
                 AxActorRelation.Viewer),
             AxAuthorizationOperation.Set =>
-                context.IsEditable && HasRelation(context, AxActorRelation.OwnerOrInitiator),
-            AxAuthorizationOperation.Save => HasRelation(context, AxActorRelation.OwnerOrInitiator),
+                context.IsEditable && HasRelation(context, AxActorRelation.Initiator),
+            AxAuthorizationOperation.Save => HasRelation(context, AxActorRelation.Initiator),
             AxAuthorizationOperation.Approve or
             AxAuthorizationOperation.Reject or
             AxAuthorizationOperation.Return => HasRelation(context, AxActorRelation.CurrentApprover),
-            AxAuthorizationOperation.Recall => HasRelation(context, AxActorRelation.OwnerOrInitiator),
+            AxAuthorizationOperation.Recall => HasRelation(context, AxActorRelation.Initiator),
             AxAuthorizationOperation.Print => HasAnyRelation(
                 context,
-                AxActorRelation.OwnerOrInitiator |
+                AxActorRelation.Initiator |
                 AxActorRelation.CurrentApprover |
                 AxActorRelation.Viewer),
             _ => false

@@ -2,13 +2,8 @@ CREATE TABLE AxDataObjectInstance (
     TenantId varchar(128) NOT NULL,
     ObjectId varchar(64) NOT NULL,
     TransId varchar(128) NOT NULL,
-    KeyField varchar(128) NULL,
-    KeyValue varchar(512) NULL,
     RecordId bigint NULL,
     DataObjectJson json NOT NULL,
-    ObjectVersion bigint NOT NULL CHECK (ObjectVersion > 0),
-    StructDefVersion varchar(128) NOT NULL,
-    OwnerUserName varchar(256) NOT NULL,
     InitiatorUserName varchar(256) NOT NULL,
     PersistDateTimeUtc timestamptz NOT NULL,
     LastAccessedDateTimeUtc timestamptz NOT NULL,
@@ -22,7 +17,6 @@ CREATE TABLE AxDataObjectInstance (
 );
 
 CREATE INDEX ix_axdoi_object ON AxDataObjectInstance (ObjectId);
-CREATE INDEX ix_axdoi_owner ON AxDataObjectInstance (TenantId, OwnerUserName);
 CREATE INDEX ix_axdoi_record ON AxDataObjectInstance (TenantId, RecordId);
 CREATE INDEX ix_axdoi_lifecycle ON AxDataObjectInstance (TenantId, LifecycleStatus);
 CREATE INDEX ix_axdoi_approval ON AxDataObjectInstance (TenantId, ApprovalStatus);

@@ -14,32 +14,26 @@ Redis entries include:
 - Tenant/context information
 - AxData runtime state
 - Active PEG workflow state
-- Object/version metadata
+- Object identity and lifecycle metadata
 - Lifecycle information
 
-Active objects have a configurable inactivity TTL. The TTL is refreshed based on configured object activity and the object is removed from Redis after the configured period of inactivity.
+Active objects have no inactivity TTL while Redis is the only state store. Init, Set, and retained Save keep the active key persistent until an explicit lifecycle action removes or closes it. Short-lived concurrency leases remain separately bounded.
 
-### 10.2 Snapshot Persistence
+### 10.2 Snapshot Persistence (future use)
 
-After each successfully completed Set operation, the service publishes a full snapshot of the current AxData object to `AxPersist`.
+Durable DataObject snapshot publication, consumption, and SQL recovery are deferred. Redis is the only active DataObject-state store in the current development scope. Set writes the complete state directly to the tenant-scoped Redis key; no snapshot stream or persistence worker is active or required.
 
-The persistence consumer upserts the latest snapshot into `AxDataObjectInstance`, maintaining one current recoverable snapshot per `ObjectId`.
+The dormant snapshot source remains compiled for possible future use, but it is not registered by API composition or started by deployment and walkthrough tooling.
 
 ```text
 Set Request
     ↓
-Update Redis
+Verify the server-owned lease token and update Redis once
     ↓
 Set completed
-    ↓
-Full Snapshot
-    ↓
-AxPersist
-    ↓
-AxDataObjectInstance
 ```
 
-Full-snapshot persistence is the first-release strategy because it provides a simple and reliable recovery model.
+If durable snapshot recovery is reintroduced, its transport, persistence, version guard, and operational requirements must be approved and activated as one complete path rather than partially wired.
 
 Change-only/delta persistence may be considered later if performance and load testing demonstrate that full snapshots introduce significant processing, storage, or network overhead.
 
@@ -56,27 +50,20 @@ For operations such as:
 - Reject
 - Return
 - Recall
-- Explicit AxData Save
+- Explicit AxPut Save
 
 the system must ensure that the required state has been successfully persisted according to the applicable operation's persistence rules before returning success.
 
 For `SaveOnApprove = true`, the final approval must successfully persist the AxData transaction before the workflow is marked as successfully Approved.
 
-For `SaveOnApprove = false`, PEG approval and AxData business-data persistence remain separate operations. The business data is persisted only when the explicit AxData Save API is invoked.
+For `SaveOnApprove = false`, PEG approval and business-data persistence remain separate operations. The business data is persisted only when AxPut is invoked explicitly.
 
 Notifications and external integrations remain asynchronous through the Transactional Outbox and do not need to complete before the API returns success.
 
-### 10.4 Recovery
+### 10.4 Recovery (future use)
 
-When an `ObjectId` is not available in Redis:
+There is no active database recovery path. When an `ObjectId` is absent from its authenticated tenant's Redis scope, Get, Query, Set, and ObjectId-aware Save treat it as not found (`404 / AXD-NOTFOUND-001`) without querying `AxDataObjectInstance` or restoring Redis state.
 
-1. Look up the latest valid `AxDataObjectInstance` snapshot within the authenticated tenant and authorization scope.
-2. Validate the snapshot version, lifecycle state, and access permissions.
-3. Restore the AxData runtime state to Redis.
-4. Restore the active PEG workflow state associated with the snapshot, where available.
-5. Continue the requested operation if the object is valid and recoverable.
-6. Otherwise, return a defined `Expired`, `NotFound`, or `RecoveryFailed` response.
-
-The recovery mechanism must ensure that an object belonging to another tenant or unauthorized user cannot be restored or accessed merely by supplying its `ObjectId`.
+Any future recovery mechanism must validate tenant, lifecycle, and authorization before restoration and must ensure that ObjectId possession is never sufficient authority.
 
 The exact durable persistence and recovery strategy for PEG state, including the use of `axactivetasks` and `axactivetaskstatus`, will be finalized as part of the detailed PEG persistence design.

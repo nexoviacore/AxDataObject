@@ -27,6 +27,8 @@ public sealed class AxpertSessionResolver(
 
     public AxpertResolvedSessionRuntime? Current => _current;
 
+    /// <summary>Resolves and validates Axpert session variables into a trusted tenant and user context.</summary>
+    /// <returns>The context only when required identity values are present and mutually consistent.</returns>
     public async Task<AxpertSessionContext?> ResolveAsync(
         AxpertSessionRequest request,
         CancellationToken cancellationToken)
@@ -54,7 +56,7 @@ public sealed class AxpertSessionResolver(
                 new RedisCacheHelper(),
                 appSettingsHelper,
                 traceService);
-            var values = await common.GetSessionData(request.SessionId).ConfigureAwait(false);
+            var values = await common.GetSessionData(request.SessionId);
             cancellationToken.ThrowIfCancellationRequested();
             if (values.Count == 0 ||
                 !Required(values, SESSION_DATA.APPNAME, out var appName) ||

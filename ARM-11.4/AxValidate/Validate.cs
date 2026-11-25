@@ -1843,7 +1843,8 @@ namespace AxValidate
             TField fld,
             int rowNo,
             bool fieldEmpty,
-            ValidationInvocationResult invocation
+            ValidationInvocationResult invocation,
+            bool deferRequiredValidation = false
         )
         {
             bool result = true;
@@ -1976,7 +1977,7 @@ namespace AxValidate
                     }
                 }
 
-                if (!fld.Empty)
+                if (!fld.Empty && !deferRequiredValidation)
                 {
                     string dt = fld.DataType.ToLower();
                     if (
@@ -3431,6 +3432,13 @@ namespace AxValidate
             return ProcessFieldsOnLoad(initializeFields: false, isNewRecord: false);
         }
 
+        // It process:
+        // Defaults.
+        // SQL-based values.
+        // Expressions and calculations.
+        //Select/fill behavior.
+        //Type conversion and validation.
+        //New-record versus existing-record rules.
         public Task<string> InitializeFieldsOnLoad(bool isNewRecord)
         {
             return ProcessFieldsOnLoad(initializeFields: true, isNewRecord);
@@ -3555,10 +3563,12 @@ namespace AxValidate
                                     _traceService.LogMessage(
                                         $"Calling RapidValidateData for {field.FieldName}"
                                     );
-                                    bool validationResult = await RapidValidateData(
+                                    bool validationResult = await RapidValidateDataCore(
                                         field,
                                         rowNo,
-                                        string.IsNullOrEmpty(fieldResult)
+                                        string.IsNullOrEmpty(fieldResult),
+                                        null,
+                                        isNewRecord
                                     );
 
                                     _traceService.LogMessage(

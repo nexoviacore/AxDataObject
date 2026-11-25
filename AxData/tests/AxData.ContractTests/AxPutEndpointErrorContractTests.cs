@@ -2,6 +2,7 @@ using System.Data;
 using ARMCommon.Interface;
 using ARMCommon.Model;
 using AxTstructData;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,29 +11,19 @@ namespace AxData.ContractTests;
 public sealed class AxPutEndpointErrorContractTests
 {
     [Theory]
-    [InlineData(404, AxPutObjectErrors.InvalidRequest, false)]
-    [InlineData(409, AxPutObjectErrors.StaleVersion, true)]
-    [InlineData(409, AxPutObjectErrors.StructDefChanged, true)]
-    [InlineData(403, AxPutObjectErrors.AccessDenied, false)]
-    public async Task Object_failures_preserve_http_status_code_objectid_and_known_version(
+    [InlineData(404, AxPutObjectErrors.InvalidRequest)]
+    [InlineData(409, AxPutObjectErrors.ActiveConflict)]
+    [InlineData(403, AxPutObjectErrors.AccessDenied)]
+    public async Task Object_failures_preserve_http_status_code_and_objectid(
         int httpStatus,
-        string errorCode,
-        bool includeVersion)
+        string errorCode)
     {
         APIResult serviceResult = new(false, "failure");
         serviceResult.data["errorcode"] = errorCode;
         serviceResult.data["httpstatus"] = httpStatus;
         serviceResult.data["objectid"] = "object-a";
-        if (includeVersion)
-        {
-            serviceResult.data["version"] = 3L;
-            serviceResult.data["dataObjectRetained"] = true;
-        }
 
-        AxPutController controller = new(new StubAxPutService(serviceResult), new NullTraceService())
-        {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
-        };
+        AxPutController controller = CreateController(new StubAxPutService(serviceResult), "session-a");
 
         ObjectResult response = Assert.IsType<ObjectResult>(await controller.AxPut(new AxPutInput
         {
@@ -44,15 +35,50 @@ public sealed class AxPutEndpointErrorContractTests
         Assert.Equal(httpStatus, response.StatusCode);
         Assert.Equal(errorCode, envelope.result["errorcode"]);
         Assert.Equal("object-a", envelope.result["objectid"]);
-        Assert.Equal(includeVersion, envelope.result.ContainsKey("version"));
-        Assert.Equal(includeVersion, envelope.result.ContainsKey("dataObjectRetained"));
-        if (includeVersion)
-            Assert.Equal(true, envelope.result["dataObjectRetained"]);
+        Assert.DoesNotContain(envelope.result.Keys, key => string.Equals(key, "version", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(envelope.result.Keys, key => string.Equals(key, "currentVersion", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Token_and_body_session_mismatch_fails_authentication_before_service_access()
+    {
+        var service = new StubAxPutService(new APIResult());
+        AxPutController controller = CreateController(service, "token-session");
+
+        UnauthorizedObjectResult response = Assert.IsType<UnauthorizedObjectResult>(await controller.AxPut(new AxPutInput
+        {
+            ARMSessionId = "body-session",
+            ObjectId = "object-a"
+        }));
+        ARMResult envelope = Assert.IsType<ARMResult>(response.Value);
+
+        Assert.Equal(AxPutObjectErrors.AuthenticationRequired, envelope.result["errorcode"]);
+        Assert.Equal("object-a", envelope.result["objectid"]);
+        Assert.Equal(0, service.CallCount);
+    }
+
+    private static AxPutController CreateController(StubAxPutService service, string sessionId)
+    {
+        DefaultHttpContext httpContext = new()
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim("sid", sessionId)],
+                authenticationType: "Bearer"))
+        };
+        return new AxPutController(service, new NullTraceService())
+        {
+            ControllerContext = new ControllerContext { HttpContext = httpContext }
+        };
     }
 
     private sealed class StubAxPutService(APIResult result) : IAxPutService
     {
-        public Task<APIResult> AxPut(AxPutInput putData) => Task.FromResult(result);
+        public int CallCount { get; private set; }
+        public Task<APIResult> AxPut(AxPutInput putData)
+        {
+            CallCount++;
+            return Task.FromResult(result);
+        }
         public Task<APIResult> CheckTstructCreateAccess(AxPut putData) => throw new NotSupportedException();
         public Task<APIResult> CheckTstructEditAccess(AxPut putData) => throw new NotSupportedException();
     }

@@ -57,6 +57,7 @@ public sealed class RealDataReviewSmokeTests(ITestOutputHelper output)
             environment.TransId,
             new AxRecordKey(environment.KeyField, environment.KeyValue, environment.RecordId),
             user,
+            [],
             CancellationToken.None);
         var setPermission = await authorization.GetSetPermissionAsync(
             environment.TenantId,
@@ -87,6 +88,7 @@ public sealed class RealDataReviewSmokeTests(ITestOutputHelper output)
             environment.TransId,
             new AxRecordKey(environment.KeyField, environment.KeyValue, environment.RecordId),
             user with { TenantId = "cross-tenant-review" },
+            [],
             CancellationToken.None);
         var unrelatedPermission = await authorization.GetQueryPermissionAsync(
             environment.TenantId,
@@ -96,6 +98,7 @@ public sealed class RealDataReviewSmokeTests(ITestOutputHelper output)
                 environment.TenantId,
                 "__axdata_unrelated_review__",
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase)),
+            [],
             CancellationToken.None);
 
         output.WriteLine(
@@ -131,53 +134,28 @@ public sealed class RealDataReviewSmokeTests(ITestOutputHelper output)
         var contextFactory = new AxpertRuntimeContextFactory(new SilentTraceService(), options);
         var source = new AxpertStructDefSource(contextFactory);
 
-        var context = await contextFactory.CreateAsync(environment.TenantId, CancellationToken.None);
-        Assert.True(context.Succeeded, context.Error);
-        var rows = await context.Value.Common._dbHelper.ExecuteSQLAsync(
-            $"SELECT props, blobno, updatedon, runtimetstruct, runtimemod FROM \"{environment.TenantId}\".tstructs WHERE LOWER(name) = @name ORDER BY blobno",
-            ["@name"],
-            [DbType.String],
-            [environment.TransId.ToLowerInvariant()]);
-        Assert.True(string.IsNullOrWhiteSpace(rows.error), rows.error);
-        Assert.NotEmpty(rows.data.Rows.Cast<DataRow>());
-        Assert.NotNull(AxpertStructDefSource.ComputeContentHash(rows));
-        var legacyDefinition = await LegacyStructDef.LoadStructure(
-            context.Value.Common,
-            environment.TransId,
-            environment.Roles.ToList(),
-            context.Value.TraceService,
-            refreshCache: true);
-        Assert.NotNull(legacyDefinition);
-
-        var snapshot = await source.LoadCurrentAsync(
+        var definition = await source.LoadCurrentAsync(
             environment.TenantId,
             environment.TransId,
             CancellationToken.None);
 
-        Assert.NotNull(snapshot);
-        Assert.Matches("^[0-9a-f]{64}$", snapshot.ContentHash);
-        Assert.NotEmpty(snapshot.DataContainers);
-        Assert.NotEmpty(snapshot.DataContainers.SelectMany(container => container.Fields));
+        Assert.NotNull(definition);
+        Assert.NotEmpty(definition.DataContainers);
+        Assert.NotEmpty(definition.DataContainers.SelectMany(container => container.Fields));
         output.WriteLine(
-            "StructDef tenant={0}, transId={1}, hash={2}, updatedOn={3}, legacyVersion={4}, runtimeStruct={5}, runtimeMode={6}, containers={7}, fields={8}, dependencies={9}, fillGrids={10}",
-            snapshot.TenantId,
-            snapshot.TransId,
-            snapshot.ContentHash,
-            snapshot.UpdatedOn ?? "<null>",
-            snapshot.LegacyVersionNo ?? "<null>",
-            snapshot.RunTimeStruct,
-            snapshot.RunTimeMode,
-            snapshot.DataContainers.Count,
-            snapshot.DataContainers.Sum(container => container.Fields.Count),
-            snapshot.Dependencies.Count,
-            snapshot.FillGrids.Count);
+            "StructDef tenant={0}, transId={1}, containers={2}, fields={3}, dependencies={4}, fillGrids={5}",
+            definition.TenantId,
+            definition.TransId,
+            definition.DataContainers.Count,
+            definition.DataContainers.Sum(container => container.Fields.Count),
+            definition.Dependencies.Count,
+            definition.FillGrids.Count);
 
-        var runtimeFactory = new AxpertFieldRuntimeFactory(contextFactory, source);
+        var runtimeFactory = new AxpertFieldRuntimeFactory(contextFactory);
         var runtime = await runtimeFactory.CreateAsync(
             new AxpertFieldRuntimeRequest(
                 environment.TenantId,
                 environment.TransId,
-                snapshot.ContentHash,
                 new AxUserContext(
                     environment.TenantId,
                     environment.UserName,
@@ -192,12 +170,11 @@ public sealed class RealDataReviewSmokeTests(ITestOutputHelper output)
                             !string.IsNullOrWhiteSpace(environment.KeyValue)
                 ? new AxRecordKey(environment.KeyField, environment.KeyValue, null)
                 : new AxRecordKey(null, null, environment.RecordId);
-            var dataSource = new AxpertDataSource(contextFactory, source);
+            var dataSource = new AxpertDataSource(contextFactory);
             var loaded = await dataSource.LoadAsync(
                 new AxpertDataSourceRequest(
                     environment.TenantId,
                     environment.TransId,
-                    snapshot.ContentHash,
                     recordKey,
                     environment.UserName,
                     new HashSet<string>(environment.Roles, StringComparer.OrdinalIgnoreCase)),
@@ -207,7 +184,7 @@ public sealed class RealDataReviewSmokeTests(ITestOutputHelper output)
             Assert.Equal(environment.RecordId, loaded.RecordId);
             Assert.NotNull(loaded.DataContainers);
             Assert.NotEmpty(loaded.DataContainers);
-            var definitionsByContainer = snapshot.DataContainers.ToDictionary(
+            var definitionsByContainer = definition.DataContainers.ToDictionary(
                 container => container.Name,
                 StringComparer.OrdinalIgnoreCase);
             var unknownContainers = loaded.DataContainers
@@ -230,13 +207,6 @@ public sealed class RealDataReviewSmokeTests(ITestOutputHelper output)
                 unknownFields.Length == 0,
                 $"Unknown AxGet fields: {string.Join(',', unknownFields)}");
 
-            var definition = new StructDefHandle(
-                snapshot.TenantId,
-                snapshot.TransId,
-                snapshot.ContentHash,
-                snapshot.DataContainers,
-                snapshot.Dependencies,
-                snapshot.FillGrids);
             var user = new AxUserContext(
                 environment.TenantId,
                 environment.UserName,
@@ -378,8 +348,6 @@ public sealed class RealDataReviewSmokeTests(ITestOutputHelper output)
             environment.TenantId,
             environment.TransId,
             environment.UserName,
-            environment.UserName,
-            snapshot.ContentHash,
             DateTimeOffset.UnixEpoch);
         foreach (var container in snapshot.DataContainers)
         {
@@ -390,7 +358,6 @@ public sealed class RealDataReviewSmokeTests(ITestOutputHelper output)
 
         var engine = new AxpertFillGridEngine(new AxpertFillGridRuntimeFactory(
             contextFactory,
-            source,
             new AxpertFillGridQueryOptions()));
         var result = await engine.ExecuteApplicableAsync(
             state,
@@ -436,12 +403,11 @@ public sealed class RealDataReviewSmokeTests(ITestOutputHelper output)
             CancellationToken.None);
         Assert.NotNull(snapshot);
 
-        var dataSource = new AxpertDataSource(contextFactory, source);
+        var dataSource = new AxpertDataSource(contextFactory);
         var loaded = await dataSource.LoadAsync(
             new AxpertDataSourceRequest(
                 environment.TenantId,
                 environment.TransId,
-                snapshot.ContentHash,
                 new AxRecordKey(null, null, environment.RecordId),
                 environment.UserName,
                 new HashSet<string>(environment.Roles, StringComparer.OrdinalIgnoreCase)),
@@ -454,13 +420,7 @@ public sealed class RealDataReviewSmokeTests(ITestOutputHelper output)
             environment.UserName,
             new HashSet<string>(environment.Roles, StringComparer.OrdinalIgnoreCase));
         var stateResult = await new AxpertDataLoader(dataSource, new CryptographicRowIdGenerator()).LoadAsync(
-            new StructDefHandle(
-                snapshot.TenantId,
-                snapshot.TransId,
-                snapshot.ContentHash,
-                snapshot.DataContainers,
-                snapshot.Dependencies,
-                snapshot.FillGrids),
+            snapshot,
             new AxRecordKey(null, null, environment.RecordId),
             user,
             CancellationToken.None);

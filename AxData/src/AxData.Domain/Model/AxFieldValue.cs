@@ -2,7 +2,7 @@ namespace AxData.Domain.Model;
 
 public sealed class AxFieldValue
 {
-    public AxFieldValue(object? value, bool isReadOnly = false, long? sourceId = null)
+    public AxFieldValue(object? value, bool isReadOnly = false, long? sourceId = null, bool isSourceKey = false)
     {
         EnsureSourceId(sourceId, nameof(sourceId));
         Value = value;
@@ -10,6 +10,7 @@ public sealed class AxFieldValue
         SourceId = sourceId;
         OriginalSourceId = sourceId;
         IsReadOnly = isReadOnly;
+        IsSourceKey = isSourceKey;
     }
 
     public object? Value { get; private set; }
@@ -24,13 +25,17 @@ public sealed class AxFieldValue
 
     public bool IsReadOnly { get; }
 
+    public bool IsSourceKey { get; }
+
+    /// <summary>Recreates a field value and its original baseline for dirty-state tracking.</summary>
     public static AxFieldValue Rehydrate(
         object? value,
         object? originalValue,
         bool isDirty,
         bool isReadOnly,
         long? sourceId = null,
-        long? originalSourceId = null)
+        long? originalSourceId = null,
+        bool isSourceKey = false)
     {
         EnsureSourceId(sourceId, nameof(sourceId));
         EnsureSourceId(originalSourceId, nameof(originalSourceId));
@@ -41,12 +46,15 @@ public sealed class AxFieldValue
                 nameof(isDirty));
         }
 
-        return new AxFieldValue(value, originalValue, sourceId, originalSourceId, isDirty, isReadOnly);
+        return new AxFieldValue(value, originalValue, sourceId, originalSourceId, isDirty, isReadOnly, isSourceKey);
     }
 
+    /// <summary>Sets a regular field value and recalculates whether it differs from the baseline.</summary>
     public bool SetValue(object? value)
         => SetValue(value, SourceId);
 
+    /// <summary>Sets a source-key field value and its associated source identifier.</summary>
+    /// <returns><see langword="true"/> when either current value changed.</returns>
     public bool SetValue(object? value, long? sourceId)
     {
         if (IsReadOnly)
@@ -66,6 +74,7 @@ public sealed class AxFieldValue
         return true;
     }
 
+    /// <summary>Accepts the current value and source identifier as the new unchanged baseline.</summary>
     public void AcceptChanges()
     {
         OriginalValue = Value;
@@ -79,7 +88,8 @@ public sealed class AxFieldValue
         long? sourceId,
         long? originalSourceId,
         bool isDirty,
-        bool isReadOnly)
+        bool isReadOnly,
+        bool isSourceKey)
     {
         Value = value;
         OriginalValue = originalValue;
@@ -87,6 +97,7 @@ public sealed class AxFieldValue
         OriginalSourceId = originalSourceId;
         IsDirty = isDirty;
         IsReadOnly = isReadOnly;
+        IsSourceKey = isSourceKey;
     }
 
     private static void EnsureSourceId(long? sourceId, string parameterName)

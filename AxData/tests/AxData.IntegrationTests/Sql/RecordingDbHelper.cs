@@ -28,9 +28,6 @@ internal class RecordingDbHelper : DispatchProxy
         return recorder;
     }
 
-    public long? GetVersion(string tenantId, string objectId) =>
-        _rows.TryGetValue(Key(tenantId, objectId), out var row) ? row.Version : null;
-
     public string? GetPayload(string tenantId, string objectId) =>
         _rows.TryGetValue(Key(tenantId, objectId), out var row) ? row.Payload : null;
 
@@ -56,25 +53,18 @@ internal class RecordingDbHelper : DispatchProxy
                 .ToDictionary(item => item.name, item => item.Item2, StringComparer.Ordinal);
             var tenantId = (string)parameters["TenantId"];
             var objectId = (string)parameters["ObjectId"];
-            var version = (long)parameters["ObjectVersion"];
             var key = Key(tenantId, objectId);
-            var changed = !_rows.TryGetValue(key, out var stored) || version > stored.Version;
-            if (changed)
-            {
-                _rows[key] = new RecordedSnapshot(
-                    tenantId,
-                    objectId,
-                    version,
-                    (string)parameters["StructDefVersion"],
-                    (string)parameters["LifecycleStatus"],
-                    (string)parameters["DataObjectJson"]);
-            }
+            _rows[key] = new RecordedSnapshot(
+                tenantId,
+                objectId,
+                (string)parameters["LifecycleStatus"],
+                (string)parameters["DataObjectJson"]);
 
             return Task.FromResult(new NonQueryResult
             {
                 error = string.Empty,
                 message = string.Empty,
-                count = changed ? 1 : 0
+                count = 1
             });
         }
 
@@ -92,8 +82,6 @@ internal class RecordingDbHelper : DispatchProxy
             table.Columns.Add("TenantId", typeof(string));
             table.Columns.Add("ObjectId", typeof(string));
             table.Columns.Add("DataObjectJson", typeof(string));
-            table.Columns.Add("ObjectVersion", typeof(long));
-            table.Columns.Add("StructDefVersion", typeof(string));
             table.Columns.Add("LifecycleStatus", typeof(string));
             if (_rows.TryGetValue(Key((string)parameters["TenantId"], (string)parameters["ObjectId"]), out var stored))
             {
@@ -101,8 +89,6 @@ internal class RecordingDbHelper : DispatchProxy
                     stored.TenantId,
                     stored.ObjectId,
                     stored.Payload,
-                    stored.Version,
-                    stored.StructDefVersion,
                     stored.LifecycleStatus);
             }
 
@@ -123,8 +109,6 @@ internal class RecordingDbHelper : DispatchProxy
     private sealed record RecordedSnapshot(
         string TenantId,
         string ObjectId,
-        long Version,
-        string StructDefVersion,
         string LifecycleStatus,
         string Payload);
 }

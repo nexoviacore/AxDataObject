@@ -9,11 +9,11 @@ StructDef is the immutable/versioned definition of a tstruct for the lifetime of
 An AxData object is one active transaction instance. It contains:
 
 - Identity: tenant/instance, ObjectId, TransId, key field/value, and RecordId.
-- Ownership: initiator/owner and authenticated user context.
+- Access identity: persisted initiator plus trusted authenticated user context; no owner credential is stored.
 - Data: DCs, rows, row actions, fields, values, and relevant metadata.
-- Runtime state: object version, dirty state, calculated/dependent values, and lifecycle timestamps.
+- Runtime state: dirty state, calculated/dependent values, and lifecycle timestamps.
 - Workflow projection: approval status, level, and current approvers for fast access. PEG remains the authority for workflow history.
-- References: files, print outputs, and related transaction identifiers.
+- References used by the domain may include files, print outputs, and related transaction identifiers; files and `AxOpen` are not part of the current Redis payload.
 
 ### 5.3 ObjectId
 

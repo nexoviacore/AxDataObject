@@ -6,16 +6,15 @@ namespace AxData.UnitTests.Domain;
 public sealed class AxDataStateTests
 {
     [Fact]
-    public void New_state_starts_active_at_version_one()
+    public void New_state_starts_active()
     {
         var state = CreateState();
 
         Assert.Equal(AxDataLifecycleStatus.Active, state.Status);
-        Assert.Equal(1, state.Version);
     }
 
     [Fact]
-    public void Valid_transition_changes_status_and_increments_version_once()
+    public void Valid_transition_changes_status()
     {
         var state = CreateState();
 
@@ -23,7 +22,6 @@ public sealed class AxDataStateTests
 
         Assert.True(changed);
         Assert.Equal(AxDataLifecycleStatus.PendingApproval, state.Status);
-        Assert.Equal(2, state.Version);
     }
 
     [Fact]
@@ -34,17 +32,15 @@ public sealed class AxDataStateTests
         var changed = state.TransitionTo(AxDataLifecycleStatus.Active);
 
         Assert.False(changed);
-        Assert.Equal(1, state.Version);
     }
 
     [Fact]
-    public void Invalid_transition_does_not_change_status_or_version()
+    public void Invalid_transition_does_not_change_status()
     {
         var state = CreateState();
 
         Assert.Throws<InvalidOperationException>(() => state.TransitionTo(AxDataLifecycleStatus.ApprovedAwaitingSave));
         Assert.Equal(AxDataLifecycleStatus.Active, state.Status);
-        Assert.Equal(1, state.Version);
     }
 
     [Fact]
@@ -52,43 +48,36 @@ public sealed class AxDataStateTests
     {
         var state = CreateState();
         state.TransitionTo(AxDataLifecycleStatus.Closed);
-        var version = state.Version;
-
         Assert.Throws<InvalidOperationException>(() => state.TransitionTo(AxDataLifecycleStatus.Active));
         Assert.Throws<InvalidOperationException>(() => state.RegisterMutation());
-        Assert.Equal(version, state.Version);
     }
 
     [Fact]
-    public void Registering_a_successful_mutation_increments_version_once()
+    public void Active_state_can_register_a_mutation()
     {
         var state = CreateState();
 
-        var version = state.RegisterMutation();
-
-        Assert.Equal(2, version);
-        Assert.Equal(2, state.Version);
+        state.RegisterMutation();
     }
 
     [Fact]
-    public void Save_claim_is_internal_and_finalization_advances_the_version_once()
+    public void Save_claim_is_internal_and_retained_finalization_returns_to_active()
     {
         var state = CreateState();
 
         state.BeginSaving();
 
         Assert.Equal(AxDataLifecycleStatus.Saving, state.Status);
-        Assert.Equal(1, state.Version);
         Assert.Throws<InvalidOperationException>(() => state.RegisterMutation());
 
-        var version = state.FinalizeSaving(retainDataObject: true);
+        state.FinalizeSaving(retainDataObject: true);
 
-        Assert.Equal(AxDataLifecycleStatus.Saved, state.Status);
-        Assert.Equal(2, version);
+        Assert.Equal(AxDataLifecycleStatus.Active, state.Status);
+        state.RegisterMutation();
     }
 
     [Fact]
-    public void Save_claim_rollback_restores_active_state_without_version_advance()
+    public void Save_claim_rollback_restores_active_state()
     {
         var state = CreateState();
         state.BeginSaving();
@@ -96,15 +85,12 @@ public sealed class AxDataStateTests
         state.RollbackSaving();
 
         Assert.Equal(AxDataLifecycleStatus.Active, state.Status);
-        Assert.Equal(1, state.Version);
     }
 
     private static AxDataState CreateState() => new(
         "01JOBJECT",
         "tenant",
         "trans",
-        "owner",
         "initiator",
-        "struct-v1",
         DateTimeOffset.Parse("2026-09-25T00:00:00Z"));
 }

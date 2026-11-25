@@ -6,7 +6,6 @@ public sealed record SnapshotEnvelope(
     string EventId,
     string TenantId,
     string ObjectId,
-    long ObjectVersion,
     AxDataState Snapshot,
     DateTimeOffset PersistedAtUtc,
     string CorrelationId = "");
@@ -20,11 +19,12 @@ public sealed record SnapshotDelivery(
 
 public interface ISnapshotTransport
 {
+    /// <summary>Publishes an immutable snapshot envelope to its tenant stream.</summary>
     Task<AxDataStoreWriteResult> PublishAsync(
         SnapshotEnvelope envelope,
-        long expectedVersion,
         CancellationToken cancellationToken);
 
+    /// <summary>Reads new or reclaimable pending deliveries for one tenant consumer group.</summary>
     Task<IReadOnlyList<SnapshotDelivery>> ReadAsync(
         string tenantId,
         string consumerGroup,
@@ -33,12 +33,13 @@ public interface ISnapshotTransport
         TimeSpan pendingIdleTime,
         CancellationToken cancellationToken);
 
+    /// <summary>Acknowledges a successfully handled delivery.</summary>
     Task AcknowledgeAsync(
         SnapshotDelivery delivery,
-        long durableVersion,
         string consumerGroup,
         CancellationToken cancellationToken);
 
+    /// <summary>Moves an invalid or terminally failed delivery to the dead-letter stream.</summary>
     Task DeadLetterAsync(
         SnapshotDelivery delivery,
         string consumerGroup,
@@ -48,10 +49,12 @@ public interface ISnapshotTransport
 
 public interface IAxDataSnapshotRepository
 {
+    /// <summary>Idempotently persists a snapshot when it is newer than the stored version.</summary>
     Task<SnapshotPersistStatus> UpsertAsync(
         SnapshotEnvelope envelope,
         CancellationToken cancellationToken);
 
+    /// <summary>Loads the latest durable snapshot for a tenant-scoped object.</summary>
     Task<SnapshotReadResult> LoadLatestAsync(
         string tenantId,
         string objectId,

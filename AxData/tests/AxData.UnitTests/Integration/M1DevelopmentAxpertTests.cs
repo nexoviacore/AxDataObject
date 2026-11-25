@@ -12,8 +12,7 @@ public sealed class M1DevelopmentAxpertTests
     private static readonly AxUserContext User = new(
         Options.TenantId,
         "owner",
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-        IsAdministrator: false);
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
     [Fact]
     public async Task Fixture_load_and_dependency_support_the_M1_walkthrough()
@@ -41,7 +40,9 @@ public sealed class M1DevelopmentAxpertTests
                 StringComparer.OrdinalIgnoreCase));
         lines.AddRow(row);
 
-        var engine = new M1DevelopmentFieldEngine();
+        var engine = new M1DevelopmentFieldEngine(
+            provider,
+            new AxpertFillGridEngine(new M1DevelopmentFillGridRuntimeFactory()));
         await engine.SetValidateAndRefreshAsync(
             state,
             new FieldAddress("dc2", "row_new", "rate"),
@@ -69,6 +70,7 @@ public sealed class M1DevelopmentAxpertTests
             Options.TransId,
             new AxRecordKey(null, null, null),
             User,
+            [],
             CancellationToken.None);
 
         Assert.False(permission.IsAllowed);
@@ -83,6 +85,7 @@ public sealed class M1DevelopmentAxpertTests
             Options.TransId,
             new AxRecordKey(null, null, null),
             User,
+            [],
             CancellationToken.None);
 
         Assert.Contains("amount", permission.ReadOnlyFields["dc2"]);

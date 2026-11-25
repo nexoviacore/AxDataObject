@@ -166,3 +166,94 @@ new behavior; this ledger documents the exceptional shared-project changes and t
 - Reason: keyed AxData Init previously received values after AxGet had already run `RefreshFieldsOnLoad`, then refreshed them again in AxData. AxValidate owns Accept/Calculate/default semantics, so duplicating those rules in an AxData adapter would create a second behavior authority.
 - Behavioral impact: existing AxGet/AxPut/AxDelete callers retain the normal `LoadData` refresh. The trusted AxData adapter can load an unrefreshed baseline, then run exactly one New/Existing initialization pass. New Init also processes saved server-generated Accept SQL/expression, Calculate/default, applicable Select, and Fill fields; keyed Init adds saved Calculate when `Axp_RefreshExpsOnLoad` is not false while preserving ordinary saved values. The on-data-load flag is active for every processed DC. No client bypass flag or deferred parser fail-closed check was added.
 - Verification: serial no-restore contract build passes; 8 focused on-load contracts, 7 Init unit tests, 16 loader/endpoint contracts, 165 full unit tests, 42 integration tests, 32 ARM characterization checks, and E2E pass. Full contracts are 185 passed with the same two explicitly deferred parser-guard failures.
+
+## 2026-11-13 — AXD-STATE-02 AxPut StructDef binding removal
+
+- Files: `ARM-11.4/AxTstructData/{Controllers/AxPutController.cs,Interface/IAxPutRepository.cs,Model/AxPutDataObjectContext.cs,Model/TstructData.cs,Repositories/AxPutRepository.cs,Service/AxPutDataObjectProjection.cs,Service/AxPutService.cs}`.
+- Reason: public ObjectId-aware Save owns the shared-state load, current StructDef load, projection, and finalization sequence, so removing the obsolete persisted StructDef binding and mismatch rejection cannot be completed through an AxData-only adapter.
+- Behavioral impact: AxPut no longer queries or compares a stored StructDef hash, accepts legacy snapshots without binding to their header, writes current snapshots without that header, and continues validation with the current StructDef. `AXD-CONC-003` is removed from this path; clients cannot set a bypass or trace ID, and the server emits an identifier-only binding-bypass trace.
+- Verification: the serial no-restore AxData solution build, including AxTstructData, passes with zero errors; 102 changed-path contracts pass with only the two documented parser-guard failures, 164 unit and 42 integration tests pass, E2E exits successfully, and full contracts are 184 passed with the same two failures. Postman JSON and `git diff --check` pass.
+
+## 2026-11-15 — AXD-STATE-03 positional state and retained-save lifecycle
+
+- Files: `ARM-11.4/AxTstructData/Service/AxPutDataObjectProjection.cs` and `ARM-11.4/AxTstructData/Service/AxPutService.cs`.
+- Reason: AxPut owns hydration of the shared DataObject payload and post-commit projection/finalization, so the current-only positional contract and retained-Save transition cannot be supplied by an AxData-only adapter.
+- Behavioral impact: AxPut validates and hydrates deterministic per-DC field ordinals with aligned typed row values, sparse positive source IDs, and sparse dirty originals; malformed or inconsistent positional data fails closed. Post-commit retained Save publishes one new version as `Active`, allowing later Set, while non-retained Save remains `Closed` and removes active state. The existing AxPut SQL/transaction/attachment order is unchanged.
+- Verification: serial no-restore solution build passes with zero errors; 63 changed-path contracts, 167 unit, 45 integration, and E2E pass. Full contracts are 185 passed with the same two documented parser-guard failures. Postman collection/template JSON validates locally.
+
+## 2026-11-15 — AXD-STATE-04 initiator-based ObjectId authorization
+
+- Files: `ARM-11.4/AxTstructData/{Controllers/AxPutController.cs,Model/AxPutDataObjectContext.cs,Service/AxPutService.cs,Service/AxPutDataObjectProjection.cs}`.
+- Reason: AxPut directly loads and authorizes shared DataObject state before Save, so removing owner authority and enforcing the trusted initiator relationship cannot be completed through an AxData-only adapter.
+- Behavioral impact: ObjectId-aware AxPut state no longer carries or checks `ownerUserName`; the controller first requires the bearer-token session claim to match body `ARMSessionId`, then AxPut authorizes the live session-resolved username against persisted `initiatorUserName`. The same user can continue in another matching live session, while mismatched or unrelated sessions fail without version disclosure. Administrator access remains separately role-established and permission-gated. Save SQL and transaction ordering are unchanged.
+- Verification: serial no-restore solution build, focused authentication/AxPut contracts, 167 unit, 45 integration, and E2E pass; full contracts are 186 passed with the same two documented parser-guard failures. Postman collection/template JSON and diff checks pass.
+
+## 2026-11-16 — AXD-STATE-05 server-owned AxPut concurrency
+
+- Files: `ARM-11.4/AxTstructData/{Controllers/AxPutController.cs,Interface/IAxPutDataObjectStore.cs,Model/AxPutDataObjectContext.cs,Model/TstructData.cs,Service/AxPutDataObjectProjection.cs,Service/AxPutDataObjectStore.cs,Service/AxPutService.cs}`.
+- Reason: AxPut directly owns existing-ObjectId load, hydration, business Save, and finalization, so sharing exclusion with AxData Set and removing the public version contract cannot be implemented through an AxData-only adapter.
+- Behavioral impact: ObjectId-aware AxPut no longer accepts or returns an object version. Existing-object Save atomically creates a persistent `Saving` claim only when the shared Set lock is absent, and competing Set/AxPut operations return `409 / AXD-CONC-002`. Claims are token-owned for release/finalization. Sequential Saves remain independent last-completed-wins operations; timed-out Saves are not automatically retried. SQL transaction ordering and the existing ARM trace exception are unchanged.
+- Verification: serial no-restore builds pass; 166 unit and 44 integration tests pass; contracts are 172 passed with the same two documented parser-guard failures; E2E exits successfully. Postman collection/template JSON and diff checks pass.
+
+## 2026-11-16 — AXD-STATE-06 AxPut characterization closeout
+
+- Files: `ARM-11.4/AxSave.Characterization/Invoke-Characterization.ps1` only; no ARM production source changed.
+- Reason: the package-free AxPut contract harness still required the superseded `expectedVersion`, `If-Match`, version-response, and stored-StructDef checks, so it could not verify the implemented STATE-02/04/05 contract.
+- Behavioral impact: none. The harness now checks trusted session matching, current-definition diagnostics, initiator-only positional state, the shared Set-lock check, token-owned atomic `Saving` claim, version omission, and the unchanged validation/SQL/attachment/child/commit order.
+- Verification: all 43 AxSave characterization checks pass; focused AxData state, authorization, Redis, endpoint, and AxPut contract tests pass without restore.
+
+## 2026-11-16 — AXD-STATE-03A native values and sparse array pairs
+
+- Files: `ARM-11.4/AxTstructData/Service/AxPutDataObjectStore.cs` and `ARM-11.4/AxTstructData/Service/AxPutDataObjectProjection.cs`.
+- Reason: ObjectId-aware AxPut rewrites the shared Redis payload during claim, rollback, retained finalization, and close, so an AxData-only adapter cannot enforce D42's one wire shape.
+- Behavioral impact: AxPut now consumes and writes JSON-native scalar row values plus omitted-when-empty `sourceIds`, `originals`, and `originalSourceIds` pair arrays. Current StructDef metadata controls new numeric projection; string appearance is never used as a business-type inference. Validation/SQL/attachment/child/commit order is unchanged.
+- Verification: serial no-restore solution and AxTstructData builds pass; 13 focused AxPut projection, 20 focused serializer, and 7 Redis lock/lifecycle tests pass. The claim/release/retained-finalize/close script case passes against Memurai 8.x. Full unit (166) and integration (48) suites pass; E2E exits successfully. Full contracts are 173 passed with the same two documented parser-guard failures.
+
+## 2026-11-16 — AXD-STATE-03C active-state timestamp removal
+
+- Files: `ARM-11.4/AxTstructData/Service/AxPutDataObjectProjection.cs` and `ARM-11.4/AxTstructData/Service/AxPutDataObjectStore.cs`.
+- Reason: ObjectId-aware AxPut constructs claim/final snapshots and owns TTL preservation during Save, so timestamp removal and retained-key expiry cannot be completed through an AxData-only adapter.
+- Behavioral impact: AxPut emits no creation/access/expiry properties. Claim temporarily persists the key; release and retained finalization restore the captured positive PTTL, while non-retained finalization still closes and removes active state. SQL/validation/attachment/child/commit order is unchanged.
+- Verification: focused Init/serializer/AxPut/Redis lifecycle tests, 43 AxSave characterization checks, 167 unit, and 50 integration tests pass; full contracts are 173 passed with the same two documented parser-guard failures. Postman is not applicable.
+
+## 2026-11-16 — New Init required-value deferral
+
+- Files: `ARM-11.4/AxValidate/Validate.cs` and `ARM-11.4/AxDependency.Characterization/Invoke-Characterization.ps1`.
+- Reason: AxValidate owns the distinction between required-value validation and other field failures during its on-load pass. An AxData adapter cannot safely infer that distinction from the legacy result strings without duplicating validation semantics or parsing messages that contain field values.
+- Behavioral impact: `InitializeFieldsOnLoad(true)` continues default, SQL, expression, type, duplicate, and other on-load processing, but defers required blank/zero rejection until normal edit or Save validation. Existing-record load, Set, final Save validation, and other `RapidValidateData` callers are unchanged.
+- Verification: the focused new-Init/edit regression passes; 32 remaining field-engine contracts pass with only the same two documented parser-guard failures excluded; all 32 package-free ARM dependency characterization checks pass.
+
+## 2026-11-16 — AXD-STATE-03D persisted locator removal
+
+- Files: `ARM-11.4/AxTstructData/{Model/AxPutDataObjectContext.cs,Service/AxPutDataObjectProjection.cs,Service/AxPutService.cs}` and `ARM-11.4/AxSave.Characterization/Invoke-Characterization.ps1`.
+- Reason: ObjectId-aware AxPut constructs the legacy AxPut request and rewrites retained DataObject state, so deriving the edit locator from canonical `recordId` and omitting Init/AxGet business locators cannot be completed through an AxData-only adapter.
+- Behavioral impact: shared DataObject state no longer persists `keyField` or `keyValue`. ObjectId-aware edits derive `recordid` and its invariant value from `recordId` inside AxPut; create state has no locator. Legacy non-ObjectId AxPut/AxGet requests remain unchanged, as do validation, SQL, attachment, child, and commit ordering.
+- Verification: Infrastructure and Integration.Axpert no-restore builds pass; full unit (170) and integration (51) suites pass; 175 contracts pass with only the same two documented parser-guard failures excluded; all AxSave characterization checks pass. Postman is not applicable because the HTTP contract is unchanged.
+
+## 2026-11-17 — AXD-STATE-03E packed source IDs and aligned old values
+
+- Files: `ARM-11.4/AxTstructData/Service/AxPutDataObjectProjection.cs`.
+- Reason: ObjectId-aware AxPut directly hydrates, permission-projects, validates, and rewrites the shared DataObject snapshot; an AxData-only adapter cannot decode the new packed source-key representation or determine changed fields from aligned arrays inside the Save runtime.
+- Behavioral impact: AxPut now validates per-DC source-key descriptors against current StructDef, splits source-key values at the last tilde into legacy field/`_sourceid` inputs, preserves ordinary tilde-bearing strings, selects dirty existing fields by aligned `values`/`oldValues`, and emits clean retained snapshots in the same packed shape. Source ID `0` remains unresolved; validation, SQL, attachment, child, and commit ordering are unchanged.
+- Verification: serial no-restore solution build passes; 22 focused serializer and 39 focused AxPut/StructDef/AxGet contracts pass; full unit (172) and integration (50) suites pass; full contracts are 180 passed with the same two documented parser-guard failures; E2E exits successfully and all AxSave characterization checks pass. Postman is not applicable.
+
+## 2026-11-18 — AXD-STATE-03F compact field metadata
+
+- Files: `ARM-11.4/AxTstructData/Service/AxPutDataObjectProjection.cs`.
+- Reason: ObjectId-aware AxPut directly validates and rewrites the shared DataObject snapshot; an AxData-only adapter cannot validate the new compact static-read-only/source-key field flags or emit the retained snapshot shape inside Save.
+- Behavioral impact: AxPut accepts only `[name,flags]` field descriptors with flags `0..3`, validates both stored static-read-only and source-key metadata against current StructDef, uses the source-key bit for packed-value hydration, and emits retained snapshots in the same compact shape. Validation, SQL, attachment, child, and commit ordering are unchanged.
+- Verification: serial no-restore solution build, focused serializer/Query/Set/AxPut/authorization/AxGet checks, 172 unit, 53 integration, empty E2E, and all 47 AxSave characterization checks pass; full contracts are 182 passed with the same two documented parser-guard failures. Postman is not applicable because the HTTP contract is unchanged.
+
+## 2026-11-19 — Persistent active DataObject keys
+
+- Files: `ARM-11.4/AxTstructData/{Interface/IAxPutDataObjectStore.cs,Model/AxPutDataObjectContext.cs,Service/AxPutDataObjectStore.cs,Service/AxPutService.cs}`.
+- Reason: ObjectId-aware AxPut directly claims, releases, and finalizes the same active Redis key, so removing active-state TTL cannot be made consistent through an AxData-only adapter.
+- Behavioral impact: AxPut no longer captures or restores PTTL. Claim, rollback release, and retained finalization explicitly leave the active key persistent; non-retained finalization still writes the closure marker and removes active state. Set lock leases, business Save behavior, validation, SQL, attachments, child processing, and commit order are unchanged.
+- Verification: serial no-restore AxData solution build succeeds with zero errors; 7 focused Init unit, 3 Init HTTP contract, and 13 Redis store/lock/AxPut lifecycle tests pass.
+
+## 2026-11-23 — AXD-SET-01 ObjectId-aware Save administrator removal
+
+- Files: `ARM-11.4/AxTstructData/Service/AxPutDataObjectProjection.cs`.
+- Reason: ObjectId-aware AxPut owns Save actor authorization inside AxTstructData, so removing AxData's generic administrator relation alone would leave a literal `admin` bypass that no AxData adapter can intercept.
+- Behavioral impact: ObjectId-aware Save now requires the persisted initiator username relationship; a former `admin` role, former owner, unrelated user, and cross-tenant actor remain denied. Live transaction/DC/field Save permission and all validation/SQL/attachment/child/commit behavior are unchanged.
+- Verification: focused AxPut projection/security contracts and all AxSave characterization checks pass; full no-restore results are 165 unit, 53 integration, and 181 contracts with the two documented parser-guard contracts excluded.

@@ -39,13 +39,15 @@ Environment: Windows + PowerShell. Use PowerShell syntax; do not assume bash too
   authenticate -> resolve tenant -> load by tenant-scoped key `AXD:{tenantId}:{objectId}` -> check owner / current
   approver / admin -> apply transaction/DC/field permission -> execute.
 - Hidden DCs/fields are omitted from responses, never masked.
-- Mutations use a short lock plus a version compare-and-set. A stale version returns 409 with the current version.
-  Never overwrite silently.
+- Mutations use server-side per-object exclusion. Set uses a short token-owned lease and an atomic write that
+  verifies the token; AxPut uses a persistent `Saving` claim shared with that lock. Overlap returns
+  `409 / AXD-CONC-002`. Sequential requests are new operations and last-completed wins; timed-out AxPut requests
+  are never retried automatically.
 - Save is idempotent and transactional. PEG approval is NOT a business Save. Follow `docs/architecture/09-peg-lifecycle.md`
   for SaveOnApprove exactly.
 - Clients can never send an internal bypass flag. Bypass is trusted server code only.
 - AxData baseline/diagnostic logs never contain field values, bodies, secrets, or tokens; log safe identifiers only
-  (tenant, TransId, ObjectId, version, trace id). This restriction is unchanged outside `ARM-11.4`. Inside
+  (tenant, TransId, ObjectId, trace id). This restriction is unchanged outside `ARM-11.4`. Inside
   `ARM-11.4` only, ObjectId-aware AxPut Save preserves the current AxTstructData trace behavior and may add
   operation-relevant trace messages containing DataObject state, request/result content, session identifiers,
   and field values. Never extend this exception to AxData or workers, and do not add tokens, connection strings,

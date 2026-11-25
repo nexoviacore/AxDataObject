@@ -8,36 +8,14 @@ namespace AxData.Infrastructure.Redis;
 public sealed class RedisSnapshotTransport : ISnapshotTransport
 {
     private const string PublishScript = """
-        local exists = redis.call('EXISTS', KEYS[1])
-        local currentVersion = false
-        if exists == 1 then
-            currentVersion = redis.call('HGET', KEYS[1], 'version')
-        end
-        if exists == 0 or currentVersion ~= ARGV[1] then
-            return 'stale|' .. (currentVersion or '')
-        end
-        if redis.call('HEXISTS', KEYS[1], 'saveClaim') == 1 then
-            return 'stale|' .. currentVersion
-        end
-        redis.call('HMSET', KEYS[1], 'version', ARGV[2], 'payload', ARGV[3])
-        redis.call('PERSIST', KEYS[1])
-        redis.call('XADD', KEYS[2], '*',
-            'eventId', ARGV[4],
-            'tenantId', ARGV[5],
-            'objectId', ARGV[6],
-            'objectVersion', ARGV[2],
-            'persistedAtUtc', ARGV[7],
-            'correlationId', ARGV[8],
-            'snapshot', ARGV[3])
-        return 'stored|' .. ARGV[2]
-        """;
-
-    private const string MarkDurableScript = """
-        local currentVersion = redis.call('HGET', KEYS[1], 'version')
-        if currentVersion and tonumber(currentVersion) <= tonumber(ARGV[1]) then
-            redis.call('PEXPIRE', KEYS[1], ARGV[2])
-        end
-        return 1
+        redis.call('XADD', KEYS[1], '*',
+            'eventId', ARGV[1],
+            'tenantId', ARGV[2],
+            'objectId', ARGV[3],
+            'persistedAtUtc', ARGV[4],
+            'correlationId', ARGV[5],
+            'snapshot', ARGV[6])
+        return 'stored'
         """;
 
     private const string DeadLetterScript = """
@@ -46,15 +24,13 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
             'tenantId', ARGV[2],
             'eventId', ARGV[3],
             'objectId', ARGV[4],
-            'objectVersion', ARGV[5],
-            'reasonCode', ARGV[6])
-        return redis.call('XACK', KEYS[1], ARGV[7], ARGV[1])
+            'reasonCode', ARGV[5])
+        return redis.call('XACK', KEYS[1], ARGV[6], ARGV[1])
         """;
 
     private readonly IDatabase _database;
     private readonly AxDataSnapshotSerializer _serializer;
     private readonly AxDataRedisOptions _options;
-    private readonly long _inactivityTtlMilliseconds;
 
     public RedisSnapshotTransport(
         IConnectionMultiplexer connectionMultiplexer,
@@ -64,8 +40,7 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
         ArgumentNullException.ThrowIfNull(connectionMultiplexer);
         ArgumentNullException.ThrowIfNull(serializer);
         ArgumentNullException.ThrowIfNull(options);
-        if (options.InactivityTtl <= TimeSpan.Zero ||
-            string.IsNullOrWhiteSpace(options.SnapshotStreamPrefix) ||
+        if (string.IsNullOrWhiteSpace(options.SnapshotStreamPrefix) ||
             string.IsNullOrWhiteSpace(options.SnapshotDeadLetterPrefix))
         {
             throw new ArgumentOutOfRangeException(nameof(options), "Snapshot Redis options are invalid.");
@@ -82,38 +57,30 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
         _database = connectionMultiplexer.GetDatabase();
         _serializer = serializer;
         _options = options;
-        _inactivityTtlMilliseconds = checked((long)Math.Ceiling(options.InactivityTtl.TotalMilliseconds));
     }
 
     public async Task<AxDataStoreWriteResult> PublishAsync(
         SnapshotEnvelope envelope,
-        long expectedVersion,
         CancellationToken cancellationToken)
     {
         ValidateEnvelope(envelope);
-        if (expectedVersion < 1 || envelope.ObjectVersion != expectedVersion + 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(expectedVersion));
-        }
-
         var payload = _serializer.Serialize(envelope.Snapshot);
         var result = await _database.ScriptEvaluateAsync(
                 PublishScript,
-                [RedisAxDataStore.BuildKey(envelope.TenantId, envelope.ObjectId), BuildStreamKey(envelope.TenantId)],
+                [BuildStreamKey(envelope.TenantId)],
                 [
-                    expectedVersion,
-                    envelope.ObjectVersion,
-                    payload,
                     envelope.EventId,
                     envelope.TenantId,
                     envelope.ObjectId,
                     envelope.PersistedAtUtc.ToString("O", CultureInfo.InvariantCulture),
-                    envelope.CorrelationId
+                    envelope.CorrelationId,
+                    payload
                 ])
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
+            .WaitAsync(cancellationToken);
 
-        return ParseWriteResult((string)result!);
+        return (string)result! == "stored"
+            ? new AxDataStoreWriteResult(AxDataStoreWriteStatus.Stored)
+            : throw new InvalidOperationException("Redis returned an invalid snapshot publication result.");
     }
 
     public async Task<IReadOnlyList<SnapshotDelivery>> ReadAsync(
@@ -133,15 +100,14 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
         }
 
         var stream = BuildStreamKey(tenantId);
-        await EnsureGroupAsync(stream, consumerGroup, cancellationToken).ConfigureAwait(false);
+        await EnsureGroupAsync(stream, consumerGroup, cancellationToken);
         var entries = await _database.StreamReadGroupAsync(
                 stream,
                 consumerGroup,
                 consumerName,
                 ">",
                 maximumCount)
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
+            .WaitAsync(cancellationToken);
 
         if (entries.Length == 0)
         {
@@ -153,8 +119,7 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
                     minId: null,
                     maxId: null,
                     minIdleTimeInMs: checked((long)Math.Ceiling(pendingIdleTime.TotalMilliseconds)))
-                .WaitAsync(cancellationToken)
-                .ConfigureAwait(false);
+                .WaitAsync(cancellationToken);
             if (pending.Length > 0)
             {
                 entries = await _database.StreamClaimAsync(
@@ -163,8 +128,7 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
                         consumerName,
                         checked((long)Math.Ceiling(pendingIdleTime.TotalMilliseconds)),
                         pending.Select(message => message.MessageId).ToArray())
-                    .WaitAsync(cancellationToken)
-                    .ConfigureAwait(false);
+                    .WaitAsync(cancellationToken);
             }
         }
 
@@ -178,8 +142,7 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
                     consumerName,
                     entry.Id,
                     entry.Id)
-                .WaitAsync(cancellationToken)
-                .ConfigureAwait(false);
+                .WaitAsync(cancellationToken);
             var deliveryCount = pending.Length == 0 ? 1 : pending[0].DeliveryCount;
             deliveries.Add(ParseDelivery(tenantId, entry, deliveryCount));
         }
@@ -189,27 +152,19 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
 
     public async Task AcknowledgeAsync(
         SnapshotDelivery delivery,
-        long durableVersion,
         string consumerGroup,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(delivery);
-        if (delivery.Envelope is null || durableVersion < delivery.Envelope.ObjectVersion)
+        if (delivery.Envelope is null)
         {
-            throw new ArgumentOutOfRangeException(nameof(durableVersion));
+            throw new ArgumentException("The delivery has no valid envelope.", nameof(delivery));
         }
 
         var stream = BuildStreamKey(delivery.TenantId);
         await _database.StreamAcknowledgeAsync(stream, consumerGroup, delivery.StreamEntryId)
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
-        await _database.ScriptEvaluateAsync(
-                MarkDurableScript,
-                [RedisAxDataStore.BuildKey(delivery.TenantId, delivery.Envelope.ObjectId)],
-                [durableVersion, _inactivityTtlMilliseconds])
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
-        await TrimAcknowledgedAsync(stream, consumerGroup, cancellationToken).ConfigureAwait(false);
+            .WaitAsync(cancellationToken);
+        await TrimAcknowledgedAsync(stream, consumerGroup, cancellationToken);
     }
 
     public async Task DeadLetterAsync(
@@ -230,13 +185,11 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
                     delivery.TenantId,
                     envelope?.EventId ?? string.Empty,
                     envelope?.ObjectId ?? string.Empty,
-                    envelope?.ObjectVersion ?? 0,
                     reasonCode,
                     consumerGroup
                 ])
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
-        await TrimAcknowledgedAsync(stream, consumerGroup, cancellationToken).ConfigureAwait(false);
+            .WaitAsync(cancellationToken);
+        await TrimAcknowledgedAsync(stream, consumerGroup, cancellationToken);
     }
 
     private async Task EnsureGroupAsync(RedisKey stream, string consumerGroup, CancellationToken cancellationToken)
@@ -244,8 +197,7 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
         try
         {
             await _database.StreamCreateConsumerGroupAsync(stream, consumerGroup, "0-0", createStream: true)
-                .WaitAsync(cancellationToken)
-                .ConfigureAwait(false);
+                .WaitAsync(cancellationToken);
         }
         catch (RedisServerException exception) when (exception.Message.StartsWith("BUSYGROUP", StringComparison.Ordinal))
         {
@@ -258,8 +210,7 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
         CancellationToken cancellationToken)
     {
         var pending = await _database.StreamPendingAsync(stream, consumerGroup)
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
+            .WaitAsync(cancellationToken);
         RedisValue minimumId;
         if (pending.PendingMessageCount > 0)
         {
@@ -268,16 +219,14 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
         else
         {
             var groups = await _database.StreamGroupInfoAsync(stream)
-                .WaitAsync(cancellationToken)
-                .ConfigureAwait(false);
+                .WaitAsync(cancellationToken);
             minimumId = groups.Single(group => string.Equals(group.Name, consumerGroup, StringComparison.Ordinal)).LastDeliveredId;
         }
 
         if (!minimumId.IsNullOrEmpty)
         {
             await _database.StreamTrimByMinIdAsync(stream, minimumId)
-                .WaitAsync(cancellationToken)
-                .ConfigureAwait(false);
+                .WaitAsync(cancellationToken);
         }
     }
 
@@ -292,7 +241,6 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
                 (string)values["eventId"]!,
                 (string)values["tenantId"]!,
                 (string)values["objectId"]!,
-                long.Parse((string)values["objectVersion"]!, CultureInfo.InvariantCulture),
                 state,
                 DateTimeOffset.Parse((string)values["persistedAtUtc"]!, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
                 values.TryGetValue("correlationId", out var correlationId) ? (string)correlationId! : string.Empty);
@@ -317,8 +265,7 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
         ArgumentException.ThrowIfNullOrWhiteSpace(envelope.TenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(envelope.ObjectId);
         ArgumentNullException.ThrowIfNull(envelope.Snapshot);
-        if (envelope.ObjectVersion < 1 || envelope.ObjectVersion != envelope.Snapshot.Version ||
-            !string.Equals(envelope.TenantId, envelope.Snapshot.TenantId, StringComparison.OrdinalIgnoreCase) ||
+        if (!string.Equals(envelope.TenantId, envelope.Snapshot.TenantId, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(envelope.ObjectId, envelope.Snapshot.ObjectId, StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException("Snapshot envelope metadata does not match its state.", nameof(envelope));
@@ -329,17 +276,4 @@ public sealed class RedisSnapshotTransport : ISnapshotTransport
 
     private RedisKey BuildDeadLetterKey(string tenantId) => $"{_options.SnapshotDeadLetterPrefix}:{{{tenantId.ToUpperInvariant()}}}";
 
-    private static AxDataStoreWriteResult ParseWriteResult(string result)
-    {
-        var parts = result.Split('|', 2);
-        var currentVersion = parts.Length == 2 && long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
-            ? parsed
-            : (long?)null;
-        return parts[0] switch
-        {
-            "stored" => new(AxDataStoreWriteStatus.Stored, currentVersion),
-            "stale" => new(AxDataStoreWriteStatus.StaleVersion, currentVersion),
-            _ => throw new InvalidOperationException("Redis returned an invalid snapshot publication result.")
-        };
-    }
 }

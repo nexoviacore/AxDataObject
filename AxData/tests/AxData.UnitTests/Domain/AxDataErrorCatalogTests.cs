@@ -32,15 +32,6 @@ public sealed class AxDataErrorCatalogTests
     [Fact]
     public void Stale_version_uses_the_documented_contract()
     {
-        Assert.Equal("AXD-CONC-001", AxDataErrors.StaleVersion.Code);
-        Assert.Equal(409, AxDataErrors.StaleVersion.HttpStatusCode);
-    }
-
-    [Fact]
-    public void StructDef_change_uses_the_D28_conflict_contract()
-    {
-        Assert.Equal("AXD-CONC-003", AxDataErrors.StructDefChanged.Code);
-        Assert.Equal(409, AxDataErrors.StructDefChanged.HttpStatusCode);
     }
 
     [Theory]

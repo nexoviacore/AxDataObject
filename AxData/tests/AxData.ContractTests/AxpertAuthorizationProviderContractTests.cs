@@ -12,6 +12,12 @@ public sealed class AxpertAuthorizationProviderContractTests
         "reviewer",
         new HashSet<string>(["role-a"], StringComparer.OrdinalIgnoreCase));
 
+    private static readonly IReadOnlyList<AxPermissionDataContainer> DataContainers =
+    [
+        new("dc1", [new("editable", false), new("visible", false), new("secret", false)]),
+        new("dc2", [new("line", false)])
+    ];
+
     [Fact]
     public async Task User_create_row_overrides_allowing_role_row()
     {
@@ -47,7 +53,7 @@ public sealed class AxpertAuthorizationProviderContractTests
         var provider = CreateProvider(source);
 
         var permission = await provider.GetQueryPermissionAsync(
-            "tenant-a", "dtchk", new AxRecordKey("key", "value", 10), User, default);
+            "tenant-a", "dtchk", new AxRecordKey("key", "value", 10), User, DataContainers, default);
 
         Assert.True(permission.IsAllowed);
         Assert.True(permission.CanEditTransaction);
@@ -55,6 +61,30 @@ public sealed class AxpertAuthorizationProviderContractTests
         Assert.Contains("dc2", permission.ReadOnlyDataContainers);
         Assert.Contains("visible", permission.ReadOnlyFields["dc1"]);
         Assert.Contains("set", permission.AllowedOperations);
+    }
+
+    [Fact]
+    public async Task Query_permission_combines_static_read_only_without_loading_StructDef()
+    {
+        var source = new FakePermissionSource();
+        source.Results[AxpertPermissionKind.View] = Success(Row(
+            access: "VIEW", includedDataContainers: "ALL", includedFields: "ALL"));
+        source.Results[AxpertPermissionKind.Edit] = Success(Row(
+            access: "EDIT", includedDataContainers: "ALL", includedFields: "ALL"));
+        var structDef = new FakeStructDefSource();
+        var provider = new AxpertAuthorizationProvider(source, structDef);
+        IReadOnlyList<AxPermissionDataContainer> schema =
+        [
+            new("dc1", [new("editable", false), new("fixed", true)])
+        ];
+
+        var permission = await provider.GetQueryPermissionAsync(
+            "tenant-a", "dtchk", new AxRecordKey("key", "value", 10), User, schema, default);
+
+        Assert.True(permission.IsAllowed);
+        Assert.Contains("fixed", permission.ReadOnlyFields["dc1"]);
+        Assert.DoesNotContain("editable", permission.ReadOnlyFields["dc1"]);
+        Assert.Equal(0, structDef.CallCount);
     }
 
     [Fact]
@@ -87,7 +117,7 @@ public sealed class AxpertAuthorizationProviderContractTests
         var otherTenant = User with { TenantId = "tenant-b" };
 
         var permission = await provider.GetQueryPermissionAsync(
-            "tenant-a", "dtchk", new AxRecordKey("key", "value", 10), otherTenant, default);
+            "tenant-a", "dtchk", new AxRecordKey("key", "value", 10), otherTenant, DataContainers, default);
 
         Assert.False(permission.IsAllowed);
         Assert.Equal(0, source.CallCount);
@@ -101,7 +131,7 @@ public sealed class AxpertAuthorizationProviderContractTests
         var provider = CreateProvider(source);
 
         var permission = await provider.GetQueryPermissionAsync(
-            "tenant-a", "dtchk", new AxRecordKey("key", "value", 10), User, default);
+            "tenant-a", "dtchk", new AxRecordKey("key", "value", 10), User, DataContainers, default);
 
         Assert.False(permission.IsAllowed);
     }
@@ -167,16 +197,18 @@ public sealed class AxpertAuthorizationProviderContractTests
 
     private sealed class FakeStructDefSource : IAxpertStructDefSource
     {
-        public Task<AxpertStructDefSnapshot?> LoadCurrentAsync(
+        public int CallCount { get; private set; }
+
+        public Task<StructDefHandle?> LoadCurrentAsync(
             string tenantId,
             string transId,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<AxpertStructDefSnapshot?>(new(
+            CallCount++;
+            return Task.FromResult<StructDefHandle?>(new(
                 tenantId,
                 transId,
-                new string('a', 64),
                 [
                     new("dc1", false, [new("editable"), new("visible"), new("secret")]),
                     new("dc2", true, [new("line")])

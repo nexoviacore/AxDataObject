@@ -2,7 +2,6 @@ using System.Diagnostics;
 using AxData.Application.Authorization;
 using AxData.Application.Ports;
 using AxData.Application.Ports.Axpert;
-using AxData.Application.Recovery;
 using AxData.Domain.Errors;
 using AxData.Domain.Lifecycle;
 using AxData.Domain.Model;
@@ -32,7 +31,6 @@ public sealed record QueryDataContainerResponse(
 
 public sealed record QueryAxDataResponse(
     string ObjectId,
-    long Version,
     string TransId,
     long? RecordId,
     bool ReadOnly,
@@ -52,11 +50,12 @@ public sealed record QueryAxDataResult(QueryAxDataResponse? Response, AxDataErro
 public sealed class QueryAxDataHandler(
     IUserContext userContext,
     IAxDataStore store,
-    IStructDefProvider structDefProvider,
     IAxpertAuthorizationProvider authorizationProvider,
-    AxDataRecoveryService recoveryService,
     IOperationalEventSink? operationalLog = null)
 {
+    /// <summary>Loads, authorizes, and projects one tenant-scoped AxData object for the current user.</summary>
+    /// <returns>A permission-filtered projection, or a safe application error.</returns>
+    /// <remarks>Hidden containers and fields are omitted. A mismatched tenant or object identity is treated as not found.</remarks>
     public async Task<QueryAxDataResult> HandleAsync(
         QueryAxDataCommand command,
         CancellationToken cancellationToken)
@@ -67,27 +66,17 @@ public sealed class QueryAxDataHandler(
             return QueryAxDataResult.Failure(AxDataErrors.InvalidRequest);
         }
 
-        var actor = await userContext.GetCurrentAsync(cancellationToken).ConfigureAwait(false);
+        var actor = await userContext.GetCurrentAsync(cancellationToken);
         var redisStarted = Stopwatch.GetTimestamp();
-        var state = await store.LoadAsync(actor.TenantId, command.ObjectId, cancellationToken).ConfigureAwait(false);
+        var state = await store.LoadAsync(actor.TenantId, command.ObjectId, cancellationToken);
         Log.Write(new OperationalEvent(
             "redis.load.completed", "query", state is null ? "miss" : "hit",
             Detail: OperationalLogDetail.Diagnostic,
-            TenantId: actor.TenantId, ObjectId: command.ObjectId, Version: state?.Version,
+            TenantId: actor.TenantId, ObjectId: command.ObjectId,
             DurationMs: Stopwatch.GetElapsedTime(redisStarted).TotalMilliseconds));
         if (state is null)
         {
-            var recovery = await recoveryService.RecoverAsync(
-                actor,
-                command.ObjectId,
-                AxAuthorizationOperation.Query,
-                cancellationToken).ConfigureAwait(false);
-            if (!recovery.Succeeded)
-            {
-                return QueryAxDataResult.Failure(recovery.Error!);
-            }
-
-            state = recovery.State!;
+            return QueryAxDataResult.Failure(AxDataErrors.ObjectNotFound);
         }
 
         if (state.Status == AxDataLifecycleStatus.Expired)
@@ -104,9 +93,10 @@ public sealed class QueryAxDataHandler(
         var permission = await authorizationProvider.GetQueryPermissionAsync(
             actor.TenantId,
             state.TransId,
-            new AxRecordKey(state.KeyField, state.KeyValue, state.RecordId),
+            new AxRecordKey(null, null, state.RecordId),
             actor,
-            cancellationToken).ConfigureAwait(false);
+            AxPermissionSchema.FromState(state),
+            cancellationToken);
 
         var authorization = AxAuthorizationContext.FromState(
             actor,
@@ -118,26 +108,12 @@ public sealed class QueryAxDataHandler(
         Log.Write(new OperationalEvent(
             "authorization.completed", "query", isAuthorized ? "allowed" : "denied",
             isAuthorized ? OperationalLogLevel.Information : OperationalLogLevel.Warning,
-            TenantId: actor.TenantId, TransId: state.TransId, ObjectId: state.ObjectId, Version: state.Version,
+            TenantId: actor.TenantId, TransId: state.TransId, ObjectId: state.ObjectId,
             ReasonCode: isAuthorized ? "policy-allowed" : "policy-denied",
             DurationMs: Stopwatch.GetElapsedTime(authorizationStarted).TotalMilliseconds));
         if (!isAuthorized)
         {
             return QueryAxDataResult.Failure(AxDataErrors.AccessDenied);
-        }
-
-        var definition = await structDefProvider.GetAsync(
-            actor.TenantId,
-            state.TransId,
-            cancellationToken).ConfigureAwait(false);
-        if (definition is null)
-        {
-            return QueryAxDataResult.Failure(AxDataErrors.DependencyUnavailable);
-        }
-
-        if (!string.Equals(definition.Version, state.StructDefVersion, StringComparison.OrdinalIgnoreCase))
-        {
-            return QueryAxDataResult.Failure(AxDataErrors.StructDefChanged);
         }
 
         var projection = Project(command, state, permission, authorization);
@@ -148,6 +124,8 @@ public sealed class QueryAxDataHandler(
 
     private IOperationalEventSink Log => operationalLog ?? NullOperationalEventSink.Instance;
 
+    /// <summary>Projects only requested and permission-visible state into the query contract.</summary>
+    /// <returns>The filtered response, or <see langword="null"/> when the requested selection is invalid.</returns>
     private static QueryAxDataResponse? Project(
         QueryAxDataCommand command,
         AxDataState state,
@@ -166,9 +144,10 @@ public sealed class QueryAxDataHandler(
             return null;
         }
 
-        var transactionReadOnly = state.Status is AxDataLifecycleStatus.Saving or AxDataLifecycleStatus.Saved ||
-                                  !permission.CanEditTransaction ||
-                                  !HasAnyRelation(authorization, AxActorRelation.OwnerOrInitiator | AxActorRelation.Administrator);
+        var transactionReadOnly =
+            state.Status != AxDataLifecycleStatus.Active ||
+            !permission.CanEditTransaction ||
+            !HasAnyRelation(authorization, AxActorRelation.Initiator);
         var containers = new List<QueryDataContainerResponse>();
         foreach (var container in state.DataContainers.Values)
         {
@@ -184,8 +163,8 @@ public sealed class QueryAxDataHandler(
             }
 
             var selectAllFields = requested is null || requestedFields!.Any(IsWildcard);
-            var knownFields = container.Rows
-                .SelectMany(row => row.Fields.Keys)
+            var knownFields = container.Fields
+                .Select(field => field.Name)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (!selectAllFields && requestedFields!.Any(field => !knownFields.Contains(field)))
             {
@@ -197,13 +176,15 @@ public sealed class QueryAxDataHandler(
                 row.RowId,
                 row.PersistedRecordId,
                 row.State == AxRowState.Unchanged ? null : AxRowAction.ToCode(row.State),
-                row.Fields
-                    .Where(field => selectAllFields || requestedFields!.Contains(field.Key, StringComparer.OrdinalIgnoreCase))
-                    .Where(field => IsFieldVisible(container.Name, field.Key, permission))
+                container.Fields
+                    .Where(field => selectAllFields || requestedFields!.Contains(field.Name, StringComparer.OrdinalIgnoreCase))
+                    .Where(field => IsFieldVisible(container.Name, field.Name, permission))
                     .Select(field => new QueryFieldResponse(
-                        field.Key,
-                        field.Value.Value,
-                        containerReadOnly || field.Value.IsReadOnly || IsReadOnlyField(container.Name, field.Key, permission)))
+                        field.Name,
+                        row.Fields[field.Name].Value,
+                        containerReadOnly ||
+                        field.IsReadOnly ||
+                        IsReadOnlyField(container.Name, field.Name, permission)))
                     .ToArray()))
                 .ToArray();
 
@@ -228,7 +209,6 @@ public sealed class QueryAxDataHandler(
 
         return new QueryAxDataResponse(
             state.ObjectId,
-            state.Version,
             state.TransId,
             state.RecordId,
             transactionReadOnly,

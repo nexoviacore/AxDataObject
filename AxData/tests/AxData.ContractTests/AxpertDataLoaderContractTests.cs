@@ -36,7 +36,6 @@ public sealed class AxpertDataLoaderContractTests
         Assert.True(result.Succeeded);
         Assert.NotNull(result.State);
         Assert.Equal(101, result.State.RecordId);
-        Assert.Equal(SampleStructDefFixture.Version, source.LastRequest?.PublishedDefinitionVersion);
         Assert.Equal("owner", source.LastRequest?.UserName);
         Assert.Equal(10, result.State.DataContainers["dc1"].Rows.Single().PersistedRecordId);
         Assert.Equal("row_header", result.State.DataContainers["dc1"].Rows.Single().RowId);
@@ -47,6 +46,7 @@ public sealed class AxpertDataLoaderContractTests
         Assert.Equal(2m, line.Fields["qty"].Value);
         Assert.Equal(501, line.Fields["qty"].SourceId);
         Assert.Equal(501, line.Fields["qty"].OriginalSourceId);
+        Assert.True(line.Fields["qty"].IsSourceKey);
         Assert.False(line.Fields["qty"].IsDirty);
     }
 
@@ -94,6 +94,9 @@ public sealed class AxpertDataLoaderContractTests
         Assert.Null(header.PersistedRecordId);
         Assert.Null(Assert.Single(header.Fields).Value.Value);
         Assert.Empty(result.State.DataContainers["dc2"].Rows);
+        Assert.Equal(["amount", "item", "qty", "rate"],
+            result.State.DataContainers["dc2"].Fields.Select(field => field.Name));
+        Assert.True(result.State.DataContainers["dc2"].Fields.Single(field => field.Name == "qty").IsSourceKey);
     }
 
     [Fact]
@@ -183,6 +186,7 @@ public sealed class AxpertDataLoaderContractTests
             {
                 ["row1"] = new()
                 {
+                    ["axp_recid"] = "10",
                     ["customer"] = "ACME",
                     ["customer_sourceid"] = "0"
                 }
@@ -192,6 +196,12 @@ public sealed class AxpertDataLoaderContractTests
         var containers = AxpertDataSource.ProjectContainers(payload);
 
         Assert.Null(containers[0].Rows[0].SourceIds!["customer"]);
+
+        var loadShape = AxpertDataSource.ProjectLoadShape(payload);
+        var row = Assert.Single(Assert.Single(loadShape).Rows);
+        Assert.Equal(10, row.RecordId);
+        Assert.Equal(["customer"], row.Fields);
+        Assert.Equal(["customer"], row.NonNullFields);
     }
 
     [Theory]
@@ -213,6 +223,7 @@ public sealed class AxpertDataLoaderContractTests
         };
 
         Assert.Throws<InvalidOperationException>(() => AxpertDataSource.ProjectContainers(payload));
+        Assert.Throws<InvalidOperationException>(() => AxpertDataSource.ProjectLoadShape(payload));
     }
 
     private static AxpertDataSourceResult SuccessfulResult() => new(

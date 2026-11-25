@@ -22,48 +22,86 @@ public sealed class AxPutDataObjectProjectionTests
     }
 
     [Fact]
-    public void Owner_initiator_and_admin_are_allowed_but_unrelated_actor_is_denied()
+    public void Source_key_uses_last_tilde_while_normal_field_tilde_remains_literal()
+    {
+        DataObjectSnapshotV3 snapshot = Snapshot();
+        DataRowSnapshotV3 row = snapshot.DataContainers![0].Rows[0];
+        row.Values[0] = SnapshotScalar.String("Widget~123");
+        row.Values[1] = SnapshotScalar.String("North~Admin~7");
+
+        Assert.Null(AxPutDataObjectProjection.ValidateSnapshot(snapshot, "tenant-a", "object-a"));
+        var data = AxPutDataObjectProjection.ToSubmitData(snapshot);
+
+        Assert.Equal("Widget~123", data["dc1"]["row1"]["name"]);
+        Assert.False(data["dc1"]["row1"].ContainsKey("name_sourceid"));
+        Assert.Equal("North~Admin", data["dc1"]["row1"]["customer"]);
+        Assert.Equal("7", data["dc1"]["row1"]["customer_sourceid"]);
+    }
+
+    [Theory]
+    [InlineData("admin")]
+    [InlineData("admin~bad")]
+    [InlineData("admin~-1")]
+    public void Malformed_packed_source_key_fails_closed(string packed)
+    {
+        DataObjectSnapshotV3 snapshot = Snapshot();
+        snapshot.DataContainers![0].Rows[0].Values[1] = SnapshotScalar.String(packed);
+
+        Assert.Equal(
+            "The DataObject contains invalid source-key field data.",
+            AxPutDataObjectProjection.ValidateSnapshot(snapshot, "tenant-a", "object-a"));
+    }
+
+    [Fact]
+    public void Unknown_field_flag_fails_closed()
+    {
+        DataObjectSnapshotV3 snapshot = Snapshot();
+        snapshot.DataContainers![0].Fields[0] = new DataObjectFieldSnapshot("name", 4);
+
+        Assert.Equal(
+            "The DataObject contains invalid or duplicate field ordinals.",
+            AxPutDataObjectProjection.ValidateSnapshot(snapshot, "tenant-a", "object-a"));
+    }
+
+    [Fact]
+    public void Snapshot_rejects_dirty_baseline_identical_to_current_value_and_source()
+    {
+        DataObjectSnapshotV3 snapshot = Snapshot();
+        List<DataContainerSnapshotV3> containers = Assert.IsType<List<DataContainerSnapshotV3>>(snapshot.DataContainers);
+        DataRowSnapshotV3 row = containers[0].Rows[0];
+        containers[0].Rows[0] = row with
+        {
+            OldValues = row.Values.ToList()
+        };
+
+        Assert.Equal(
+            "The DataObject contains an oldValues array with no changed field.",
+            AxPutDataObjectProjection.ValidateSnapshot(snapshot, "tenant-a", "object-a"));
+    }
+
+    [Fact]
+    public void Only_initiator_is_allowed_even_when_an_unrelated_actor_has_former_admin_role()
     {
         DataObjectSnapshotV3 snapshot = Snapshot();
 
-        Assert.True(AxPutDataObjectProjection.IsActorAllowed(snapshot, "owner", []));
-        Assert.True(AxPutDataObjectProjection.IsActorAllowed(snapshot, "initiator", []));
-        Assert.True(AxPutDataObjectProjection.IsActorAllowed(snapshot, "other", ["Admin"]));
-        Assert.False(AxPutDataObjectProjection.IsActorAllowed(snapshot, "other", ["sales"]));
+        Assert.True(AxPutDataObjectProjection.IsActorAllowed(snapshot, "initiator"));
+        Assert.False(AxPutDataObjectProjection.IsActorAllowed(snapshot, "other"));
+        Assert.False(AxPutDataObjectProjection.IsActorAllowed(snapshot, "owner"));
     }
 
     [Fact]
     public void Loaded_state_checks_unknown_cross_tenant_and_unrelated_actor_without_version_disclosure()
     {
         AxPutDataObjectCheck unknown = AxPutDataObjectProjection.CheckLoadedState(
-            null, "tenant-a", "object-a", "owner", []);
+            null, "tenant-a", "object-a", "initiator", []);
         AxPutDataObjectCheck crossTenant = AxPutDataObjectProjection.CheckLoadedState(
-            Snapshot(), "tenant-b", "object-a", "owner", []);
+            Snapshot(), "tenant-b", "object-a", "initiator", []);
         AxPutDataObjectCheck unrelated = AxPutDataObjectProjection.CheckLoadedState(
             Snapshot(), "tenant-a", "object-a", "other", ["sales"]);
 
-        Assert.Equal((AxPutObjectErrors.InvalidRequest, 404, null),
-            (unknown.ErrorCode, unknown.HttpStatus, unknown.CurrentVersion));
-        Assert.Equal((AxPutObjectErrors.InvalidRequest, 400, null),
-            (crossTenant.ErrorCode, crossTenant.HttpStatus, crossTenant.CurrentVersion));
-        Assert.Equal((AxPutObjectErrors.AccessDenied, 403, null),
-            (unrelated.ErrorCode, unrelated.HttpStatus, unrelated.CurrentVersion));
-    }
-
-    [Fact]
-    public void Stale_version_and_definition_mismatch_return_current_version()
-    {
-        DataObjectSnapshotV3 snapshot = Snapshot();
-
-        AxPutDataObjectCheck stale = AxPutDataObjectProjection.CheckExpectedVersion(snapshot, 2);
-        AxPutDataObjectCheck definition = AxPutDataObjectProjection.CheckStructDefVersion(snapshot, "hash-b");
-
-        Assert.Equal((AxPutObjectErrors.StaleVersion, 409, 3L),
-            (stale.ErrorCode, stale.HttpStatus, stale.CurrentVersion));
-        Assert.Equal((AxPutObjectErrors.StructDefChanged, 409, 3L),
-            (definition.ErrorCode, definition.HttpStatus, definition.CurrentVersion));
-        Assert.True(AxPutDataObjectProjection.CheckExpectedVersion(snapshot, 3).Success);
-        Assert.True(AxPutDataObjectProjection.CheckStructDefVersion(snapshot, "HASH-A").Success);
+        Assert.Equal((AxPutObjectErrors.InvalidRequest, 404), (unknown.ErrorCode, unknown.HttpStatus));
+        Assert.Equal((AxPutObjectErrors.InvalidRequest, 400), (crossTenant.ErrorCode, crossTenant.HttpStatus));
+        Assert.Equal((AxPutObjectErrors.AccessDenied, 403), (unrelated.ErrorCode, unrelated.HttpStatus));
     }
 
     [Theory]
@@ -74,11 +112,10 @@ public sealed class AxPutDataObjectProjectionTests
         DataObjectSnapshotV3 snapshot = Snapshot(status);
 
         AxPutDataObjectCheck check = AxPutDataObjectProjection.CheckLoadedState(
-            snapshot, "tenant-a", "object-a", "owner", []);
+            snapshot, "tenant-a", "object-a", "initiator", []);
 
         Assert.False(check.Success);
-        Assert.Equal((AxPutObjectErrors.ActiveConflict, 409, 3L),
-            (check.ErrorCode, check.HttpStatus, check.CurrentVersion));
+        Assert.Equal((AxPutObjectErrors.ActiveConflict, 409), (check.ErrorCode, check.HttpStatus));
     }
 
     [Fact]
@@ -131,9 +168,7 @@ public sealed class AxPutDataObjectProjectionTests
         {
             ObjectId = "object-a",
             TenantId = "tenant-a",
-            Version = 3,
             ObjectIdWasSupplied = true,
-            OwnerUserName = "owner",
             InitiatorUserName = "initiator",
             TransId = "sales",
             Snapshot = snapshot
@@ -158,9 +193,7 @@ public sealed class AxPutDataObjectProjectionTests
         {
             ObjectId = "object-new",
             TenantId = "tenant-a",
-            Version = 1,
             ObjectIdWasSupplied = false,
-            OwnerUserName = "owner",
             InitiatorUserName = "owner",
             TransId = "sales",
             RuntimeInitialized = true
@@ -174,7 +207,7 @@ public sealed class AxPutDataObjectProjectionTests
     }
 
     [Fact]
-    public void Final_snapshot_applies_runtime_values_record_ids_lifecycle_and_one_version_advance()
+    public void Final_snapshot_applies_runtime_values_record_ids_and_lifecycle()
     {
         DataObjectSnapshotV3 source = Snapshot();
         StructDef definition = Definition();
@@ -186,12 +219,9 @@ public sealed class AxPutDataObjectProjectionTests
         {
             ObjectId = "object-a",
             TenantId = "tenant-a",
-            Version = 3,
             ObjectIdWasSupplied = true,
-            OwnerUserName = "owner",
             InitiatorUserName = "initiator",
             TransId = "sales",
-            CurrentStructDefVersion = "hash-a",
             Snapshot = source
         };
 
@@ -199,87 +229,117 @@ public sealed class AxPutDataObjectProjectionTests
             definition,
             context,
             [new AxPutRecordIdMapping("dc1", "row-a", 42)],
-            4,
-            "Saved",
+            "Active",
             DateTimeOffset.Parse("2026-11-06T12:00:00Z"));
 
-        Assert.Equal(4, finalized.Version);
-        Assert.Equal("Saved", finalized.Status);
-        DataRowSnapshotV3 row = Assert.Single(Assert.Single(finalized.DataContainers!).Rows);
+        Assert.Equal("Active", finalized.Status);
+        Assert.Null(typeof(DataObjectSnapshotV3).GetProperty("StructDef"));
+        DataContainerSnapshotV3 container = Assert.Single(finalized.DataContainers!);
+        DataRowSnapshotV3 row = Assert.Single(container.Rows);
         Assert.Equal(42, row.RecordId);
         Assert.Equal("Unchanged", row.State);
-        Assert.Equal("Saved widget", row.Fields.Single(field => field.Name == "name").Value.Value);
+        Assert.Equal("Saved widget", row.Values[FieldIndex(container, "name")].Text);
+        Assert.Null(row.OldValues);
+        Assert.Equal("Acme~7", row.Values[FieldIndex(container, "customer")].Text);
+        Assert.True(container.Fields[FieldIndex(container, "name")].ReadOnly);
+        Assert.True(container.Fields[FieldIndex(container, "customer")].SourceKey);
     }
 
     [Fact]
-    public void V1_reader_normalizes_to_current_contract()
+    public void Final_snapshot_uses_structdef_numeric_type_without_inferring_string_business_types()
+    {
+        StructDef definition = new();
+        definition.Frames!.Add(new TFrame { FrameNo = 1, RowCount = 1 });
+        definition.Flds!.Add(new TField { FrameNo = 1, FieldName = "amount", DataType = "n" });
+        definition.Flds.Add(new TField { FrameNo = 1, FieldName = "date_text", DataType = "c" });
+        definition.SubmitValue("amount", 1, "12.50", "", 0, 0, 0);
+        definition.SubmitValue("date_text", 1, "2026-11-16", "", 0, 0, 0);
+        definition.SubmitRecordId(1, 1, 42);
+        AxPutDataObjectContext context = new()
+        {
+            ObjectId = "object-new",
+            TenantId = "tenant-a",
+            ObjectIdWasSupplied = false,
+            InitiatorUserName = "initiator",
+            TransId = "sales"
+        };
+
+        DataObjectSnapshotV3 snapshot = AxPutDataObjectProjection.CreateFinalSnapshot(
+            definition,
+            context,
+            [new AxPutRecordIdMapping("dc1", context.GetOrCreateRowId("dc1", 1), 42)],
+            "Active",
+            DateTimeOffset.Parse("2026-11-16T00:00:00Z"));
+
+        DataContainerSnapshotV3 container = Assert.Single(snapshot.DataContainers!);
+        DataRowSnapshotV3 row = Assert.Single(container.Rows);
+        Assert.Equal(SnapshotScalarKind.Number, row.Values[FieldIndex(container, "amount")].Kind);
+        Assert.Equal("12.50", row.Values[FieldIndex(container, "amount")].Text);
+        Assert.Equal(SnapshotScalarKind.String, row.Values[FieldIndex(container, "date_text")].Kind);
+        Assert.Equal("2026-11-16", row.Values[FieldIndex(container, "date_text")].Text);
+    }
+
+    [Fact]
+    public void Versioned_reader_payload_is_rejected_instead_of_migrated()
     {
         const string payload = """
             {"schemaVersion":1,"objectId":"object-a","tenantId":"tenant-a","transId":"sales",
-             "ownerUserName":"owner","initiatorUserName":"initiator","version":3,
-             "structDef":{"transId":"sales","version":"hash-a"},"status":"Active",
-             "createdAtUtc":"2026-11-05T00:00:00Z","lastAccessedAtUtc":"2026-11-05T00:00:00Z",
-             "dataContainers":[{"name":"dc1","isGrid":false,"rows":[{"rowId":"legacy-row1",
-             "persistedRecordId":42,"state":"Unchanged","fields":[{"name":"name",
-             "value":{"kind":"string","value":"Widget"},"originalValue":{"kind":"string","value":"Widget"},
-             "isDirty":false,"isReadOnly":false}]}]}],"files":[],"axOpen":true}
+             "initiatorUserName":"initiator","status":"Active",
+             "dataContainers":[]}
             """;
 
-        DataObjectSnapshotV3 snapshot = DataObjectSnapshotReader.ReadCurrent(payload);
+        Assert.Throws<System.Text.Json.JsonException>(() => DataObjectSnapshotReader.ReadCurrent(payload));
+    }
 
-        Assert.Equal(3, snapshot.SchemaVersion);
-        Assert.Equal("dc1", Assert.Single(snapshot.DataContainers!).DcId);
-        Assert.Equal(42, Assert.Single(Assert.Single(snapshot.DataContainers!).Rows).RecordId);
+    [Fact]
+    public void Business_key_locator_payload_is_rejected_instead_of_retained()
+    {
+        const string payload = """
+            {"objectId":"object-a","tenantId":"tenant-a","transId":"sales",
+             "keyField":"salesid","keyValue":"42","recordId":42,
+             "initiatorUserName":"initiator","status":"Active","dataContainers":[]}
+            """;
+
+        Assert.Throws<System.Text.Json.JsonException>(() => DataObjectSnapshotReader.ReadCurrent(payload));
     }
 
     private static StructDef Definition()
     {
         StructDef definition = new();
         definition.Frames!.Add(new TFrame { FrameNo = 1 });
-        definition.Flds!.Add(new TField { FrameNo = 1, FieldName = "name" });
+        definition.Flds!.Add(new TField { FrameNo = 1, FieldName = "name", Readonly = true });
         definition.Flds.Add(new TField { FrameNo = 1, FieldName = "customer", SourceKey = true });
         return definition;
     }
 
     private static DataObjectSnapshotV3 Snapshot(string status = "Active") => new()
     {
-        SchemaVersion = 3,
         ObjectId = "object-a",
         TenantId = "tenant-a",
         TransId = "sales",
-        KeyField = "salesid",
-        KeyValue = "42",
         RecordId = 42,
-        OwnerUserName = "owner",
         InitiatorUserName = "initiator",
-        Version = 3,
-        StructDef = new StructDefReferenceSnapshot("sales", "hash-a"),
-        CreatedAtUtc = "2026-11-05T00:00:00Z",
-        LastAccessedAtUtc = "2026-11-05T00:00:00Z",
         Status = status,
         DataContainers =
         [
             new DataContainerSnapshotV3(
                 "dc1",
                 false,
+                [new DataObjectFieldSnapshot("name", DataObjectFieldSnapshot.ReadOnlyFlag), new DataObjectFieldSnapshot("customer", DataObjectFieldSnapshot.SourceKeyFlag)],
                 [
                     new DataRowSnapshotV3(
                         "row-a",
                         42,
                         "Edited",
                         [
-                            new FieldSnapshotV3(
-                                "name",
-                                new SnapshotValue("string", "Widget"),
-                                IsDirty: true,
-                                OriginalValue: new SnapshotValue("string", "Old widget")),
-                            new FieldSnapshotV3(
-                                "customer",
-                                new SnapshotValue("string", "Acme"),
-                                SourceId: 7)
-                        ])
+                            SnapshotScalar.String("Widget"),
+                            SnapshotScalar.String("Acme~7")
+                        ],
+                        [SnapshotScalar.String("Old widget"), SnapshotScalar.String("Acme~7")])
                 ])
-        ],
-        Files = []
+        ]
     };
+
+    private static int FieldIndex(DataContainerSnapshotV3 container, string name) =>
+        container.Fields.FindIndex(field => string.Equals(field.Name, name, StringComparison.OrdinalIgnoreCase));
 }

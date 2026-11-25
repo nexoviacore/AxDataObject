@@ -3,6 +3,7 @@ using AxData.Application.Ports;
 using AxData.Application.Ports.Axpert;
 using AxData.Domain.Errors;
 using AxData.Domain.Model;
+using AxData.Integration.Axpert.FillGrid;
 using AxStructDef.Models;
 using AxValidate.Dto;
 
@@ -12,6 +13,8 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
 {
     private static readonly SemaphoreSlim LegacyRuntimeGate = new(1, 1);
 
+    /// <summary>Creates and hydrates an isolated Axpert runtime operation for the supplied state.</summary>
+    /// <returns>An operation only after runtime creation and hydration both succeed.</returns>
     public async Task<FieldOperationStartResult> CreateOperationAsync(
         AxDataState state,
         AxUserContext user,
@@ -26,14 +29,14 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
                 "The field runtime tenant does not match the trusted user tenant.");
         }
 
-        await LegacyRuntimeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await LegacyRuntimeGate.WaitAsync(cancellationToken);
         try
         {
             var operation = new Operation(runtimeFactory, state, user, LegacyRuntimeGate);
-            var initialized = await operation.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            var initialized = await operation.InitializeAsync(cancellationToken);
             if (!initialized.Succeeded)
             {
-                await operation.DisposeAsync().ConfigureAwait(false);
+                await operation.DisposeAsync();
                 return FieldOperationStartResult.Failure(
                     initialized.Error ?? "The Axpert field runtime could not be created.",
                     initialized.FailureKind);
@@ -65,6 +68,8 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
         private bool _completed;
         private bool _disposed;
 
+        public StructDefHandle? Definition => _runtime?.Definition;
+
         public Task<FieldOperationStatus> InitializeAsync(CancellationToken cancellationToken) =>
             CreateAndHydrateAsync(cancellationToken);
 
@@ -81,7 +86,7 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await _runtime.Validate.InitializeFieldsOnLoad(state.RecordId is null).ConfigureAwait(false);
+                await _runtime.Validate.InitializeFieldsOnLoad(state.RecordId is null);
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!_runtime.Validate.validationPassed)
                 {
@@ -126,7 +131,7 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
                     state,
                     field,
                     value,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken);
                 if (!evaluated.Succeeded)
                 {
                     _contaminated = true;
@@ -154,7 +159,7 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
                 return FieldOperationStatus.Failure("The Axpert field operation cannot be rebuilt.");
             }
 
-            var initialized = await CreateAndHydrateAsync(cancellationToken).ConfigureAwait(false);
+            var initialized = await CreateAndHydrateAsync(cancellationToken);
             if (!initialized.Succeeded)
             {
                 return initialized;
@@ -167,7 +172,7 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
                     state,
                     submission.Address,
                     submission.Value,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken);
                 if (!replayed.Succeeded)
                 {
                     _contaminated = true;
@@ -197,15 +202,13 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
                     return FieldEvaluationResult.Success();
                 }
 
-                var rebuilt = await RebuildAsync(cancellationToken).ConfigureAwait(false);
+                var rebuilt = await RebuildAsync(cancellationToken);
                 if (!rebuilt.Succeeded)
                 {
                     return Failure(
                         _accepted[^1].Address,
                         rebuilt.Error ?? "The accepted Axpert field state could not be rebuilt.",
-                        rebuilt.FailureKind == FieldOperationFailureKind.DefinitionChanged
-                            ? AxDataErrors.StructDefChanged.Code
-                            : AxDataErrors.ValidationFailed.Code);
+                        "AXD-VAL-001");
                 }
             }
 
@@ -221,6 +224,28 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
                     _accepted.LastOrDefault()?.Address ?? UnknownAddress(),
                     "The Axpert field operation result could not be read.");
             }
+        }
+
+        public Task<FillGridExecutionResult> ExecuteApplicableFillGridAsync(
+            AxDataState candidate,
+            IReadOnlyCollection<FieldAddress> changedParents,
+            AxUserContext actor,
+            CancellationToken cancellationToken)
+        {
+            if (_disposed || !_completed || _runtime?.FillGridRuntime is null ||
+                !string.Equals(candidate.TenantId, actor.TenantId, StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult(new FillGridExecutionResult(
+                    false,
+                    [],
+                    "The Axpert Set runtime is not ready for FillGrid execution."));
+            }
+
+            return AxpertFillGridEngine.ExecuteLoadedAsync(
+                _runtime.FillGridRuntime,
+                candidate,
+                changedParents,
+                cancellationToken);
         }
 
         public ValueTask DisposeAsync()
@@ -241,17 +266,14 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
                 new AxpertFieldRuntimeRequest(
                     state.TenantId,
                     state.TransId,
-                    state.StructDefVersion,
                     user,
                     state.RecordId),
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken);
             if (!runtimeResult.Succeeded || runtimeResult.Value is null)
             {
                 return FieldOperationStatus.Failure(
                     runtimeResult.Error ?? "The Axpert field runtime could not be created.",
-                    runtimeResult.DefinitionChanged
-                        ? FieldOperationFailureKind.DefinitionChanged
-                        : FieldOperationFailureKind.DependencyUnavailable);
+                    FieldOperationFailureKind.DependencyUnavailable);
             }
 
             var hydrated = Hydrate(runtimeResult.Value, state, cancellationToken);
@@ -261,12 +283,12 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
             }
 
             _runtime = runtimeResult.Value;
-            _runtime.MarkHydrated();
             _contaminated = false;
             return FieldOperationStatus.Success;
         }
 
-        private static FieldOperationStatus Hydrate(
+        /// <summary>Copies AxData values into the Axpert runtime while preserving row and source-key identity.</summary>
+        internal static FieldOperationStatus Hydrate(
             AxpertFieldRuntime runtime,
             AxDataState state,
             CancellationToken cancellationToken)
@@ -392,7 +414,7 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
                     RowNo = target.RowNumber,
                     FieldName = target.LegacyField.FieldName
                 }
-            ]).ConfigureAwait(false);
+            ]);
             cancellationToken.ThrowIfCancellationRequested();
             if (validation.Success)
             {
@@ -441,14 +463,15 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
                 validationAddress.FieldName);
         }
 
-        private static FieldEvaluationResult ReadBack(
+        /// <summary>Reads successful runtime values back into state and returns the resulting field changes.</summary>
+        /// <remarks>Callers must not invoke this after a failed Axpert operation.</remarks>
+        internal static FieldEvaluationResult ReadBack(
             AxpertFieldRuntime runtime,
             AxDataState state,
             IEnumerable<FieldAddress> submittedAddresses)
         {
             var submitted = submittedAddresses.ToArray();
             var pending = new List<PendingChange>();
-            runtime.MarkReadBack();
             var structDef = runtime.Validate._sdef;
             if (structDef?.Flds is null)
             {
@@ -552,7 +575,8 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
                 dirty,
                 true,
                 change.SourceId,
-                change.DomainField.OriginalSourceId);
+                change.DomainField.OriginalSourceId,
+                change.DomainField.IsSourceKey);
         }
 
         private static long? NormalizeSourceId(long value) => value > 0 ? value : null;
@@ -590,9 +614,9 @@ public sealed class AxpertFieldEngine(IAxpertFieldRuntimeFactory runtimeFactory)
                 ? leftBytes.AsSpan().SequenceEqual(rightBytes)
                 : Equals(left, right);
 
-        private static FieldAddress UnknownAddress() => new(string.Empty, string.Empty, string.Empty);
+        internal static FieldAddress UnknownAddress() => new(string.Empty, string.Empty, string.Empty);
 
-        private static FieldEvaluationResult Failure(
+        internal static FieldEvaluationResult Failure(
             FieldAddress address,
             string message,
             string? code = null) =>

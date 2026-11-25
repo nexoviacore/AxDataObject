@@ -14,7 +14,6 @@ public sealed record M1DevelopmentAxpertOptions
 
     public string TransId { get; init; } = "sample-order";
 
-    public string StructDefVersion { get; init; } = "1";
 }
 
 public sealed class M1DevelopmentStructDefProvider(M1DevelopmentAxpertOptions options) : IStructDefProvider
@@ -27,32 +26,18 @@ public sealed class M1DevelopmentStructDefProvider(M1DevelopmentAxpertOptions op
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult<StructDefHandle?>(Matches(tenantId, transId, options.StructDefVersion)
+        return Task.FromResult<StructDefHandle?>(Matches(tenantId, transId)
             ? _definition
             : null);
     }
 
-    public Task<StructDefHandle?> GetVersionAsync(
-        string tenantId,
-        string transId,
-        string version,
-        CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult<StructDefHandle?>(Matches(tenantId, transId, version)
-            ? _definition
-            : null);
-    }
-
-    private bool Matches(string tenantId, string transId, string version) =>
+    private bool Matches(string tenantId, string transId) =>
         string.Equals(tenantId, options.TenantId, StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(transId, options.TransId, StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(version, options.StructDefVersion, StringComparison.Ordinal);
+        string.Equals(transId, options.TransId, StringComparison.OrdinalIgnoreCase);
 
     private static StructDefHandle CreateDefinition(M1DevelopmentAxpertOptions settings) => new(
         settings.TenantId,
         settings.TransId,
-        settings.StructDefVersion,
         [
             new DataContainerDefinition(
                 "dc1",
@@ -116,6 +101,7 @@ public sealed class M1DevelopmentAuthorizationProvider(M1DevelopmentAxpertOption
         string transId,
         AxRecordKey key,
         AxUserContext user,
+        IReadOnlyList<AxPermissionDataContainer> dataContainers,
         CancellationToken cancellationToken) =>
         GetPermissionAsync(tenantId, transId, user, cancellationToken);
 
@@ -171,12 +157,8 @@ public sealed class M1DevelopmentDataLoader(IRowIdGenerator rowIdGenerator) : IA
             user.TenantId,
             definition.TransId,
             user.UserName,
-            user.UserName,
-            definition.Version,
             DateTimeOffset.UnixEpoch)
         {
-            KeyField = key.KeyField,
-            KeyValue = key.KeyValue,
             RecordId = key.RecordId
         };
 
@@ -188,28 +170,56 @@ public sealed class M1DevelopmentDataLoader(IRowIdGenerator rowIdGenerator) : IA
                 [new AxDataRow(rowIdGenerator.NewRowId(), AxRowState.Unchanged, 1, new Dictionary<string, AxFieldValue>
                 {
                     ["customer"] = new("M1 customer")
-                })]));
-        state.DataContainers.Add("dc2", new AxDataContainer("dc2", true));
+                })],
+                FieldMetadata(definition, "dc1")));
+        state.DataContainers.Add("dc2", new AxDataContainer(
+            "dc2",
+            true,
+            fields: FieldMetadata(definition, "dc2")));
         return Task.FromResult(new AxDataLoadResult(true, state, null));
     }
+
+    private static IEnumerable<AxDataFieldMetadata> FieldMetadata(StructDefHandle definition, string dcId) =>
+        definition.DataContainers
+            .Single(container => string.Equals(container.Name, dcId, StringComparison.OrdinalIgnoreCase))
+            .Fields
+            .OrderBy(field => field.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(field => field.Name, StringComparer.Ordinal)
+            .Select(field => new AxDataFieldMetadata(field.Name, field.IsReadOnly, field.SourceKey));
 }
 
-public sealed class M1DevelopmentFieldEngine : IAxpertFieldEngine
+public sealed class M1DevelopmentFieldEngine(
+    IStructDefProvider structDefProvider,
+    IAxpertFillGridEngine fillGridEngine) : IAxpertFieldEngine
 {
-    public Task<FieldOperationStartResult> CreateOperationAsync(
+    public async Task<FieldOperationStartResult> CreateOperationAsync(
         AxDataState state,
         AxUserContext user,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(!string.Equals(state.TenantId, user.TenantId, StringComparison.OrdinalIgnoreCase)
-            ? FieldOperationStartResult.Failure("The M1 field runtime tenant is invalid.")
-            : FieldOperationStartResult.Success(new Operation(state)));
+        if (!string.Equals(state.TenantId, user.TenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            return FieldOperationStartResult.Failure("The M1 field runtime tenant is invalid.");
+        }
+
+        var definition = await structDefProvider.GetAsync(
+            state.TenantId,
+            state.TransId,
+            cancellationToken);
+        return definition is null
+            ? FieldOperationStartResult.Failure("The M1 StructDef is unavailable.")
+            : FieldOperationStartResult.Success(new Operation(state, definition, fillGridEngine));
     }
 
-    private sealed class Operation(AxDataState state) : IAxpertFieldOperation
+    private sealed class Operation(
+        AxDataState state,
+        StructDefHandle definition,
+        IAxpertFillGridEngine fillGridEngine) : IAxpertFieldOperation
     {
         private readonly List<FieldChange> _changes = [];
+
+        public StructDefHandle? Definition => definition;
 
         public Task<FieldEvaluationResult> InitializeOnLoadAsync(
             CancellationToken cancellationToken)
@@ -262,6 +272,13 @@ public sealed class M1DevelopmentFieldEngine : IAxpertFieldEngine
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(new FieldEvaluationResult(true, _changes.ToArray(), []));
         }
+
+        public Task<FillGridExecutionResult> ExecuteApplicableFillGridAsync(
+            AxDataState candidate,
+            IReadOnlyCollection<FieldAddress> changedParents,
+            AxUserContext user,
+            CancellationToken cancellationToken) =>
+            fillGridEngine.ExecuteApplicableAsync(candidate, changedParents, user, cancellationToken);
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

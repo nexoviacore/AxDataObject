@@ -9,13 +9,8 @@ internal static class AxDataSnapshotSql
                 :TenantId TenantId,
                 :ObjectId ObjectId,
                 :TransId TransId,
-                :KeyField KeyField,
-                :KeyValue KeyValue,
                 :RecordId RecordId,
                 :DataObjectJson DataObjectJson,
-                :ObjectVersion ObjectVersion,
-                :StructDefVersion StructDefVersion,
-                :OwnerUserName OwnerUserName,
                 :InitiatorUserName InitiatorUserName,
                 :PersistDateTimeUtc PersistDateTimeUtc,
                 :LastAccessedDateTimeUtc LastAccessedDateTimeUtc,
@@ -30,13 +25,8 @@ internal static class AxDataSnapshotSql
         ON (target.TenantId = incoming.TenantId AND target.ObjectId = incoming.ObjectId)
         WHEN MATCHED THEN UPDATE SET
             target.TransId = incoming.TransId,
-            target.KeyField = incoming.KeyField,
-            target.KeyValue = incoming.KeyValue,
             target.RecordId = incoming.RecordId,
             target.DataObjectJson = incoming.DataObjectJson,
-            target.ObjectVersion = incoming.ObjectVersion,
-            target.StructDefVersion = incoming.StructDefVersion,
-            target.OwnerUserName = incoming.OwnerUserName,
             target.InitiatorUserName = incoming.InitiatorUserName,
             target.PersistDateTimeUtc = incoming.PersistDateTimeUtc,
             target.LastAccessedDateTimeUtc = incoming.LastAccessedDateTimeUtc,
@@ -46,17 +36,16 @@ internal static class AxDataSnapshotSql
             target.PendingFromDateTimeUtc = incoming.PendingFromDateTimeUtc,
             target.CurrentTaskId = incoming.CurrentTaskId,
             target.AxOpen = incoming.AxOpen
-        WHERE incoming.ObjectVersion > target.ObjectVersion
         WHEN NOT MATCHED THEN INSERT (
-            TenantId, ObjectId, TransId, KeyField, KeyValue, RecordId, DataObjectJson,
-            ObjectVersion, StructDefVersion, OwnerUserName, InitiatorUserName,
+            TenantId, ObjectId, TransId, RecordId, DataObjectJson,
+            InitiatorUserName,
             PersistDateTimeUtc, LastAccessedDateTimeUtc, LifecycleStatus, ApprovalStatus,
             PendingWith, PendingFromDateTimeUtc, CurrentTaskId, AxOpen
         ) VALUES (
-            incoming.TenantId, incoming.ObjectId, incoming.TransId, incoming.KeyField,
-            incoming.KeyValue, incoming.RecordId, incoming.DataObjectJson,
-            incoming.ObjectVersion, incoming.StructDefVersion, incoming.OwnerUserName,
-            incoming.InitiatorUserName, incoming.PersistDateTimeUtc,
+            incoming.TenantId, incoming.ObjectId, incoming.TransId,
+            incoming.RecordId, incoming.DataObjectJson,
+            incoming.InitiatorUserName,
+            incoming.PersistDateTimeUtc,
             incoming.LastAccessedDateTimeUtc, incoming.LifecycleStatus,
             incoming.ApprovalStatus, incoming.PendingWith, incoming.PendingFromDateTimeUtc,
             incoming.CurrentTaskId, incoming.AxOpen
@@ -65,26 +54,21 @@ internal static class AxDataSnapshotSql
 
     internal const string Postgres = """
         INSERT INTO AxDataObjectInstance (
-            TenantId, ObjectId, TransId, KeyField, KeyValue, RecordId, DataObjectJson,
-            ObjectVersion, StructDefVersion, OwnerUserName, InitiatorUserName,
+            TenantId, ObjectId, TransId, RecordId, DataObjectJson,
+            InitiatorUserName,
             PersistDateTimeUtc, LastAccessedDateTimeUtc, LifecycleStatus, ApprovalStatus,
             PendingWith, PendingFromDateTimeUtc, CurrentTaskId, AxOpen
         ) VALUES (
-            @TenantId, @ObjectId, @TransId, @KeyField, @KeyValue, @RecordId, @DataObjectJson,
-            @ObjectVersion, @StructDefVersion, @OwnerUserName, @InitiatorUserName,
+            @TenantId, @ObjectId, @TransId, @RecordId, @DataObjectJson,
+            @InitiatorUserName,
             CAST(@PersistDateTimeUtc AS timestamptz), CAST(@LastAccessedDateTimeUtc AS timestamptz),
             @LifecycleStatus, @ApprovalStatus, @PendingWith,
             CAST(@PendingFromDateTimeUtc AS timestamptz), @CurrentTaskId, @AxOpen
         )
         ON CONFLICT (TenantId, ObjectId) DO UPDATE SET
             TransId = EXCLUDED.TransId,
-            KeyField = EXCLUDED.KeyField,
-            KeyValue = EXCLUDED.KeyValue,
             RecordId = EXCLUDED.RecordId,
             DataObjectJson = EXCLUDED.DataObjectJson,
-            ObjectVersion = EXCLUDED.ObjectVersion,
-            StructDefVersion = EXCLUDED.StructDefVersion,
-            OwnerUserName = EXCLUDED.OwnerUserName,
             InitiatorUserName = EXCLUDED.InitiatorUserName,
             PersistDateTimeUtc = EXCLUDED.PersistDateTimeUtc,
             LastAccessedDateTimeUtc = EXCLUDED.LastAccessedDateTimeUtc,
@@ -94,32 +78,26 @@ internal static class AxDataSnapshotSql
             PendingFromDateTimeUtc = EXCLUDED.PendingFromDateTimeUtc,
             CurrentTaskId = EXCLUDED.CurrentTaskId,
             AxOpen = EXCLUDED.AxOpen
-        WHERE EXCLUDED.ObjectVersion > AxDataObjectInstance.ObjectVersion
         """;
 
     internal const string SqlServer = """
         MERGE AxDataObjectInstance WITH (HOLDLOCK) AS target
         USING (VALUES (
-            @TenantId, @ObjectId, @TransId, @KeyField, @KeyValue, @RecordId, @DataObjectJson,
-            @ObjectVersion, @StructDefVersion, @OwnerUserName, @InitiatorUserName,
+            @TenantId, @ObjectId, @TransId, @RecordId, @DataObjectJson,
+            @InitiatorUserName,
             @PersistDateTimeUtc, @LastAccessedDateTimeUtc, @LifecycleStatus, @ApprovalStatus,
             @PendingWith, @PendingFromDateTimeUtc, @CurrentTaskId, @AxOpen
         )) AS incoming (
-            TenantId, ObjectId, TransId, KeyField, KeyValue, RecordId, DataObjectJson,
-            ObjectVersion, StructDefVersion, OwnerUserName, InitiatorUserName,
+            TenantId, ObjectId, TransId, RecordId, DataObjectJson,
+            InitiatorUserName,
             PersistDateTimeUtc, LastAccessedDateTimeUtc, LifecycleStatus, ApprovalStatus,
             PendingWith, PendingFromDateTimeUtc, CurrentTaskId, AxOpen
         )
         ON target.TenantId = incoming.TenantId AND target.ObjectId = incoming.ObjectId
-        WHEN MATCHED AND incoming.ObjectVersion > target.ObjectVersion THEN UPDATE SET
+        WHEN MATCHED THEN UPDATE SET
             TransId = incoming.TransId,
-            KeyField = incoming.KeyField,
-            KeyValue = incoming.KeyValue,
             RecordId = incoming.RecordId,
             DataObjectJson = incoming.DataObjectJson,
-            ObjectVersion = incoming.ObjectVersion,
-            StructDefVersion = incoming.StructDefVersion,
-            OwnerUserName = incoming.OwnerUserName,
             InitiatorUserName = incoming.InitiatorUserName,
             PersistDateTimeUtc = incoming.PersistDateTimeUtc,
             LastAccessedDateTimeUtc = incoming.LastAccessedDateTimeUtc,
@@ -130,15 +108,15 @@ internal static class AxDataSnapshotSql
             CurrentTaskId = incoming.CurrentTaskId,
             AxOpen = incoming.AxOpen
         WHEN NOT MATCHED THEN INSERT (
-            TenantId, ObjectId, TransId, KeyField, KeyValue, RecordId, DataObjectJson,
-            ObjectVersion, StructDefVersion, OwnerUserName, InitiatorUserName,
+            TenantId, ObjectId, TransId, RecordId, DataObjectJson,
+            InitiatorUserName,
             PersistDateTimeUtc, LastAccessedDateTimeUtc, LifecycleStatus, ApprovalStatus,
             PendingWith, PendingFromDateTimeUtc, CurrentTaskId, AxOpen
         ) VALUES (
-            incoming.TenantId, incoming.ObjectId, incoming.TransId, incoming.KeyField,
-            incoming.KeyValue, incoming.RecordId, incoming.DataObjectJson,
-            incoming.ObjectVersion, incoming.StructDefVersion, incoming.OwnerUserName,
-            incoming.InitiatorUserName, incoming.PersistDateTimeUtc,
+            incoming.TenantId, incoming.ObjectId, incoming.TransId,
+            incoming.RecordId, incoming.DataObjectJson,
+            incoming.InitiatorUserName,
+            incoming.PersistDateTimeUtc,
             incoming.LastAccessedDateTimeUtc, incoming.LifecycleStatus,
             incoming.ApprovalStatus, incoming.PendingWith, incoming.PendingFromDateTimeUtc,
             incoming.CurrentTaskId, incoming.AxOpen
@@ -163,7 +141,7 @@ internal static class AxDataSnapshotSql
         ArgumentException.ThrowIfNullOrWhiteSpace(provider);
         var marker = provider.Trim().Equals("oracle", StringComparison.OrdinalIgnoreCase) ? ":" : "@";
         return $"""
-            SELECT TenantId, ObjectId, DataObjectJson, ObjectVersion, StructDefVersion, LifecycleStatus
+            SELECT TenantId, ObjectId, DataObjectJson, LifecycleStatus
             FROM AxDataObjectInstance
             WHERE TenantId = {marker}TenantId AND ObjectId = {marker}ObjectId
             """;

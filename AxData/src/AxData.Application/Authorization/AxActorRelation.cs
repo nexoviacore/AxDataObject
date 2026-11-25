@@ -4,8 +4,7 @@ namespace AxData.Application.Authorization;
 public enum AxActorRelation
 {
     Unrelated = 0,
-    OwnerOrInitiator = 1,
+    Initiator = 1,
     CurrentApprover = 2,
-    Viewer = 4,
-    Administrator = 8
+    Viewer = 4
 }

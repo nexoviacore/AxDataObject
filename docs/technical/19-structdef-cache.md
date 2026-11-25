@@ -1,22 +1,13 @@
-## 19. Caching StructDef
+## 19. Loading StructDef
 
-Cache key:
+Active DataObject state does not retain or enforce a StructDef version/hash. AxData does not query raw `tstructs.props`, calculate a content hash, or maintain a hash-keyed projected-definition cache.
 
-```text
-tenantId + transId + publishedDefinitionVersion
-```
-
-Requirements:
-
-- StructDef is treated as immutable for a given version.
-- Definition changes create/invalidate a versioned entry.
-- An active AxData object continues with a compatible definition or follows a documented migration/restart rule.
-- Do not use only TransId as the cache key in a multi-tenant system.
+Init/AxGet, Set, and Save load the current StructDef needed for metadata and behavior. Query/Get uses stored compact field metadata plus fresh authorization and does not load StructDef. Concrete mutable Axpert types remain inside Integration.Axpert; application-only and fake paths use the small neutral definition contract where required by the dependency boundary.
 
 ### 19.1 Legacy cache and operation runtime
 
-The current legacy `StructDef.LoadStructure` cache is keyed by tenant schema plus TransId, has no visible definition-hash component, and returns a newly deserialized mutable StructDef with helpers reattached. AxTstructData uses that cache by default; current AxData bypasses it with `refreshCache: true`.
+The legacy `StructDef.LoadStructure` cache is keyed by tenant schema plus TransId and returns a newly deserialized mutable StructDef with helpers reattached. AxTstructData uses that cache by default; current AxData bypasses cache reads with `refreshCache: true`.
 
-P1D-05A must prove Builder invalidation/coherency before AxData enables the legacy cache. The operation first reads the authoritative current definition hash and compares it with the AxData object's stored hash. A mismatch returns `AXD-CONC-003` and requires re-Init. If legacy cache coherency cannot be proven, AxData refreshes once per operation rather than once per submitted field. Authorization never relies on a cached StructDef object.
+AxData loads one current mutable StructDef per real operation rather than preloading a second definition for a hash or cache check. Real Init uses that same instance for AxGet, Validate/Parser, and on-load processing, then constructs the clean DataObject once from the final runtime values. Real Set uses its operation-owned instance for neutral metadata, hydration, validation/dependencies, final readback, and FillGrid metadata/query preparation; the handler does not separately preload a projected definition. Authorization never relies on a cached mutable StructDef object.
 
-The cached definition is only an input for creating a fresh operation-scoped runtime. Mutable `StructDef`, `Validate`, and `Parser` instances are not shared between operations, tenants, users, or AxData objects.
+Mutable `StructDef`, `Validate`, `Parser`, and `Utils` instances are request-owned and are not shared between operations, tenants, users, or AxData objects. Init follows AxTstructData's scoped-runtime model without the Set field-engine's process-wide gate; a concurrent-init contract verifies separate definitions and overlapping loads. Set holds the field-engine gate for its complete runtime, including FillGrid execution, so FillGrid no longer acquires a second runtime/gate in the production Set path.

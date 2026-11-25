@@ -1,4 +1,3 @@
-using System.Globalization;
 using AxData.Application.Ports;
 using AxData.Domain.Model;
 using AxData.Infrastructure.Serialization;
@@ -10,49 +9,36 @@ public sealed class RedisAxDataStore : IAxDataStore
 {
     private const string CreateOnlyMarker = "create";
 
-    private const string CompareAndSetScript = """
+    private const string OwnedWriteScript = """
         local exists = redis.call('EXISTS', KEYS[1])
-        local currentVersion = false
-        if exists == 1 then
-            currentVersion = redis.call('HGET', KEYS[1], 'version')
-        end
-
         if ARGV[1] == 'create' then
             if exists == 1 then
-                return 'stale|' .. (currentVersion or '')
+                return 'conflict'
             end
-        elseif exists == 0 or currentVersion ~= ARGV[1] then
-            return 'stale|' .. (currentVersion or '')
+        elseif exists == 0 or redis.call('GET', KEYS[2]) ~= ARGV[2] then
+            return 'conflict'
         end
 
-        redis.call('HMSET', KEYS[1], 'version', ARGV[2], 'payload', ARGV[3])
-        redis.call('PEXPIRE', KEYS[1], ARGV[4])
-        return 'stored|' .. ARGV[2]
+        redis.call('HSET', KEYS[1], 'payload', ARGV[3])
+        redis.call('PERSIST', KEYS[1])
+        return 'stored'
         """;
 
     private readonly IDatabase _database;
     private readonly AxDataSnapshotSerializer _serializer;
-    private readonly long _inactivityTtlMilliseconds;
 
     public RedisAxDataStore(
         IConnectionMultiplexer connectionMultiplexer,
-        AxDataSnapshotSerializer serializer,
-        AxDataRedisOptions options)
+        AxDataSnapshotSerializer serializer)
     {
         ArgumentNullException.ThrowIfNull(connectionMultiplexer);
         ArgumentNullException.ThrowIfNull(serializer);
-        ArgumentNullException.ThrowIfNull(options);
-
-        if (options.InactivityTtl <= TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(options), "The inactivity TTL must be positive.");
-        }
-
         _database = connectionMultiplexer.GetDatabase();
         _serializer = serializer;
-        _inactivityTtlMilliseconds = checked((long)Math.Ceiling(options.InactivityTtl.TotalMilliseconds));
     }
 
+    /// <summary>Loads and verifies a snapshot stored under its tenant-scoped Redis key.</summary>
+    /// <returns>The state, or <see langword="null"/> when no payload exists.</returns>
     public async Task<AxDataState?> LoadAsync(
         string tenantId,
         string objectId,
@@ -62,8 +48,7 @@ public sealed class RedisAxDataStore : IAxDataStore
         cancellationToken.ThrowIfCancellationRequested();
 
         var payload = await _database.HashGetAsync(key, "payload")
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
+            .WaitAsync(cancellationToken);
         if (payload.IsNull)
         {
             return null;
@@ -79,6 +64,7 @@ public sealed class RedisAxDataStore : IAxDataStore
         return state;
     }
 
+    /// <summary>Checks the durable closed marker for a tenant-scoped object.</summary>
     public async Task<bool> IsClosedAsync(
         string tenantId,
         string objectId,
@@ -86,35 +72,34 @@ public sealed class RedisAxDataStore : IAxDataStore
     {
         cancellationToken.ThrowIfCancellationRequested();
         return await _database.KeyExistsAsync(BuildClosedKey(tenantId, objectId))
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
+            .WaitAsync(cancellationToken);
     }
 
+    /// <summary>Atomically creates an object or replaces it after verifying the mutation lease token.</summary>
+    /// <returns>A stored or conflict status; token mismatches never write state.</returns>
     public async Task<AxDataStoreWriteResult> WriteAsync(
         AxDataState state,
-        long? expectedVersion,
+        string? lockToken,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(state);
-        if (expectedVersion < 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(expectedVersion), "Expected version must be positive.");
-        }
-
         var key = BuildKey(state.TenantId, state.ObjectId);
         var payload = _serializer.Serialize(state);
-        var expected = expectedVersion?.ToString(CultureInfo.InvariantCulture) ?? CreateOnlyMarker;
-        var version = state.Version.ToString(CultureInfo.InvariantCulture);
+        var mode = lockToken is null ? CreateOnlyMarker : "owned";
 
         cancellationToken.ThrowIfCancellationRequested();
         var result = await _database.ScriptEvaluateAsync(
-                CompareAndSetScript,
-                [key],
-                [expected, version, payload, _inactivityTtlMilliseconds])
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
+                OwnedWriteScript,
+                [key, RedisAxDataLock.BuildKey(state.TenantId, state.ObjectId)],
+                [mode, lockToken ?? string.Empty, payload])
+            .WaitAsync(cancellationToken);
 
-        return ParseWriteResult((string)result!);
+        return (string)result! switch
+        {
+            "stored" => new AxDataStoreWriteResult(AxDataStoreWriteStatus.Stored),
+            "conflict" => new AxDataStoreWriteResult(AxDataStoreWriteStatus.Conflict),
+            _ => throw new InvalidOperationException("Redis returned an unknown owned-write result.")
+        };
     }
 
     internal static RedisKey BuildKey(string tenantId, string objectId)
@@ -131,29 +116,4 @@ public sealed class RedisAxDataStore : IAxDataStore
         return $"AXD:CLOSED:{{{tenantId.ToUpperInvariant()}}}:{objectId.ToUpperInvariant()}";
     }
 
-    private static AxDataStoreWriteResult ParseWriteResult(string result)
-    {
-        var separator = result.IndexOf('|');
-        if (separator < 0)
-        {
-            throw new InvalidOperationException("Redis returned an invalid compare-and-set result.");
-        }
-
-        var status = result[..separator];
-        var versionText = result[(separator + 1)..];
-        var currentVersion = long.TryParse(
-            versionText,
-            NumberStyles.None,
-            CultureInfo.InvariantCulture,
-            out var parsedVersion)
-            ? parsedVersion
-            : (long?)null;
-
-        return status switch
-        {
-            "stored" => new AxDataStoreWriteResult(AxDataStoreWriteStatus.Stored, currentVersion),
-            "stale" => new AxDataStoreWriteResult(AxDataStoreWriteStatus.StaleVersion, currentVersion),
-            _ => throw new InvalidOperationException("Redis returned an unknown compare-and-set status.")
-        };
-    }
 }

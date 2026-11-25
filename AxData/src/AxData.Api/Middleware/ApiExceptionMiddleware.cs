@@ -25,8 +25,7 @@ public sealed class ApiExceptionMiddleware(RequestDelegate next)
                 AxDataErrorResponse.Create(
                     exception.Error.Code,
                     exception.Error.Message,
-                    context.TraceIdentifier,
-                    exception.CurrentVersion),
+                    context.TraceIdentifier),
                 context.RequestAborted);
         }
         catch (Exception exception) when (!context.Response.HasStarted)
@@ -41,7 +40,7 @@ public sealed class ApiExceptionMiddleware(RequestDelegate next)
                 "failed",
                 OperationalLogLevel.Error,
                 CorrelationId: context.TraceIdentifier,
-                ObjectId: context.Request.RouteValues["objectId"]?.ToString(),
+                ObjectId: RequestOperationalMetadata.GetObjectId(context),
                 ErrorCode: UnexpectedCode,
                 ReasonCode: exception.GetType().Name));
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;

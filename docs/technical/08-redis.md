@@ -6,7 +6,7 @@ Proposed namespaced keys:
 
 ```text
 AXD:{tenantId}:{objectId}             serialized AxData state
-AXDLOCK:{tenantId}:{objectId}         short operation lock
+AXD:LOCK:{tenantId}:OBJECT            shared Set/AxPut operation lock
 AXDIDEMP:{tenantId}:{operationKey}    optional short result cache; DB remains durable
 PEG:{tenantId}:{workflowInstanceId}   optional indexed copy of active PEG state
 ```
@@ -15,33 +15,33 @@ The logical requirement `AXD + ObjectId` is preserved while adding tenant isolat
 
 ### 8.2 Atomic update
 
-Set and other mutating operations use both a short lease and an object version:
+Set uses a short server-owned lease:
 
 ```text
 Acquire lock with unique token and bounded lease
     -> read state
     -> authorize
-    -> compare expected version
     -> execute operation
-    -> increment version
-    -> write complete state atomically and refresh TTL
+    -> atomically verify the lease token, write complete state, and refresh TTL
     -> release only the lock owned by this token
 ```
 
-A Lua script, Redis transaction, or storage abstraction must atomically compare the stored version and write the new state. A stale request returns HTTP `409 Conflict` with the current version; it never silently overwrites the object.
+The final Lua write verifies that the lock still contains the holder's unique token. An expired or replaced holder cannot commit. AxPut uses the same lock key to establish a persistent `Saving` claim before hydration and SQL; Set observes that state and returns `409 / AXD-CONC-002`. A competing AxPut claim does the same when Set holds the lease.
 
-The lock prevents overlapping evaluation work. Versioning remains required because locks can expire and requests can retry.
+Sequential requests are distinct operations and the last completed operation wins. There is no stale-tab detector. A timed-out AxPut request is not automatically retried because the server cannot infer whether its business transaction committed.
 
-### 8.3 Expiry and eviction
+### 8.3 Persistence and eviction
 
 - TTL is refreshed on authorized activity.
-- Eviction is allowed only after a durable recoverable snapshot exists.
-- LRU capacity management treats Redis removal as eviction, not durable deletion.
+- Active payloads contain no creation, access, or expiry timestamps, and active keys have no inactivity TTL. Init, Set, AxPut claim/release, and retained finalization leave the key persistent.
+- Short-lived lock leases keep their bounded TTL because they are coordination keys, not DataObject storage.
+- Redis eviction or manual deletion removes the only active DataObject copy in the current scope; a later lookup returns `404 / AXD-NOTFOUND-001` and does not attempt database recovery.
+- Capacity and TTL settings must therefore be chosen with this explicit loss-of-active-state behavior in mind until durable snapshot recovery is reintroduced.
 - Completed/rejected/recalled objects follow retention configuration.
 - `AxOpen` modifies logical cleanup timing but does not bypass infrastructure hard limits indefinitely.
 
 ### 8.4 Active-state size and definition cache boundary
 
-The active `AXD:` value stores AxData state only; it never stores mutable `StructDef`, `Validate`, or `Parser` instances. Snapshot schema v3 uses sparse original values/source IDs and avoids repeating container/row identity per field. P1D-05A measures the agreed 50 DC x 70 rows x 100 fields envelope and records the supported byte/memory limit before P1D-05B changes production limits or storage layout.
+The active `AXD:` value stores AxData state only; it never stores mutable `StructDef`, `Validate`, or `Parser` instances. The current payload has no format/schema discriminator and no compatibility reader: deployments clear incompatible active objects rather than migrate them. Each DC stores ordered `[name,flags]` descriptors once, with static read-only bit `1` and source-key bit `2`. Rows store aligned typed values, with source-key display value and non-negative ID packed as `value~id`, plus optional aligned `oldValues` only while an existing row is dirty. Init/AxGet business-key locators, per-row source/original arrays, data types, files, and AxOpen are omitted; existing state retains only the resolved `recordId`, Query/Get uses stored field metadata plus fresh permissions without StructDef, Set/Save validate the flags against current StructDef, and active PEG state is included only when present.
 
-The legacy StructDef Redis entry is a separate definition cache. It is not AxData durable state and must not weaken the current raw-definition hash check. AxData may reuse it only when Builder invalidation or equivalent hash coherency is demonstrated; otherwise AxData refreshes StructDef once per operation. Splitting one AxData object across Redis keys is deferred unless measurement proves a compact single-value snapshot cannot meet the capacity envelope, because multi-key storage complicates atomic version CAS and stream publication.
+The unchanged hash key remains `AXD:{SCHEMANAME}:{OBJECTID}`. One compact value preserves atomic replacement and the 50 DC x 70 rows x 100 fields (350,000 instances) capacity envelope. The legacy StructDef cache is separate from DataObject state; active operations load the current definition without a stored definition binding. Snapshot stream publication remains deferred.

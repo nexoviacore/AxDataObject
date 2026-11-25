@@ -1,20 +1,16 @@
 ## 13. Database persistence
 
-### 13.1 AxDataObjectInstance
+### 13.1 AxDataObjectInstance (dormant future use)
 
-The stated base fields are retained and supplemented with version/lifecycle data needed for safe recovery. Exact data types follow the supported database.
+The compiled snapshot table is not an active DataObject dependency. Its current version-free shape is retained only for possible future redesign; Redis misses do not read it.
 
 | Field | Purpose |
 |---|---|
 | ObjectId | Primary logical identifier |
 | TenantId/AxpertInstanceId | Tenant isolation |
 | TransId | Tstruct identifier |
-| KeyField, KeyValue | Business lookup key |
 | RecordId | Persisted Axpert record ID |
 | DataObjectJson | Latest serialized snapshot |
-| ObjectVersion | Optimistic concurrency/recovery version |
-| StructDefVersion | Definition used by the object |
-| Username/OwnerUserName | Object owner |
 | InitiatorUserName | Workflow initiator |
 | PersistDateTimeUtc | Snapshot time |
 | LastAccessedDateTimeUtc | Expiry/recovery support |
@@ -22,9 +18,8 @@ The stated base fields are retained and supplemented with version/lifecycle data
 | ApprovalStatus | Workflow projection |
 | PendingWith | Current approvers projection |
 | PendingFromDateTimeUtc | Current pending time |
-| AxOpen | Lifecycle override |
 
-One current snapshot row exists per tenant/ObjectId. If full history is required, use a separate append-only history/audit table rather than repeatedly expanding this row.
+The dormant schema has at most one row per tenant/ObjectId and uses last-delivery-wins replacement. Reactivating it requires a separately approved ordering, durability, retention, and authorization design.
 
 ### 13.2 Idempotency store
 

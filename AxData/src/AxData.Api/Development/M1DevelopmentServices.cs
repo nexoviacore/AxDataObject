@@ -1,10 +1,8 @@
-using ARMCommon.Helpers;
-using ARMCommon.Interface;
 using AxData.Application.Ports;
 using AxData.Application.Ports.Axpert;
+using AxData.Application.Init;
 using AxData.Infrastructure.Redis;
 using AxData.Infrastructure.Serialization;
-using AxData.Infrastructure.Sql;
 using AxData.Integration.Axpert.Development;
 using AxData.Integration.Axpert.FillGrid;
 using StackExchange.Redis;
@@ -30,14 +28,12 @@ public static class M1DevelopmentServices
         }
 
         var redisConnection = Required(configuration["AxData:Redis:ConnectionString"], "AxData:Redis:ConnectionString");
-        var postgresConnection = Required(configuration["AxData:Postgres:ConnectionString"], "AxData:Postgres:ConnectionString");
         var tenantId = Required(configuration["AxData:M1:TenantId"], "AxData:M1:TenantId");
         var userName = Required(configuration["AxData:M1:UserName"], "AxData:M1:UserName");
         var transId = Required(configuration["AxData:M1:TransId"], "AxData:M1:TransId");
 
         var redisOptions = new AxDataRedisOptions
         {
-            InactivityTtl = TimeSpan.FromMinutes(configuration.GetValue("AxData:Redis:InactivityTtlMinutes", 30)),
             LockLeaseDuration = TimeSpan.FromSeconds(configuration.GetValue("AxData:Redis:LockLeaseSeconds", 10))
         };
         var snapshotOptions = new AxDataSnapshotOptions
@@ -55,8 +51,7 @@ public static class M1DevelopmentServices
         var axpertOptions = new M1DevelopmentAxpertOptions
         {
             TenantId = tenantId,
-            TransId = transId,
-            StructDefVersion = "1"
+            TransId = transId
         };
 
         services.AddSingleton(new DevelopmentIdentityOptions(tenantId, userName, []));
@@ -67,18 +62,11 @@ public static class M1DevelopmentServices
         services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisConnection));
         services.AddSingleton<IAxDataStore, RedisAxDataStore>();
         services.AddSingleton<IAxDataLock, RedisAxDataLock>();
-        services.AddSingleton<ISnapshotTransport, RedisSnapshotTransport>();
-        services.AddScoped<IDbHelper>(_ =>
-        {
-            var helper = DBHelper.CreateDbHelper("postgre");
-            helper.ConnectionString = postgresConnection;
-            return helper;
-        });
-        services.AddScoped<IAxDataSnapshotRepository, AxDataSnapshotStore>();
         services.AddSingleton<IStructDefProvider, M1DevelopmentStructDefProvider>();
         services.AddSingleton<IAxpertAuthorizationProvider, M1DevelopmentAuthorizationProvider>();
         services.AddSingleton<IAxpertDataLoader, M1DevelopmentDataLoader>();
         services.AddSingleton<IAxpertFieldEngine, M1DevelopmentFieldEngine>();
+        services.AddSingleton<IAxpertInitializer, PortBasedAxpertInitializer>();
         services.AddSingleton<IAxpertFillGridRuntimeFactory, M1DevelopmentFillGridRuntimeFactory>();
         services.AddSingleton<IAxpertFillGridEngine, AxpertFillGridEngine>();
         return true;

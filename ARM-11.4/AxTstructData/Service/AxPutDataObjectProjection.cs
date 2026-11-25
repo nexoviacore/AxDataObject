@@ -34,7 +34,7 @@ public static partial class AxPutDataObjectProjection
                 400);
         }
 
-        if (!IsActorAllowed(snapshot, userName, roles))
+        if (!IsActorAllowed(snapshot, userName))
         {
             return new AxPutDataObjectCheck(
                 false,
@@ -59,56 +59,21 @@ public static partial class AxPutDataObjectProjection
                 false,
                 "The DataObject has an active conflicting operation.",
                 AxPutObjectErrors.ActiveConflict,
-                409,
-                snapshot.Version);
+                409);
         }
 
-        return new AxPutDataObjectCheck(true, CurrentVersion: snapshot.Version);
+        return new AxPutDataObjectCheck(true);
     }
-
-    public static AxPutDataObjectCheck CheckExpectedVersion(DataObjectSnapshotV3 snapshot, long? expectedVersion) =>
-        expectedVersion == snapshot.Version
-            ? new AxPutDataObjectCheck(true, CurrentVersion: snapshot.Version)
-            : new AxPutDataObjectCheck(
-                false,
-                "The DataObject was changed by another request.",
-                AxPutObjectErrors.StaleVersion,
-                409,
-                snapshot.Version);
-
-    public static AxPutDataObjectCheck CheckStructDefVersion(
-        DataObjectSnapshotV3 snapshot,
-        string? currentVersion) =>
-        string.IsNullOrWhiteSpace(currentVersion)
-            ? new AxPutDataObjectCheck(
-                false,
-                "The current transaction definition could not be resolved.",
-                AxPutObjectErrors.StateUnavailable,
-                503,
-                snapshot.Version)
-            : string.Equals(snapshot.StructDef?.Version, currentVersion, StringComparison.OrdinalIgnoreCase)
-                ? new AxPutDataObjectCheck(true, CurrentVersion: snapshot.Version)
-                : new AxPutDataObjectCheck(
-                    false,
-                    "The transaction definition changed. Re-initialize the DataObject.",
-                    AxPutObjectErrors.StructDefChanged,
-                    409,
-                    snapshot.Version);
 
     public static string? ValidateSnapshot(
         DataObjectSnapshotV3 snapshot,
         string tenantId,
         string objectId)
     {
-        if (snapshot.SchemaVersion != 3 ||
-            string.IsNullOrWhiteSpace(snapshot.ObjectId) ||
+        if (string.IsNullOrWhiteSpace(snapshot.ObjectId) ||
             string.IsNullOrWhiteSpace(snapshot.TenantId) ||
             string.IsNullOrWhiteSpace(snapshot.TransId) ||
-            string.IsNullOrWhiteSpace(snapshot.OwnerUserName) ||
             string.IsNullOrWhiteSpace(snapshot.InitiatorUserName) ||
-            snapshot.Version < 1 ||
-            snapshot.StructDef is null ||
-            string.IsNullOrWhiteSpace(snapshot.StructDef.Version) ||
             snapshot.DataContainers is null)
         {
             return "The DataObject payload is incomplete.";
@@ -120,9 +85,6 @@ public static partial class AxPutDataObjectProjection
             return "The DataObject identity does not match the requested tenant and objectid.";
         }
 
-        if (!string.Equals(snapshot.TransId, snapshot.StructDef.TransId, StringComparison.OrdinalIgnoreCase))
-            return "The DataObject transaction does not match its StructDef reference.";
-
         if (snapshot.RecordId is <= 0)
             return "The DataObject contains an invalid primary record identity.";
 
@@ -132,12 +94,20 @@ public static partial class AxPutDataObjectProjection
             if (string.IsNullOrWhiteSpace(container.DcId) ||
                 !DcName().IsMatch(container.DcId) ||
                 !containers.Add(container.DcId) ||
+                container.Fields is null ||
                 container.Rows is null)
             {
                 return "The DataObject contains an invalid or duplicate data container.";
             }
 
-            HashSet<string> rowIds = new(StringComparer.Ordinal);
+            if (container.Fields.Any(field => string.IsNullOrWhiteSpace(field.Name) ||
+                (field.Flags & ~DataObjectFieldSnapshot.KnownFlags) != 0) ||
+                container.Fields.Select(field => field.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != container.Fields.Count)
+            {
+                return "The DataObject contains invalid or duplicate field ordinals.";
+            }
+
+            HashSet<string> rowIds = new(StringComparer.OrdinalIgnoreCase);
             foreach (DataRowSnapshotV3 row in container.Rows)
             {
                 if (string.IsNullOrWhiteSpace(row.RowId) || !rowIds.Add(row.RowId))
@@ -147,23 +117,28 @@ public static partial class AxPutDataObjectProjection
                 if ((isNew && row.RecordId is not null) || (!isNew && row.RecordId is not > 0))
                     return "The DataObject contains an invalid row record identity.";
 
-                if (!IsRowState(row.State) || row.Fields is null)
+                if (!IsRowState(row.State) || row.Values is null || row.Values.Count != container.Fields.Count)
                     return "The DataObject contains an invalid row state.";
 
-                HashSet<string> fields = new(StringComparer.OrdinalIgnoreCase);
-                foreach (FieldSnapshotV3 field in row.Fields)
+                if (row.Values.Any(value => !IsSnapshotValueValid(value)) ||
+                    (row.OldValues is not null &&
+                     (isNew || row.OldValues.Count != container.Fields.Count ||
+                      row.OldValues.Any(value => !IsSnapshotValueValid(value)))))
                 {
-                    if (string.IsNullOrWhiteSpace(field.Name) ||
-                        !fields.Add(field.Name) ||
-                        !IsSnapshotValueValid(field.Value) ||
-                        (field.IsDirty is true && !IsSnapshotValueValid(field.OriginalValue)) ||
-                        (field.IsDirty is not true && (field.OriginalValue is not null || field.OriginalSourceId is not null)) ||
-                        field.SourceId < 0 ||
-                        field.OriginalSourceId < 0)
-                    {
-                        return "The DataObject contains invalid field data.";
-                    }
+                    return "The DataObject contains invalid positional field data.";
                 }
+
+                for (int ordinal = 0; ordinal < container.Fields.Count; ordinal++)
+                {
+                    if (!TryDecodeFieldValue(container.Fields[ordinal], row.Values[ordinal], out _, out _))
+                        return "The DataObject contains invalid source-key field data.";
+                    if (row.OldValues is not null &&
+                        !TryDecodeFieldValue(container.Fields[ordinal], row.OldValues[ordinal], out _, out _))
+                        return "The DataObject contains invalid source-key old field data.";
+                }
+
+                if (row.OldValues is not null && row.OldValues.SequenceEqual(row.Values))
+                    return "The DataObject contains an oldValues array with no changed field.";
             }
         }
 
@@ -172,17 +147,8 @@ public static partial class AxPutDataObjectProjection
 
     public static bool IsActorAllowed(
         DataObjectSnapshotV3 snapshot,
-        string userName,
-        IEnumerable<string> roles)
-    {
-        if (string.Equals(snapshot.OwnerUserName, userName, StringComparison.Ordinal) ||
-            string.Equals(snapshot.InitiatorUserName, userName, StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return roles.Any(role => string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase));
-    }
+        string userName) =>
+        string.Equals(snapshot.InitiatorUserName, userName, StringComparison.Ordinal);
 
     public static Dictionary<string, Dictionary<string, Dictionary<string, string>>> ToSubmitData(
         DataObjectSnapshotV3 snapshot)
@@ -203,10 +169,12 @@ public static partial class AxPutDataObjectProjection
                     ["axrow_action"] = ToLegacyRowAction(row.State)
                 };
 
-                foreach (FieldSnapshotV3 field in row.Fields)
+                for (int ordinal = 0; ordinal < container.Fields.Count; ordinal++)
                 {
-                    values[field.Name] = SnapshotValueText(field.Value);
-                    if (field.SourceId is long sourceId)
+                    DataObjectFieldSnapshot field = container.Fields[ordinal];
+                    _ = TryDecodeFieldValue(field, row.Values[ordinal], out string value, out long sourceId);
+                    values[field.Name] = value;
+                    if (field.SourceKey)
                         values[$"{field.Name}_sourceid"] = sourceId.ToString(CultureInfo.InvariantCulture);
                 }
 
@@ -232,8 +200,9 @@ public static partial class AxPutDataObjectProjection
             {
                 DataRowSnapshotV3 row = container.Rows[index];
                 bool includeAll = string.Equals(row.State, "New", StringComparison.OrdinalIgnoreCase);
-                List<FieldSnapshotV3> changed = row.Fields
-                    .Where(field => includeAll || field.IsDirty is true)
+                List<int> changed = Enumerable.Range(0, container.Fields.Count)
+                    .Where(ordinal => includeAll ||
+                        row.OldValues is not null && row.Values[ordinal] != row.OldValues[ordinal])
                     .ToList();
                 if (changed.Count == 0 && string.Equals(row.State, "Unchanged", StringComparison.OrdinalIgnoreCase))
                     continue;
@@ -244,10 +213,12 @@ public static partial class AxPutDataObjectProjection
                     ["axp_recid"] = (row.RecordId ?? 0).ToString(CultureInfo.InvariantCulture),
                     ["axrow_action"] = ToLegacyRowAction(row.State)
                 };
-                foreach (FieldSnapshotV3 field in changed)
+                foreach (int ordinal in changed)
                 {
-                    values[field.Name] = SnapshotValueText(field.Value);
-                    if (field.SourceId is long sourceId)
+                    DataObjectFieldSnapshot field = container.Fields[ordinal];
+                    _ = TryDecodeFieldValue(field, row.Values[ordinal], out string value, out long sourceId);
+                    values[field.Name] = value;
+                    if (field.SourceKey)
                         values[$"{field.Name}_sourceid"] = sourceId.ToString(CultureInfo.InvariantCulture);
                 }
                 rows[$"row{index + 1}"] = values;
@@ -332,23 +303,31 @@ public static partial class AxPutDataObjectProjection
 
         if (context.Snapshot is DataObjectSnapshotV3 existing)
         {
-            return CopySnapshot(
-                existing,
-                existing.Version,
-                "Saving",
-                now,
-                existing.RecordId,
-                existing.DataContainers ?? []);
+            return CreateSavingSnapshot(context, now);
         }
 
-        return CreateFinalSnapshot(definition, context, [], context.Version, "Saving", now);
+        return CreateFinalSnapshot(definition, context, [], "Saving", now);
+    }
+
+    public static DataObjectSnapshotV3 CreateSavingSnapshot(
+        AxPutDataObjectContext context,
+        DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        DataObjectSnapshotV3 existing = context.Snapshot
+            ?? throw new InvalidOperationException("An existing DataObject snapshot is required.");
+        return CopySnapshot(
+            existing,
+            "Saving",
+            now,
+            existing.RecordId,
+            existing.DataContainers ?? []);
     }
 
     public static DataObjectSnapshotV3 CreateFinalSnapshot(
         StructDef definition,
         AxPutDataObjectContext context,
         IReadOnlyList<AxPutRecordIdMapping> mappings,
-        long version,
         string status,
         DateTimeOffset now)
     {
@@ -368,6 +347,14 @@ public static partial class AxPutDataObjectProjection
                 .SingleOrDefault(container => string.Equals(container.DcId, dcId, StringComparison.OrdinalIgnoreCase));
             List<TField> fields = (definition.Flds ?? [])
                 .Where(field => field.FrameNo == frame.FrameNo)
+                .OrderBy(field => field.FieldName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(field => field.FieldName, StringComparer.Ordinal)
+                .ToList();
+            List<DataObjectFieldSnapshot> fieldNames = fields
+                .Select(field => new DataObjectFieldSnapshot(
+                    field.FieldName,
+                    (frame.ReadOnly || field.Readonly ? DataObjectFieldSnapshot.ReadOnlyFlag : 0) |
+                    (field.SourceKey ? DataObjectFieldSnapshot.SourceKeyFlag : 0)))
                 .ToList();
             List<DataRowSnapshotV3> rows = [];
             int rowCount = definition.GetRowCount(frame.FrameNo);
@@ -382,25 +369,24 @@ public static partial class AxPutDataObjectProjection
                 long? recordId = recordIds.TryGetValue($"{dcId.ToUpperInvariant()}:{rowId}", out AxPutRecordIdMapping? mapping)
                     ? mapping.RecordId
                     : runtimeRecordId > 0 ? runtimeRecordId : storedRow?.RecordId;
-                List<FieldSnapshotV3> projectedFields = [];
-                foreach (TField field in fields)
+                List<SnapshotScalar> projectedValues = [];
+                for (int ordinal = 0; ordinal < fields.Count; ordinal++)
                 {
-                    FieldSnapshotV3? storedField = storedRow?.Fields.SingleOrDefault(candidate =>
-                        string.Equals(candidate.Name, field.FieldName, StringComparison.OrdinalIgnoreCase));
+                    TField field = fields[ordinal];
+                    SnapshotScalar? storedValue = StoredValue(storedContainer, storedRow, field.FieldName);
                     string value = definition.GetFieldValue(field, rowNo);
-                    SnapshotValue projectedValue = ToSnapshotValue(value, field, storedField?.Value);
                     long runtimeSourceId = definition.GetIDValue(field, rowNo);
-                    projectedFields.Add(new FieldSnapshotV3(
-                        field.FieldName,
-                        projectedValue,
-                        storedField?.IsReadOnly,
-                        runtimeSourceId > 0 ? runtimeSourceId : null));
+                    projectedValues.Add(ToSnapshotValue(value, field, runtimeSourceId, storedValue));
                 }
 
-                rows.Add(new DataRowSnapshotV3(rowId, recordId, "Unchanged", projectedFields));
+                rows.Add(new DataRowSnapshotV3(
+                    rowId,
+                    recordId,
+                    "Unchanged",
+                    projectedValues));
             }
 
-            containers.Add(new DataContainerSnapshotV3(dcId, frame.AsGrid, rows));
+            containers.Add(new DataContainerSnapshotV3(dcId, frame.AsGrid, fieldNames, rows));
         }
 
         long? primaryRecordId = containers
@@ -409,78 +395,81 @@ public static partial class AxPutDataObjectProjection
         DataObjectSnapshotV3? source = context.Snapshot;
         return new DataObjectSnapshotV3
         {
-            SchemaVersion = 3,
             ObjectId = context.ObjectId,
             TenantId = context.TenantId,
             TransId = context.TransId,
-            KeyField = context.KeyField ?? source?.KeyField,
-            KeyValue = context.KeyValue ?? source?.KeyValue,
             RecordId = primaryRecordId ?? source?.RecordId,
-            OwnerUserName = context.OwnerUserName,
             InitiatorUserName = context.InitiatorUserName,
-            Version = version,
-            StructDef = new StructDefReferenceSnapshot(
-                context.TransId,
-                context.CurrentStructDefVersion ?? source?.StructDef?.Version
-                    ?? throw new InvalidOperationException("The current StructDef version is unavailable.")),
-            CreatedAtUtc = source?.CreatedAtUtc ?? now.ToString("O", CultureInfo.InvariantCulture),
-            LastAccessedAtUtc = now.ToString("O", CultureInfo.InvariantCulture),
-            ExpiresAtUtc = source?.ExpiresAtUtc,
             Status = status,
             DataContainers = containers,
-            Workflow = source?.Workflow,
-            Files = source?.Files ?? [],
-            AxOpen = source?.AxOpen ?? false
+            Workflow = source?.Workflow
         };
     }
 
     private static DataObjectSnapshotV3 CopySnapshot(
         DataObjectSnapshotV3 source,
-        long version,
         string status,
         DateTimeOffset now,
         long? recordId,
         List<DataContainerSnapshotV3> containers) => new()
     {
-        SchemaVersion = 3,
         ObjectId = source.ObjectId,
         TenantId = source.TenantId,
         TransId = source.TransId,
-        KeyField = source.KeyField,
-        KeyValue = source.KeyValue,
         RecordId = recordId,
-        OwnerUserName = source.OwnerUserName,
         InitiatorUserName = source.InitiatorUserName,
-        Version = version,
-        StructDef = source.StructDef,
-        CreatedAtUtc = source.CreatedAtUtc,
-        LastAccessedAtUtc = now.ToString("O", CultureInfo.InvariantCulture),
-        ExpiresAtUtc = source.ExpiresAtUtc,
         Status = status,
         DataContainers = containers,
-        Workflow = source.Workflow,
-        Files = source.Files,
-        AxOpen = source.AxOpen
+        Workflow = source.Workflow
     };
 
-    private static SnapshotValue ToSnapshotValue(string value, TField field, SnapshotValue? stored)
+    private static SnapshotScalar? StoredValue(
+        DataContainerSnapshotV3? container,
+        DataRowSnapshotV3? row,
+        string fieldName)
     {
+        if (container is null || row is null)
+            return null;
+
+        int ordinal = container.Fields.FindIndex(field =>
+            string.Equals(field.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+        return ordinal >= 0 && ordinal < row.Values.Count ? row.Values[ordinal] : null;
+    }
+
+    private static SnapshotScalar ToSnapshotValue(
+        string value,
+        TField field,
+        long sourceId,
+        SnapshotScalar? stored)
+    {
+        if (field.SourceKey)
+        {
+            if (stored?.Kind == SnapshotScalarKind.Null && string.IsNullOrEmpty(value) && sourceId == 0)
+                return SnapshotScalar.Null;
+            return SnapshotScalar.String($"{value}~{Math.Max(0, sourceId)}");
+        }
+
         if (stored is not null)
         {
-            if (string.Equals(stored.Kind, "null", StringComparison.OrdinalIgnoreCase) && string.IsNullOrEmpty(value))
-                return new SnapshotValue("null", null);
-            return new SnapshotValue(stored.Kind, value);
+            if (stored.Kind == SnapshotScalarKind.Null && string.IsNullOrEmpty(value))
+                return SnapshotScalar.Null;
+            if (stored.Kind == SnapshotScalarKind.Number &&
+                decimal.TryParse(value, NumberStyles.Number | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out decimal storedNumber))
+                return SnapshotScalar.Number(storedNumber.ToString(CultureInfo.InvariantCulture));
+            if (stored.Kind == SnapshotScalarKind.Boolean && bool.TryParse(value, out bool storedBoolean))
+                return SnapshotScalar.Boolean(storedBoolean);
+            return SnapshotScalar.String(value);
         }
 
         if (string.Equals(field.DataType, "n", StringComparison.OrdinalIgnoreCase) &&
             decimal.TryParse(value, NumberStyles.Number | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out decimal number))
         {
-            return new SnapshotValue("decimal", number.ToString(CultureInfo.InvariantCulture));
+            return SnapshotScalar.Number(number.ToString(CultureInfo.InvariantCulture));
         }
 
         return string.IsNullOrEmpty(value)
-            ? new SnapshotValue("null", null)
-            : new SnapshotValue("string", value);
+            ? SnapshotScalar.Null
+            : SnapshotScalar.String(value);
     }
 
     private static Dictionary<string, Dictionary<string, string>> GetOrAdd(
@@ -507,6 +496,21 @@ public static partial class AxPutDataObjectProjection
             .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
         Dictionary<string, DataContainerSnapshotV3> stored = (snapshot?.DataContainers ?? [])
             .ToDictionary(container => container.DcId, StringComparer.OrdinalIgnoreCase);
+
+        foreach ((string dcId, DataContainerSnapshotV3 container) in stored)
+        {
+            if (!fields.TryGetValue(dcId, out List<TField>? dcFields))
+                return $"Unknown data container '{dcId}'.";
+            foreach (DataObjectFieldSnapshot storedField in container.Fields)
+            {
+                TField? current = dcFields.SingleOrDefault(field =>
+                    string.Equals(field.FieldName, storedField.Name, StringComparison.OrdinalIgnoreCase));
+                if (current is null ||
+                    current.SourceKey != storedField.SourceKey ||
+                    (frames[dcId].ReadOnly || current.Readonly) != storedField.ReadOnly)
+                    return $"Stored field metadata does not match current structure for '{dcId}/{storedField.Name}'.";
+            }
+        }
 
         foreach ((string dcId, Dictionary<string, Dictionary<string, string>> rows) in data)
         {
@@ -575,65 +579,31 @@ public static partial class AxPutDataObjectProjection
         return null;
     }
 
-    public static string SnapshotValueText(SnapshotValue value) =>
-        string.Equals(value.Kind, "null", StringComparison.Ordinal) ? string.Empty : value.Value ?? string.Empty;
+    public static string SnapshotValueText(SnapshotScalar value) =>
+        value.Kind == SnapshotScalarKind.Null ? string.Empty : value.Text ?? string.Empty;
 
-    private static bool IsSnapshotValueValid(SnapshotValue? value)
+    private static bool IsSnapshotValueValid(SnapshotScalar? value)
     {
         if (value is null)
             return false;
 
         try
         {
-            string? text = value.Value;
+            string? text = value.Text;
             switch (value.Kind)
             {
-                case "null" when text is null:
+                case SnapshotScalarKind.Null when text is null:
                     break;
-                case "string":
+                case SnapshotScalarKind.String:
                     _ = text ?? throw new FormatException();
                     break;
-                case "boolean":
+                case SnapshotScalarKind.Boolean:
                     _ = bool.Parse(text ?? throw new FormatException());
                     break;
-                case "byte":
-                    _ = byte.Parse(text ?? throw new FormatException(), CultureInfo.InvariantCulture);
-                    break;
-                case "int16":
-                    _ = short.Parse(text ?? throw new FormatException(), CultureInfo.InvariantCulture);
-                    break;
-                case "int32":
-                    _ = int.Parse(text ?? throw new FormatException(), CultureInfo.InvariantCulture);
-                    break;
-                case "int64":
-                    _ = long.Parse(text ?? throw new FormatException(), CultureInfo.InvariantCulture);
-                    break;
-                case "single":
-                    _ = float.Parse(text ?? throw new FormatException(), CultureInfo.InvariantCulture);
-                    break;
-                case "double":
-                    _ = double.Parse(text ?? throw new FormatException(), CultureInfo.InvariantCulture);
-                    break;
-                case "decimal":
-                    _ = decimal.Parse(text ?? throw new FormatException(), CultureInfo.InvariantCulture);
-                    break;
-                case "dateTimeUtc":
-                    _ = DateTime.Parse(text ?? throw new FormatException(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
-                    break;
-                case "dateTimeOffsetUtc":
-                    _ = DateTimeOffset.Parse(text ?? throw new FormatException(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
-                    break;
-                case "date":
-                    _ = DateOnly.ParseExact(text ?? throw new FormatException(), "yyyy-MM-dd", CultureInfo.InvariantCulture);
-                    break;
-                case "time":
-                    _ = TimeOnly.Parse(text ?? throw new FormatException(), CultureInfo.InvariantCulture);
-                    break;
-                case "guid":
-                    _ = Guid.ParseExact(text ?? throw new FormatException(), "D");
-                    break;
-                case "binary":
-                    _ = Convert.FromBase64String(text ?? throw new FormatException());
+                case SnapshotScalarKind.Number:
+                    if (!decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out _) &&
+                        (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double number) || !double.IsFinite(number)))
+                        throw new FormatException();
                     break;
                 default:
                     throw new FormatException();
@@ -644,6 +614,44 @@ public static partial class AxPutDataObjectProjection
         {
             return false;
         }
+    }
+
+    private static bool TryDecodeFieldValue(
+        DataObjectFieldSnapshot field,
+        SnapshotScalar scalar,
+        out string value,
+        out long sourceId)
+    {
+        sourceId = 0;
+        if (!field.SourceKey)
+        {
+            value = SnapshotValueText(scalar);
+            return true;
+        }
+
+        if (scalar.Kind == SnapshotScalarKind.Null)
+        {
+            value = string.Empty;
+            return scalar.Text is null;
+        }
+
+        if (scalar.Kind != SnapshotScalarKind.String || scalar.Text is not string packed)
+        {
+            value = string.Empty;
+            return false;
+        }
+
+        int separator = packed.LastIndexOf('~');
+        if (separator < 0 ||
+            !long.TryParse(packed.AsSpan(separator + 1), NumberStyles.None, CultureInfo.InvariantCulture, out sourceId) ||
+            sourceId < 0)
+        {
+            value = string.Empty;
+            return false;
+        }
+
+        value = packed[..separator];
+        return true;
     }
 
     private static bool IsRowState(string state) =>

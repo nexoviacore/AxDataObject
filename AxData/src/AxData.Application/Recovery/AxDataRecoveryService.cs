@@ -24,6 +24,9 @@ public sealed class AxDataRecoveryService(
     IAxpertAuthorizationProvider authorizationProvider,
     IOperationalEventSink? operationalLog = null)
 {
+    /// <summary>Recovers a missing active object from its latest durable snapshot after authorization.</summary>
+    /// <returns>The recovered state, or a safe not-found, authorization, conflict, or dependency error.</returns>
+    /// <remarks>Recovery never overwrites an active object and preserves tenant-scoped identity checks.</remarks>
     public async Task<AxDataRecoveryResult> RecoverAsync(
         AxUserContext actor,
         string objectId,
@@ -33,7 +36,7 @@ public sealed class AxDataRecoveryService(
         ArgumentNullException.ThrowIfNull(actor);
         ArgumentException.ThrowIfNullOrWhiteSpace(objectId);
 
-        if (await activeStore.IsClosedAsync(actor.TenantId, objectId, cancellationToken).ConfigureAwait(false))
+        if (await activeStore.IsClosedAsync(actor.TenantId, objectId, cancellationToken))
         {
             return AxDataRecoveryResult.Failure(AxDataErrors.ObjectNotFound);
         }
@@ -42,13 +45,13 @@ public sealed class AxDataRecoveryService(
         var read = await snapshotRepository.LoadLatestAsync(
             actor.TenantId,
             objectId,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         Log.Write(new OperationalEvent(
             "snapshot.recovery.load.completed", "recovery", read.Status.ToString().ToLowerInvariant(),
             read.Status is SnapshotReadStatus.Unavailable or SnapshotReadStatus.Invalid
                 ? OperationalLogLevel.Warning
                 : OperationalLogLevel.Information,
-            TenantId: actor.TenantId, ObjectId: objectId, Version: read.State?.Version,
+            TenantId: actor.TenantId, ObjectId: objectId,
             DurationMs: Stopwatch.GetElapsedTime(loadStarted).TotalMilliseconds));
 
         if (read.Status == SnapshotReadStatus.NotFound)
@@ -63,8 +66,7 @@ public sealed class AxDataRecoveryService(
 
         if (read.Status != SnapshotReadStatus.Found || read.State is null ||
             !string.Equals(read.State.TenantId, actor.TenantId, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(read.State.ObjectId, objectId, StringComparison.OrdinalIgnoreCase) ||
-            read.State.Version < 1)
+            !string.Equals(read.State.ObjectId, objectId, StringComparison.OrdinalIgnoreCase))
         {
             return AxDataRecoveryResult.Failure(AxDataErrors.RecoveryFailed);
         }
@@ -83,16 +85,21 @@ public sealed class AxDataRecoveryService(
         var permission = operation switch
         {
             AxAuthorizationOperation.Query => await authorizationProvider.GetQueryPermissionAsync(
-                actor.TenantId, recovered.TransId, new AxRecordKey(recovered.KeyField, recovered.KeyValue, recovered.RecordId), actor, cancellationToken).ConfigureAwait(false),
+                actor.TenantId,
+                recovered.TransId,
+                new AxRecordKey(null, null, recovered.RecordId),
+                actor,
+                AxPermissionSchema.FromState(recovered),
+                cancellationToken),
             AxAuthorizationOperation.Set => await authorizationProvider.GetSetPermissionAsync(
-                actor.TenantId, recovered.TransId, new AxRecordKey(recovered.KeyField, recovered.KeyValue, recovered.RecordId), actor, cancellationToken).ConfigureAwait(false),
+                actor.TenantId, recovered.TransId, new AxRecordKey(null, null, recovered.RecordId), actor, cancellationToken),
             _ => null
         };
         var isAuthorized = permission is not null && IsAuthorized(actor, recovered, permission, operation);
         Log.Write(new OperationalEvent(
             "authorization.completed", "recovery", isAuthorized ? "allowed" : "denied",
             isAuthorized ? OperationalLogLevel.Information : OperationalLogLevel.Warning,
-            TenantId: actor.TenantId, TransId: recovered.TransId, ObjectId: recovered.ObjectId, Version: recovered.Version,
+            TenantId: actor.TenantId, TransId: recovered.TransId, ObjectId: recovered.ObjectId,
             ReasonCode: isAuthorized ? "policy-allowed" : "policy-denied"));
         if (!isAuthorized)
         {
@@ -102,31 +109,31 @@ public sealed class AxDataRecoveryService(
         var definition = await structDefProvider.GetAsync(
             actor.TenantId,
             recovered.TransId,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         if (definition is null)
         {
             return AxDataRecoveryResult.Failure(AxDataErrors.RecoveryFailed);
         }
 
-        if (!string.Equals(definition.Version, recovered.StructDefVersion, StringComparison.OrdinalIgnoreCase))
-        {
-            return AxDataRecoveryResult.Failure(AxDataErrors.StructDefChanged);
-        }
+        Log.Write(new OperationalEvent(
+            "structdef.binding.bypassed", "recovery", "current-definition",
+            Detail: OperationalLogDetail.Diagnostic,
+            CorrelationId: Activity.Current?.TraceId.ToString(),
+            TenantId: actor.TenantId, TransId: recovered.TransId, ObjectId: recovered.ObjectId));
 
-        var restore = await activeStore.WriteAsync(recovered, expectedVersion: null, cancellationToken).ConfigureAwait(false);
+        var restore = await activeStore.WriteAsync(recovered, lockToken: null, cancellationToken);
         Log.Write(new OperationalEvent(
             "redis.recovery.completed", "recovery",
             restore.Status == AxDataStoreWriteStatus.Stored ? "restored" : "concurrent",
             restore.Status == AxDataStoreWriteStatus.Stored ? OperationalLogLevel.Information : OperationalLogLevel.Warning,
-            TenantId: actor.TenantId, TransId: recovered.TransId, ObjectId: recovered.ObjectId,
-            Version: recovered.Version, CurrentVersion: restore.CurrentVersion));
+            TenantId: actor.TenantId, TransId: recovered.TransId, ObjectId: recovered.ObjectId));
         if (restore.Status == AxDataStoreWriteStatus.Stored)
         {
             return AxDataRecoveryResult.Success(recovered);
         }
 
-        var concurrent = await activeStore.LoadAsync(actor.TenantId, objectId, cancellationToken).ConfigureAwait(false);
-        return concurrent is not null && concurrent.Version >= recovered.Version
+        var concurrent = await activeStore.LoadAsync(actor.TenantId, objectId, cancellationToken);
+        return concurrent is not null
             ? AxDataRecoveryResult.Success(concurrent)
             : AxDataRecoveryResult.Failure(AxDataErrors.RecoveryFailed);
     }

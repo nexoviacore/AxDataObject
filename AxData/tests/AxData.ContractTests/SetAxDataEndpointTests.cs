@@ -16,59 +16,26 @@ namespace AxData.ContractTests;
 public sealed class SetAxDataEndpointTests
 {
     [Fact]
-    public async Task If_match_request_returns_success_contract_with_incremented_version()
+    public async Task Set_returns_success_contract_without_object_version()
     {
         var context = CreateHttpContext("corr-set");
-        context.Request.Headers.IfMatch = "\"1\"";
         var handler = await CreateHandlerAsync();
-        var request = Request(expectedVersion: null);
+        var request = Request();
 
         var result = await CreateController(context).SetAsync(
-            "object-1", request, handler, CancellationToken.None);
+            request, handler, CancellationToken.None);
 
         using var response = ToJsonDocument(Assert.IsType<OkObjectResult>(result));
         Assert.Equal("success", response.RootElement.GetProperty("status").GetString());
-        Assert.Equal(2, response.RootElement.GetProperty("version").GetInt64());
+        Assert.False(response.RootElement.TryGetProperty("version", out _));
         Assert.Equal("corr-set", response.RootElement.GetProperty("correlationId").GetString());
-    }
-
-    [Fact]
-    public async Task Stale_body_version_returns_409_with_current_version()
-    {
-        var context = CreateHttpContext("corr-stale");
-        var handler = await CreateHandlerAsync();
-
-        var result = await CreateController(context).SetAsync(
-            "object-1", Request(expectedVersion: 9), handler, CancellationToken.None);
-
-        var error = Assert.IsType<ObjectResult>(result);
-        using var response = ToJsonDocument(error);
-        Assert.Equal(StatusCodes.Status409Conflict, error.StatusCode);
-        Assert.Equal("AXD-CONC-001", response.RootElement.GetProperty("code").GetString());
-        Assert.Equal(1, response.RootElement.GetProperty("currentVersion").GetInt64());
-    }
-
-    [Fact]
-    public async Task StructDef_hash_mismatch_returns_safe_409_envelope()
-    {
-        var context = CreateHttpContext("corr-definition");
-        var mismatch = SampleStructDefFixture.Definition with { Version = "changed" };
-        var handler = await CreateHandlerAsync(currentDefinition: mismatch);
-
-        var result = await CreateController(context).SetAsync(
-            "object-1", Request(expectedVersion: 1), handler, CancellationToken.None);
-
-        var error = Assert.IsType<ObjectResult>(result);
-        using var response = ToJsonDocument(error);
-        Assert.Equal(StatusCodes.Status409Conflict, error.StatusCode);
-        Assert.Equal("AXD-CONC-003", response.RootElement.GetProperty("code").GetString());
     }
 
     [Fact]
     public async Task Validation_errors_return_completed_validation_error_contract()
     {
         const string json = """
-            {"getDeps":true,"expectedVersion":1,
+            {"objectId":"object-1","getDeps":true,
              "data":{"dc2":{"rows":[{"rowId":"row_existing","action":"e","fields":{"qty":"not-a-number"}}]}}}
             """;
         var request = JsonSerializer.Deserialize<SetAxDataRequest>(json, new JsonSerializerOptions
@@ -79,11 +46,11 @@ public sealed class SetAxDataEndpointTests
         var handler = await CreateHandlerAsync();
 
         var result = await CreateController(context).SetAsync(
-            "object-1", request, handler, CancellationToken.None);
+            request, handler, CancellationToken.None);
 
         using var response = ToJsonDocument(Assert.IsType<OkObjectResult>(result));
         Assert.Equal("validation_error", response.RootElement.GetProperty("status").GetString());
-        Assert.Equal(1, response.RootElement.GetProperty("version").GetInt64());
+        Assert.False(response.RootElement.TryGetProperty("version", out _));
         Assert.Empty(response.RootElement.GetProperty("changed").EnumerateArray());
         Assert.Equal("INVALID_NUMBER", response.RootElement.GetProperty("errors")[0].GetProperty("code").GetString());
         Assert.Equal("dc2", response.RootElement.GetProperty("errors")[0].GetProperty("address").GetProperty("dcId").GetString());
@@ -92,9 +59,9 @@ public sealed class SetAxDataEndpointTests
     [Fact]
     public void Request_maps_dc_rows_actions_and_primitive_values()
     {
-        var request = Request(expectedVersion: 1);
+        var request = Request();
 
-        var mapped = request.TryToCommand("object-1", 1, out var command);
+        var mapped = request.TryToCommand(out var command);
 
         Assert.True(mapped);
         var container = Assert.Single(command.DataContainers);
@@ -109,7 +76,7 @@ public sealed class SetAxDataEndpointTests
     public async Task Client_bypass_property_cannot_authorize_set()
     {
         const string json = """
-            {"getDeps":false,"expectedVersion":1,"bypassPermission":true,
+            {"objectId":"object-1","getDeps":false,"bypassPermission":true,
              "data":{"dc2":{"rows":[{"rowId":"row_existing","action":"e","fields":{"qty":2}}]}}}
             """;
         var request = JsonSerializer.Deserialize<SetAxDataRequest>(json, new JsonSerializerOptions
@@ -120,7 +87,7 @@ public sealed class SetAxDataEndpointTests
         var handler = await CreateHandlerAsync("unrelated");
 
         var result = await CreateController(context).SetAsync(
-            "object-1", request, handler, CancellationToken.None);
+            request, handler, CancellationToken.None);
 
         Assert.Equal(
             StatusCodes.Status403Forbidden,
@@ -131,7 +98,7 @@ public sealed class SetAxDataEndpointTests
     public async Task New_row_omits_row_id_and_receives_server_generated_identity()
     {
         const string json = """
-            {"getDeps":false,"expectedVersion":1,
+            {"objectId":"object-1","getDeps":false,
              "data":{"dc2":{"rows":[{"action":"n","fields":{"qty":2,"rate":5}}]}}}
             """;
         var request = JsonSerializer.Deserialize<SetAxDataRequest>(json, new JsonSerializerOptions
@@ -142,7 +109,7 @@ public sealed class SetAxDataEndpointTests
         var handler = await CreateHandlerAsync();
 
         var result = await CreateController(context).SetAsync(
-            "object-1", request, handler, CancellationToken.None);
+            request, handler, CancellationToken.None);
 
         using var response = ToJsonDocument(Assert.IsType<OkObjectResult>(result));
         var created = Assert.Single(response.RootElement.GetProperty("createdRows").EnumerateArray());
@@ -155,7 +122,7 @@ public sealed class SetAxDataEndpointTests
     public async Task Record_id_and_row_number_cannot_address_an_edit()
     {
         const string json = """
-            {"getDeps":false,"expectedVersion":1,
+            {"objectId":"object-1","getDeps":false,
              "data":{"dc2":{"rows":[{"recordId":10,"rowNo":1,"action":"e","fields":{"qty":2}}]}}}
             """;
         var request = JsonSerializer.Deserialize<SetAxDataRequest>(json, new JsonSerializerOptions
@@ -166,7 +133,7 @@ public sealed class SetAxDataEndpointTests
         var handler = await CreateHandlerAsync();
 
         var result = await CreateController(context).SetAsync(
-            "object-1", request, handler, CancellationToken.None);
+            request, handler, CancellationToken.None);
 
         var error = Assert.IsType<ObjectResult>(result);
         using var response = ToJsonDocument(error);
@@ -174,12 +141,12 @@ public sealed class SetAxDataEndpointTests
         Assert.Equal("AXD-REQ-001", response.RootElement.GetProperty("code").GetString());
     }
 
-    private static SetAxDataRequest Request(long? expectedVersion)
+    private static SetAxDataRequest Request()
     {
         using var document = JsonDocument.Parse("2");
         return new SetAxDataRequest(
+            "object-1",
             false,
-            expectedVersion,
             new Dictionary<string, SetDataContainerRequest>
             {
                 ["dc2"] = new(
@@ -188,6 +155,14 @@ public sealed class SetAxDataEndpointTests
                     ["qty"] = document.RootElement.Clone()
                 })])
             });
+    }
+
+    [Fact]
+    public void Blank_object_id_is_rejected()
+    {
+        var request = Request() with { ObjectId = " " };
+
+        Assert.False(request.TryToCommand(out _));
     }
 
     private static async Task<SetAxDataHandler> CreateHandlerAsync(
@@ -202,14 +177,17 @@ public sealed class SetAxDataEndpointTests
             new Dictionary<string, AxFieldValue>
             {
                 ["item"] = new("persisted"),
-                ["qty"] = new(1m),
+                ["qty"] = new(1m, isSourceKey: true),
                 ["rate"] = new(4m),
                 ["amount"] = new(4m)
             }));
         var store = new InMemoryAxDataStore();
         await store.WriteAsync(state, null, CancellationToken.None);
-        var definitionProvider = new FakeStructDefProvider(currentDefinition ?? SampleStructDefFixture.Definition);
         var authorization = new FakeAxpertAuthorizationProvider();
+        var fillGridEngine = new FakeAxpertFillGridEngine
+        {
+            Result = new(true, [new(true, "dc2", FillGridMode.Append, [])])
+        };
         return new SetAxDataHandler(
             new FakeUserContext(new AxUserContext(
                 SampleStructDefFixture.TenantId,
@@ -217,17 +195,11 @@ public sealed class SetAxDataEndpointTests
                 new HashSet<string>())),
             store,
             new FakeAxDataLock(),
-            definitionProvider,
             authorization,
-            new FakeAxpertFieldEngine(SampleStructDefFixture.Definition),
-            new FakeAxpertFillGridEngine
-            {
-                Result = new(true, [new(true, "dc2", FillGridMode.Append, [])])
-            },
-            new InMemorySnapshotTransport(store),
-            new FakeRowIdGenerator(),
-            new FakeClock(DateTimeOffset.UtcNow),
-            FakeRecovery.Create(store, authorization, definitionProvider));
+            new FakeAxpertFieldEngine(
+                currentDefinition ?? SampleStructDefFixture.Definition,
+                fillGridEngine),
+            new FakeRowIdGenerator());
     }
 
     private static DefaultHttpContext CreateHttpContext(string correlationId)

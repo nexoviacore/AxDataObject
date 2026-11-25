@@ -43,10 +43,9 @@
         public override string? ObjectId { get; set; }
         [Newtonsoft.Json.JsonProperty("retainDataObject")]
         public override bool? RetainDataObject { get; set; } = true;
-        [Newtonsoft.Json.JsonProperty("expectedVersion")]
-        public override long? ExpectedVersion { get; set; }
         [Newtonsoft.Json.JsonIgnore]
-        public string? IfMatch { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string? RequestTraceId { get; set; }
         public List<AxPut>? Data { get; set; }
 
     }

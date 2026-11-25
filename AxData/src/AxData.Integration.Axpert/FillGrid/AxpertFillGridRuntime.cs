@@ -7,7 +7,6 @@ namespace AxData.Integration.Axpert.FillGrid;
 public sealed record AxpertFillGridRuntimeRequest(
     string TenantId,
     string TransId,
-    string PublishedDefinitionVersion,
     AxUserContext User);
 
 public interface IAxpertFillGridRuntimeFactory

@@ -8,12 +8,9 @@ public static class SampleStructDefFixture
 {
     public const string TenantId = "sample-tenant";
     public const string TransId = "sample-order";
-    public const string Version = "1";
-
     public static StructDefHandle Definition { get; } = new(
         TenantId,
         TransId,
-        Version,
         [
             new DataContainerDefinition(
                 "dc1",
@@ -24,7 +21,7 @@ public static class SampleStructDefFixture
                 true,
                 [
                     new FieldDefinition("item"),
-                    new FieldDefinition("qty"),
+                    new FieldDefinition("qty", SourceKey: true),
                     new FieldDefinition("rate"),
                     new FieldDefinition("amount")
                 ],
@@ -50,8 +47,6 @@ public static class SampleStructDefFixture
             TenantId,
             TransId,
             "owner",
-            "owner",
-            Version,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
 
         state.DataContainers.Add(
@@ -71,7 +66,7 @@ public static class SampleStructDefFixture
                 [new AxDataRow("row_new", AxRowState.New, fields: new Dictionary<string, AxFieldValue>
                 {
                     ["item"] = new("widget"),
-                    ["qty"] = new(1m),
+                    ["qty"] = new(1m, isSourceKey: true),
                     ["rate"] = new(12.50m),
                     ["amount"] = new(12.50m)
                 })]));

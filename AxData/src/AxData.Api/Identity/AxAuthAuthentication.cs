@@ -44,7 +44,7 @@ public static class AxAuthAuthentication
                         context.HandleResponse();
                         await WriteErrorAsync(
                             context.HttpContext,
-                            AxDataErrors.AuthenticationRequired).ConfigureAwait(false);
+                            AxDataErrors.AuthenticationRequired);
                     },
                     OnForbidden = context => WriteErrorAsync(
                         context.HttpContext,
@@ -67,7 +67,7 @@ public static class AxAuthAuthentication
         context.Response.StatusCode = error.HttpStatusCode;
         await context.Response.WriteAsJsonAsync(
             AxDataErrorResponse.Create(error.Code, error.Message, context.TraceIdentifier),
-            context.RequestAborted).ConfigureAwait(false);
+            context.RequestAborted);
     }
 
     private static string Required(string? value, string key) =>

@@ -22,24 +22,18 @@ public sealed class AxDataState
         string objectId,
         string tenantId,
         string transId,
-        string ownerUserName,
         string initiatorUserName,
-        string structDefVersion,
         DateTimeOffset createdAtUtc)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(objectId);
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(transId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(ownerUserName);
         ArgumentException.ThrowIfNullOrWhiteSpace(initiatorUserName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(structDefVersion);
 
         ObjectId = objectId;
         TenantId = tenantId;
         TransId = transId;
-        OwnerUserName = ownerUserName;
         InitiatorUserName = initiatorUserName;
-        StructDefVersion = structDefVersion;
         CreatedAtUtc = createdAtUtc;
         LastAccessedAtUtc = createdAtUtc;
     }
@@ -47,62 +41,40 @@ public sealed class AxDataState
     public string ObjectId { get; }
     public string TenantId { get; }
     public string TransId { get; }
-    public string? KeyField { get; set; }
-    public string? KeyValue { get; set; }
     public long? RecordId { get; set; }
-    public string OwnerUserName { get; }
     public string InitiatorUserName { get; }
-    public long Version { get; private set; } = 1;
-    public string StructDefVersion { get; }
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset LastAccessedAtUtc { get; set; }
-    public DateTimeOffset? ExpiresAtUtc { get; set; }
     public AxDataLifecycleStatus Status { get; private set; } = AxDataLifecycleStatus.Active;
     public Dictionary<string, AxDataContainer> DataContainers { get; } = new(StringComparer.OrdinalIgnoreCase);
     public PegActiveState? Workflow { get; set; }
     public List<AxFileReference> Files { get; } = [];
     public bool AxOpen { get; set; }
 
+    /// <summary>Recreates persisted state while validating identity, lifecycle, and contained domain invariants.</summary>
     public static AxDataState Rehydrate(
         string objectId,
         string tenantId,
         string transId,
-        string? keyField,
-        string? keyValue,
         long? recordId,
-        string ownerUserName,
         string initiatorUserName,
-        long version,
-        string structDefVersion,
         DateTimeOffset createdAtUtc,
         DateTimeOffset lastAccessedAtUtc,
-        DateTimeOffset? expiresAtUtc,
         AxDataLifecycleStatus status,
         IEnumerable<AxDataContainer> dataContainers,
         PegActiveState? workflow,
         IEnumerable<AxFileReference> files,
         bool axOpen)
     {
-        if (version < 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(version), "Version must be positive.");
-        }
-
         var state = new AxDataState(
             objectId,
             tenantId,
             transId,
-            ownerUserName,
             initiatorUserName,
-            structDefVersion,
             createdAtUtc)
         {
-            KeyField = keyField,
-            KeyValue = keyValue,
             RecordId = recordId,
-            Version = version,
             LastAccessedAtUtc = lastAccessedAtUtc,
-            ExpiresAtUtc = expiresAtUtc,
             Status = status,
             Workflow = workflow,
             AxOpen = axOpen
@@ -120,6 +92,8 @@ public sealed class AxDataState
         return state;
     }
 
+    /// <summary>Applies a valid lifecycle transition.</summary>
+    /// <returns><see langword="true"/> when state changed; otherwise <see langword="false"/>.</returns>
     public bool TransitionTo(AxDataLifecycleStatus target)
     {
         if (target == Status)
@@ -133,10 +107,10 @@ public sealed class AxDataState
         }
 
         Status = target;
-        Version++;
         return true;
     }
 
+    /// <summary>Claims the object for a persistent save operation.</summary>
     public void BeginSaving()
     {
         if (Status != AxDataLifecycleStatus.Active)
@@ -147,6 +121,7 @@ public sealed class AxDataState
         Status = AxDataLifecycleStatus.Saving;
     }
 
+    /// <summary>Returns a failed save claim to active state.</summary>
     public void RollbackSaving()
     {
         if (Status != AxDataLifecycleStatus.Saving)
@@ -157,24 +132,25 @@ public sealed class AxDataState
         Status = AxDataLifecycleStatus.Active;
     }
 
-    public long FinalizeSaving(bool retainDataObject)
+    /// <summary>Completes a successful save by reactivating or closing the in-memory object.</summary>
+    /// <param name="retainDataObject">Whether the saved object remains available for further operations.</param>
+    public void FinalizeSaving(bool retainDataObject)
     {
         if (Status != AxDataLifecycleStatus.Saving)
         {
             throw new InvalidOperationException($"An object in {Status} state has no Save claim to finalize.");
         }
 
-        Status = retainDataObject ? AxDataLifecycleStatus.Saved : AxDataLifecycleStatus.Closed;
-        return ++Version;
+        Status = retainDataObject ? AxDataLifecycleStatus.Active : AxDataLifecycleStatus.Closed;
     }
 
-    public long RegisterMutation()
+    /// <summary>Advances mutation metadata after an atomic state change.</summary>
+    public void RegisterMutation()
     {
         if (Status is AxDataLifecycleStatus.Saving or AxDataLifecycleStatus.Saved or AxDataLifecycleStatus.Expired or AxDataLifecycleStatus.Closed)
         {
             throw new InvalidOperationException($"An object in {Status} state cannot be mutated.");
         }
 
-        return ++Version;
     }
 }

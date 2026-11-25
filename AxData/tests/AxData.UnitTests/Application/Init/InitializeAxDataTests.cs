@@ -12,7 +12,7 @@ public sealed class InitializeAxDataTests
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-09-25T08:00:00Z");
 
     [Fact]
-    public async Task New_transaction_gets_server_identity_version_and_expiry()
+    public async Task New_transaction_gets_server_identity_and_persistent_state()
     {
         var fixture = CreateFixture();
 
@@ -22,15 +22,13 @@ public sealed class InitializeAxDataTests
 
         Assert.True(result.Succeeded);
         Assert.Equal("01J-OPAQUE", result.Response!.ObjectId);
-        Assert.Equal(1, result.Response.Version);
-        Assert.Equal(Now.AddMinutes(30), result.Response.ExpiresAt);
         Assert.Null(fixture.Loader.LastKey!.KeyField);
         var stored = await fixture.Store.LoadAsync(
             SampleStructDefFixture.TenantId,
             "01J-OPAQUE",
             CancellationToken.None);
-        Assert.Equal("owner", stored!.OwnerUserName);
-        Assert.Equal(SampleStructDefFixture.Version, stored.StructDefVersion);
+        Assert.Equal("owner", stored!.InitiatorUserName);
+        Assert.Equal(SampleStructDefFixture.TransId, stored.TransId);
     }
 
     [Fact]
@@ -38,9 +36,9 @@ public sealed class InitializeAxDataTests
     {
         var loaded = SampleStructDefFixture.CreateState();
         loaded.RecordId = 100501;
-        loaded.KeyField = "recordid";
-        loaded.KeyValue = "100501";
         var fixture = CreateFixture(loaded);
+        fixture.FieldEngine.OnInitializeOnLoad = state =>
+            state.DataContainers["dc2"].Rows[0].Fields["amount"].SetValue(30m, 600);
         var key = new AxRecordKey("recordid", "100501", null);
 
         var result = await fixture.Handler.HandleAsync(
@@ -50,6 +48,17 @@ public sealed class InitializeAxDataTests
         Assert.True(result.Succeeded);
         Assert.Equal(key, fixture.Loader.LastKey);
         Assert.Equal(100501, result.Response!.RecordId);
+        var stored = await fixture.Store.LoadAsync(
+            SampleStructDefFixture.TenantId,
+            result.Response.ObjectId,
+            CancellationToken.None);
+        var amount = stored!.DataContainers["dc2"].Rows[0].Fields["amount"];
+        Assert.Equal(100501, stored.RecordId);
+        Assert.Equal(30m, amount.Value);
+        Assert.Equal(30m, amount.OriginalValue);
+        Assert.Equal(600, amount.SourceId);
+        Assert.Equal(600, amount.OriginalSourceId);
+        Assert.False(amount.IsDirty);
     }
 
     [Fact]
@@ -57,7 +66,7 @@ public sealed class InitializeAxDataTests
     {
         var fixture = CreateFixture();
         fixture.FieldEngine.OnInitializeOnLoad = state =>
-            state.DataContainers["dc2"].Rows[0].Fields["amount"].SetValue(25m);
+            state.DataContainers["dc2"].Rows[0].Fields["amount"].SetValue(25m, 501);
 
         var result = await fixture.Handler.HandleAsync(
             new InitializeAxDataCommand(SampleStructDefFixture.TransId, null),
@@ -69,7 +78,12 @@ public sealed class InitializeAxDataTests
             SampleStructDefFixture.TenantId,
             result.Response!.ObjectId,
             CancellationToken.None);
-        Assert.Equal(25m, stored!.DataContainers["dc2"].Rows[0].Fields["amount"].Value);
+        var amount = stored!.DataContainers["dc2"].Rows[0].Fields["amount"];
+        Assert.Equal(25m, amount.Value);
+        Assert.Equal(25m, amount.OriginalValue);
+        Assert.Equal(501, amount.SourceId);
+        Assert.Equal(501, amount.OriginalSourceId);
+        Assert.False(amount.IsDirty);
     }
 
     [Fact]
@@ -95,10 +109,13 @@ public sealed class InitializeAxDataTests
     }
 
     [Fact]
-    public async Task Object_id_collision_retries_do_not_repeat_on_load_processing()
+    public async Task Object_id_collision_retry_reuses_clean_initialized_state_without_repeating_on_load()
     {
-        var fixture = CreateFixture(objectId: "object-1");
+        var fixture = CreateFixture(objectIds: ["object-1", "object-2"]);
+        fixture.FieldEngine.OnInitializeOnLoad = state =>
+            state.DataContainers["dc2"].Rows[0].Fields["amount"].SetValue(25m, 501);
         var existing = SampleStructDefFixture.CreateState();
+        existing = CloneWithObjectId(existing, "object-1");
         Assert.Equal(
             AxDataStoreWriteStatus.Stored,
             (await fixture.Store.WriteAsync(existing, null, CancellationToken.None)).Status);
@@ -107,8 +124,19 @@ public sealed class InitializeAxDataTests
             new InitializeAxDataCommand(SampleStructDefFixture.TransId, null),
             CancellationToken.None);
 
-        Assert.Equal("AXD-INFRA-001", result.Error!.Code);
+        Assert.True(result.Succeeded);
+        Assert.Equal("object-2", result.Response!.ObjectId);
         Assert.Equal(1, fixture.FieldEngine.InitializeOnLoadCount);
+        var stored = await fixture.Store.LoadAsync(
+            SampleStructDefFixture.TenantId,
+            "object-2",
+            CancellationToken.None);
+        var amount = stored!.DataContainers["dc2"].Rows[0].Fields["amount"];
+        Assert.Equal(25m, amount.Value);
+        Assert.Equal(25m, amount.OriginalValue);
+        Assert.Equal(501, amount.SourceId);
+        Assert.Equal(501, amount.OriginalSourceId);
+        Assert.False(amount.IsDirty);
     }
 
     [Fact]
@@ -141,7 +169,7 @@ public sealed class InitializeAxDataTests
 
     private static Fixture CreateFixture(
         AxDataState? loaded = null,
-        string objectId = "01J-OPAQUE")
+        IReadOnlyList<string>? objectIds = null)
     {
         var authorization = new FakeAxpertAuthorizationProvider();
         var definitions = new FakeStructDefProvider(SampleStructDefFixture.Definition);
@@ -150,6 +178,7 @@ public sealed class InitializeAxDataTests
             Result = new AxDataLoadResult(true, loaded ?? SampleStructDefFixture.CreateState(), null)
         };
         var fieldEngine = new FakeAxpertFieldEngine(SampleStructDefFixture.Definition);
+        var initializer = new PortBasedAxpertInitializer(definitions, loader, fieldEngine);
         var store = new InMemoryAxDataStore();
         var handler = new InitializeAxDataHandler(
             new FakeUserContext(new AxUserContext(
@@ -157,14 +186,28 @@ public sealed class InitializeAxDataTests
                 "owner",
                 new HashSet<string>())),
             authorization,
-            definitions,
-            loader,
-            fieldEngine,
+            initializer,
             store,
-            new FakeObjectIdGenerator(objectId, objectId, objectId),
+            new FakeObjectIdGenerator((objectIds ?? ["01J-OPAQUE", "01J-OPAQUE", "01J-OPAQUE"]).ToArray()),
             new FakeClock(Now),
             new InitializeAxDataOptions());
         return new Fixture(handler, authorization, definitions, loader, fieldEngine, store);
+    }
+
+    private static AxDataState CloneWithObjectId(AxDataState source, string objectId)
+    {
+        var clone = new AxDataState(
+            objectId,
+            source.TenantId,
+            source.TransId,
+            source.InitiatorUserName,
+            source.CreatedAtUtc);
+        foreach (var container in source.DataContainers)
+        {
+            clone.DataContainers.Add(container.Key, container.Value);
+        }
+
+        return clone;
     }
 
     private sealed record Fixture(

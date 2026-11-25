@@ -47,13 +47,14 @@ public interface IAxpertPermissionSource
 public sealed class AxpertPermissionSource(
     IAxpertRuntimeContextFactory contextFactory) : IAxpertPermissionSource
 {
+    /// <summary>Loads raw Axpert permission rows for a validated tenant, transaction, record, and user.</summary>
+    /// <returns>Projected permission rows only when the Axpert operation succeeds.</returns>
     public async Task<AxpertPermissionResult> LoadAsync(
         AxpertPermissionRequest request,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var contextResult = await contextFactory.CreateAsync(request.TenantId, cancellationToken)
-            .ConfigureAwait(false);
+        var contextResult = await contextFactory.CreateAsync(request.TenantId, cancellationToken);
         if (!contextResult.Succeeded || contextResult.Value is null)
         {
             return Failure("The Axpert permission runtime could not be created.");
@@ -76,7 +77,7 @@ public sealed class AxpertPermissionSource(
                             UserName = request.UserName,
                             Roles = roles,
                             Dimensions = dimensions
-                        }).ConfigureAwait(false);
+                        });
                     break;
                 case AxpertPermissionKind.View:
                     result = await new AxGetRepository(context.Common, context.TraceService)
@@ -89,7 +90,7 @@ public sealed class AxpertPermissionSource(
                             UserName = request.UserName,
                             Roles = roles,
                             Dimensions = dimensions
-                        }).ConfigureAwait(false);
+                        });
                     break;
                 case AxpertPermissionKind.Edit:
                     result = await new AxPutRepository(context.Common, context.TraceService)
@@ -102,7 +103,7 @@ public sealed class AxpertPermissionSource(
                             UserName = request.UserName,
                             Roles = roles,
                             Dimensions = dimensions
-                        }).ConfigureAwait(false);
+                        });
                     break;
                 default:
                     return Failure("The Axpert permission kind is unsupported.");
@@ -159,6 +160,7 @@ public sealed class AxpertAuthorizationProvider(
     IAxpertPermissionSource permissionSource,
     IAxpertStructDefSource structDefSource) : IAxpertAuthorizationProvider
 {
+    /// <summary>Resolves create permission without exposing raw Axpert permission rows.</summary>
     public async Task<AxCreatePermission> GetCreatePermissionAsync(
         string tenantId,
         string transId,
@@ -176,16 +178,18 @@ public sealed class AxpertAuthorizationProvider(
             new AxRecordKey(null, null, null),
             user,
             AxpertPermissionKind.Create,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         return new AxCreatePermission(
             result.Succeeded && PreferredRows(result.Rows).Any(CanCreate));
     }
 
+    /// <summary>Builds query visibility and editability permissions for the requested data-container shape.</summary>
     public async Task<AxQueryPermission> GetQueryPermissionAsync(
         string tenantId,
         string transId,
         AxRecordKey key,
         AxUserContext user,
+        IReadOnlyList<AxPermissionDataContainer> dataContainers,
         CancellationToken cancellationToken)
     {
         if (!ValidIdentity(tenantId, transId, user))
@@ -195,9 +199,8 @@ public sealed class AxpertAuthorizationProvider(
 
         if (key.RecordId is null && string.IsNullOrWhiteSpace(key.KeyField))
         {
-            var create = await GetCreatePermissionAsync(tenantId, transId, user, cancellationToken)
-                .ConfigureAwait(false);
-            return create.IsAllowed ? Unrestricted(canEdit: true) : AxQueryPermission.Denied;
+            var create = await GetCreatePermissionAsync(tenantId, transId, user, cancellationToken);
+            return create.IsAllowed ? Unrestricted(canEdit: true, dataContainers) : AxQueryPermission.Denied;
         }
 
         var view = await LoadAsync(
@@ -206,7 +209,7 @@ public sealed class AxpertAuthorizationProvider(
             key,
             user,
             AxpertPermissionKind.View,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         if (!view.Succeeded)
         {
             return AxQueryPermission.Denied;
@@ -224,20 +227,14 @@ public sealed class AxpertAuthorizationProvider(
             key,
             user,
             AxpertPermissionKind.Edit,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         var editRows = edit.Succeeded
             ? PreferredRows(edit.Rows).Where(CanViewOrEdit).ToArray()
             : [];
-        var definition = await structDefSource.LoadCurrentAsync(tenantId, transId, cancellationToken)
-            .ConfigureAwait(false);
-        if (definition is null)
-        {
-            return AxQueryPermission.Denied;
-        }
-
-        return BuildPermission(definition, viewRows, editRows);
+        return BuildPermission(dataContainers, viewRows, editRows);
     }
 
+    /// <summary>Builds set permissions for an existing record and authenticated user.</summary>
     public async Task<AxQueryPermission> GetSetPermissionAsync(
         string tenantId,
         string transId,
@@ -252,8 +249,7 @@ public sealed class AxpertAuthorizationProvider(
 
         if (key.RecordId is null && string.IsNullOrWhiteSpace(key.KeyField))
         {
-            var create = await GetCreatePermissionAsync(tenantId, transId, user, cancellationToken)
-                .ConfigureAwait(false);
+            var create = await GetCreatePermissionAsync(tenantId, transId, user, cancellationToken);
             return create.IsAllowed ? Unrestricted(canEdit: true) : AxQueryPermission.Denied;
         }
 
@@ -263,7 +259,7 @@ public sealed class AxpertAuthorizationProvider(
             key,
             user,
             AxpertPermissionKind.Edit,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         if (!edit.Succeeded)
         {
             return AxQueryPermission.Denied;
@@ -275,8 +271,7 @@ public sealed class AxpertAuthorizationProvider(
             return AxQueryPermission.Denied;
         }
 
-        var definition = await structDefSource.LoadCurrentAsync(tenantId, transId, cancellationToken)
-            .ConfigureAwait(false);
+        var definition = await structDefSource.LoadCurrentAsync(tenantId, transId, cancellationToken);
         return definition is null ? AxQueryPermission.Denied : BuildSetPermission(definition, rows);
     }
 
@@ -298,7 +293,7 @@ public sealed class AxpertAuthorizationProvider(
             cancellationToken);
 
     private static AxQueryPermission BuildPermission(
-        AxpertStructDefSnapshot definition,
+        IReadOnlyList<AxPermissionDataContainer> dataContainers,
         IReadOnlyCollection<AxpertPermissionRow> viewRows,
         IReadOnlyCollection<AxpertPermissionRow> editRows)
     {
@@ -307,7 +302,7 @@ public sealed class AxpertAuthorizationProvider(
         var canEdit = editRows.Count > 0;
         var readOnlyContainers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var readOnlyFields = new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var container in definition.DataContainers)
+        foreach (AxPermissionDataContainer container in dataContainers)
         {
             if (Visible(container.Name, view.IncludedDataContainers, view.ExcludedDataContainers) &&
                 (!canEdit || !Visible(container.Name, edit.IncludedDataContainers, edit.ExcludedDataContainers)))
@@ -317,7 +312,7 @@ public sealed class AxpertAuthorizationProvider(
 
             var fields = container.Fields
                 .Where(field => FieldVisible(field.Name, view.IncludedFields, view.ExcludedFields) &&
-                    (!canEdit || !FieldVisible(field.Name, edit.IncludedFields, edit.ExcludedFields)))
+                    (field.IsReadOnly || !canEdit || !FieldVisible(field.Name, edit.IncludedFields, edit.ExcludedFields)))
                 .Select(field => field.Name)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (fields.Count > 0)
@@ -331,15 +326,15 @@ public sealed class AxpertAuthorizationProvider(
             canEdit,
             view.IncludedDataContainers,
             view.ExcludedDataContainers,
-            FieldSets(definition, view.IncludedFields),
-            FieldSets(definition, view.ExcludedFields),
+            FieldSets(dataContainers, view.IncludedFields),
+            FieldSets(dataContainers, view.ExcludedFields),
             readOnlyContainers,
             readOnlyFields,
             Set(canEdit ? ["query", "set", "save"] : ["query"]));
     }
 
     private static AxQueryPermission BuildSetPermission(
-        AxpertStructDefSnapshot definition,
+        StructDefHandle definition,
         IReadOnlyCollection<AxpertPermissionRow> rows)
     {
         var selectors = Selectors.From(rows, includeMaskedAndEncrypted: false);
@@ -355,7 +350,9 @@ public sealed class AxpertAuthorizationProvider(
             Set("query", "set", "save"));
     }
 
-    private static AxQueryPermission Unrestricted(bool canEdit) => new(
+    private static AxQueryPermission Unrestricted(
+        bool canEdit,
+        IReadOnlyList<AxPermissionDataContainer>? dataContainers = null) => new(
         true,
         canEdit,
         EmptySet,
@@ -363,11 +360,40 @@ public sealed class AxpertAuthorizationProvider(
         EmptyFieldSets,
         EmptyFieldSets,
         EmptySet,
-        EmptyFieldSets,
+        dataContainers is null ? EmptyFieldSets : StaticReadOnlyFields(dataContainers),
         Set(canEdit ? ["query", "set", "save"] : ["query"]));
 
+    private static IReadOnlyDictionary<string, IReadOnlySet<string>> StaticReadOnlyFields(
+        IReadOnlyList<AxPermissionDataContainer> dataContainers) =>
+        dataContainers
+            .Select(container => new
+            {
+                container.Name,
+                Fields = (IReadOnlySet<string>)container.Fields
+                    .Where(field => field.IsReadOnly)
+                    .Select(field => field.Name)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            })
+            .Where(container => container.Fields.Count > 0)
+            .ToDictionary(container => container.Name, container => container.Fields, StringComparer.OrdinalIgnoreCase);
+
     private static IReadOnlyDictionary<string, IReadOnlySet<string>> FieldSets(
-        AxpertStructDefSnapshot definition,
+        IReadOnlyList<AxPermissionDataContainer> dataContainers,
+        IReadOnlySet<string> fields)
+    {
+        if (fields.Count == 0)
+        {
+            return EmptyFieldSets;
+        }
+
+        return dataContainers.ToDictionary(
+            container => container.Name,
+            _ => fields,
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlySet<string>> FieldSets(
+        StructDefHandle definition,
         IReadOnlySet<string> fields)
     {
         if (fields.Count == 0)

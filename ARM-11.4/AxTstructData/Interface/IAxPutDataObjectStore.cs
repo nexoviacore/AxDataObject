@@ -8,7 +8,7 @@ public interface IAxPutDataObjectStore
 
     Task<AxPutDataObjectStoreResult> ClaimAsync(
         DataObjectSnapshotV3 savingSnapshot,
-        long expectedVersion,
+        DataObjectSnapshotV3? expectedSnapshot,
         string claimToken,
         bool createOnly);
 
@@ -21,17 +21,13 @@ public interface IAxPutDataObjectStore
         DateTimeOffset persistedAtUtc);
 }
 
-public sealed record AxPutDataObjectStoreResult(
-    AxPutDataObjectStoreStatus Status,
-    long? CurrentVersion = null,
-    long PreviousTtlMilliseconds = -1);
+public sealed record AxPutDataObjectStoreResult(AxPutDataObjectStoreStatus Status);
 
 public enum AxPutDataObjectStoreStatus
 {
     Claimed,
     Released,
     Finalized,
-    StaleVersion,
     ActiveConflict,
     ClaimLost
 }

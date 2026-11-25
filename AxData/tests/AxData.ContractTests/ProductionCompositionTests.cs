@@ -6,6 +6,7 @@ using AxData.Application.Ports.Axpert;
 using AxData.Integration.Axpert.AxGet;
 using AxData.Integration.Axpert.FieldEngine;
 using AxData.Integration.Axpert.FillGrid;
+using AxData.Integration.Axpert.Initialization;
 using AxData.Integration.Axpert.Runtime;
 using AxData.Integration.Axpert.StructDef;
 using Microsoft.Extensions.Configuration;
@@ -23,8 +24,7 @@ public sealed class ProductionCompositionTests
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?>
             {
-                ["AxData:Redis:ConnectionString"] = "localhost:6385",
-                ["AxData:Postgres:ConnectionString"] = "Host=localhost;Database=axdata;Username=axdata"
+                ["AxData:Redis:ConnectionString"] = "localhost:6385"
             }).Build();
 
         services.AddProductionServices(configuration);
@@ -36,9 +36,12 @@ public sealed class ProductionCompositionTests
         Assert.Contains(services, Registration<IStructDefProvider, AxpertStructDefProvider>);
         Assert.Contains(services, Registration<IAxpertDataSource, AxpertDataSource>);
         Assert.Contains(services, Registration<IAxpertFieldRuntimeFactory, AxpertFieldRuntimeFactory>);
+        Assert.Contains(services, Registration<IAxpertInitializer, AxpertInitializer>);
         Assert.Contains(services, Registration<IAxpertFillGridRuntimeFactory, AxpertFillGridRuntimeFactory>);
         Assert.Contains(services, Registration<IAppSettingsService, AppSettingsService>);
         Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IARMLogTraceService));
+        Assert.DoesNotContain(services, descriptor => descriptor.ServiceType == typeof(ISnapshotTransport));
+        Assert.DoesNotContain(services, descriptor => descriptor.ServiceType == typeof(IAxDataSnapshotRepository));
     }
 
     private static bool Registration<TService, TImplementation>(ServiceDescriptor descriptor) =>

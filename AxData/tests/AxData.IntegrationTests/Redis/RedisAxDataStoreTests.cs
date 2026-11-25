@@ -12,7 +12,6 @@ namespace AxData.IntegrationTests.Redis;
 [Collection(RedisTestCollection.Name)]
 public sealed class RedisAxDataStoreTests
 {
-    private static readonly TimeSpan InactivityTtl = TimeSpan.FromSeconds(5);
     private readonly RedisServerFixture _redis;
 
     public RedisAxDataStoreTests(RedisServerFixture redis)
@@ -21,42 +20,22 @@ public sealed class RedisAxDataStoreTests
     }
 
     [Fact]
-    public async Task Stale_write_is_rejected_and_returns_current_version()
+    public async Task Duplicate_create_is_rejected_without_overwriting_state()
     {
         var store = CreateStore();
         var state = CreateState("tenant-a", NewObjectId());
         var initial = await store.WriteAsync(state, null, CancellationToken.None);
 
-        var changed = CreateState(state.TenantId, state.ObjectId, version: 2);
-        var stale = await store.WriteAsync(changed, 99, CancellationToken.None);
+        var duplicate = await store.WriteAsync(CreateState(state.TenantId, state.ObjectId), null, CancellationToken.None);
         var loaded = await store.LoadAsync(state.TenantId, state.ObjectId, CancellationToken.None);
 
         Assert.Equal(AxDataStoreWriteStatus.Stored, initial.Status);
-        Assert.Equal(AxDataStoreWriteStatus.StaleVersion, stale.Status);
-        Assert.Equal(1, stale.CurrentVersion);
-        Assert.Equal(1, loaded!.Version);
+        Assert.Equal(AxDataStoreWriteStatus.Conflict, duplicate.Status);
+        Assert.NotNull(loaded);
     }
 
     [Fact]
-    public async Task Two_concurrent_writers_with_the_same_expected_version_have_one_winner()
-    {
-        var store = CreateStore();
-        var state = CreateState("tenant-b", NewObjectId());
-        await store.WriteAsync(state, null, CancellationToken.None);
-
-        var first = CreateState(state.TenantId, state.ObjectId, version: 2);
-        var second = CreateState(state.TenantId, state.ObjectId, version: 2);
-        var writes = await Task.WhenAll(
-            store.WriteAsync(first, 1, CancellationToken.None),
-            store.WriteAsync(second, 1, CancellationToken.None));
-
-        Assert.Single(writes, result => result.Status == AxDataStoreWriteStatus.Stored);
-        var loser = Assert.Single(writes, result => result.Status == AxDataStoreWriteStatus.StaleVersion);
-        Assert.Equal(2, loser.CurrentVersion);
-    }
-
-    [Fact]
-    public async Task Successful_compare_and_set_refreshes_the_inactivity_ttl()
+    public async Task Create_and_owned_write_keep_active_state_persistent()
     {
         var store = CreateStore();
         var state = CreateState("tenant-c", NewObjectId());
@@ -64,18 +43,14 @@ public sealed class RedisAxDataStoreTests
 
         var key = BuildKey(state.TenantId, state.ObjectId);
         var initialTtl = await _redis.Connection.GetDatabase().KeyTimeToLiveAsync(key);
-        await Task.Delay(TimeSpan.FromMilliseconds(750));
-        var depletedTtl = await _redis.Connection.GetDatabase().KeyTimeToLiveAsync(key);
 
-        var changed = CreateState(state.TenantId, state.ObjectId, version: 2);
-        await store.WriteAsync(changed, 1, CancellationToken.None);
-        var refreshedTtl = await _redis.Connection.GetDatabase().KeyTimeToLiveAsync(key);
+        await using var lease = await CreateLock().TryAcquireAsync(state.TenantId, state.ObjectId, CancellationToken.None);
+        Assert.NotNull(lease);
+        await store.WriteAsync(CreateState(state.TenantId, state.ObjectId), lease.Token, CancellationToken.None);
+        var finalTtl = await _redis.Connection.GetDatabase().KeyTimeToLiveAsync(key);
 
-        Assert.NotNull(initialTtl);
-        Assert.NotNull(depletedTtl);
-        Assert.NotNull(refreshedTtl);
-        Assert.InRange(initialTtl.Value, TimeSpan.FromSeconds(4), InactivityTtl);
-        Assert.True(refreshedTtl > depletedTtl, $"Expected refreshed TTL {refreshedTtl} to exceed {depletedTtl}.");
+        Assert.Null(initialTtl);
+        Assert.Null(finalTtl);
     }
 
     [Fact]
@@ -95,77 +70,29 @@ public sealed class RedisAxDataStoreTests
     }
 
     [Fact]
-    public async Task Snapshot_publish_is_atomic_and_ttl_waits_for_durable_acknowledgement()
+    public async Task Snapshot_publish_round_trips_and_can_be_acknowledged()
     {
         if (!SupportsStreams()) return;
         var tenantId = $"tenant-{Guid.NewGuid():N}";
         var objectId = NewObjectId();
         var store = CreateStore();
         await store.WriteAsync(CreateState(tenantId, objectId), null, CancellationToken.None);
-        var changed = CreateState(tenantId, objectId, version: 2);
+        var changed = CreateState(tenantId, objectId);
         var transport = CreateTransport();
         var envelope = new SnapshotEnvelope(
             "event-2",
             tenantId,
             objectId,
-            2,
             changed,
             DateTimeOffset.UtcNow,
             "corr-snapshot");
 
-        var published = await transport.PublishAsync(envelope, 1, CancellationToken.None);
-        var ttlBeforeAck = await _redis.Connection.GetDatabase().KeyTimeToLiveAsync(BuildKey(tenantId, objectId));
+        await transport.PublishAsync(envelope, CancellationToken.None);
         var deliveries = await transport.ReadAsync(
             tenantId, "group-1", "consumer-1", 10, TimeSpan.Zero, CancellationToken.None);
-        await transport.AcknowledgeAsync(deliveries.Single(), 2, "group-1", CancellationToken.None);
-        var ttlAfterAck = await _redis.Connection.GetDatabase().KeyTimeToLiveAsync(BuildKey(tenantId, objectId));
+        await transport.AcknowledgeAsync(deliveries.Single(), "group-1", CancellationToken.None);
 
-        Assert.Equal(AxDataStoreWriteStatus.Stored, published.Status);
-        Assert.Null(ttlBeforeAck);
-        Assert.NotNull(ttlAfterAck);
-        Assert.Equal(2, deliveries.Single().Envelope!.ObjectVersion);
         Assert.Equal("corr-snapshot", deliveries.Single().Envelope!.CorrelationId);
-    }
-
-    [Fact]
-    public async Task Stale_snapshot_write_does_not_append_stream_entry()
-    {
-        if (!SupportsStreams()) return;
-        var tenantId = $"tenant-{Guid.NewGuid():N}";
-        var objectId = NewObjectId();
-        var store = CreateStore();
-        await store.WriteAsync(CreateState(tenantId, objectId), null, CancellationToken.None);
-        await store.WriteAsync(CreateState(tenantId, objectId, version: 2), 1, CancellationToken.None);
-        var transport = CreateTransport();
-        var changed = CreateState(tenantId, objectId, version: 2);
-        var envelope = new SnapshotEnvelope("event-stale", tenantId, objectId, 2, changed, DateTimeOffset.UtcNow);
-
-        var result = await transport.PublishAsync(envelope, 1, CancellationToken.None);
-        var length = await _redis.Connection.GetDatabase().StreamLengthAsync($"AXD:SNAPSHOTS:{{{tenantId.ToUpperInvariant()}}}");
-
-        Assert.Equal(AxDataStoreWriteStatus.StaleVersion, result.Status);
-        Assert.Equal(0, length);
-    }
-
-    [Fact]
-    public async Task Active_save_claim_blocks_a_racing_snapshot_publish()
-    {
-        if (!SupportsStreams()) return;
-        var tenantId = $"tenant-{Guid.NewGuid():N}";
-        var objectId = NewObjectId();
-        var store = CreateStore();
-        await store.WriteAsync(CreateState(tenantId, objectId), null, CancellationToken.None);
-        await _redis.Connection.GetDatabase().HashSetAsync(BuildKey(tenantId, objectId), "saveClaim", "claim-a");
-        var changed = CreateState(tenantId, objectId, version: 2);
-
-        var result = await CreateTransport().PublishAsync(
-            new SnapshotEnvelope("event-claimed", tenantId, objectId, 2, changed, DateTimeOffset.UtcNow),
-            1,
-            CancellationToken.None);
-
-        Assert.Equal(AxDataStoreWriteStatus.StaleVersion, result.Status);
-        Assert.Equal(1, result.CurrentVersion);
-        Assert.Equal(1, (await store.LoadAsync(tenantId, objectId, CancellationToken.None))!.Version);
     }
 
     [Fact]
@@ -190,10 +117,9 @@ public sealed class RedisAxDataStoreTests
         var store = CreateStore();
         await store.WriteAsync(CreateState(tenantId, objectId), null, CancellationToken.None);
         var transport = CreateTransport();
-        var changed = CreateState(tenantId, objectId, version: 2);
+        var changed = CreateState(tenantId, objectId);
         await transport.PublishAsync(
-            new SnapshotEnvelope("event-restart", tenantId, objectId, 2, changed, DateTimeOffset.UtcNow),
-            1,
+            new SnapshotEnvelope("event-restart", tenantId, objectId, changed, DateTimeOffset.UtcNow),
             CancellationToken.None);
 
         var first = await transport.ReadAsync(
@@ -213,10 +139,12 @@ public sealed class RedisAxDataStoreTests
         {
             MaximumSerializedBytes = 1024 * 1024,
             MaximumGridRows = 100
-        }),
+        }));
+
+    private RedisAxDataLock CreateLock() => new(
+        _redis.Connection,
         new AxDataRedisOptions
         {
-            InactivityTtl = InactivityTtl,
             LockLeaseDuration = TimeSpan.FromSeconds(1)
         });
 
@@ -229,28 +157,15 @@ public sealed class RedisAxDataStoreTests
         }),
         new AxDataRedisOptions
         {
-            InactivityTtl = InactivityTtl,
             LockLeaseDuration = TimeSpan.FromSeconds(1)
         });
 
-    private static AxDataState CreateState(string tenantId, string objectId, int version = 1)
-    {
-        var state = new AxDataState(
+    private static AxDataState CreateState(string tenantId, string objectId) => new(
             objectId,
             tenantId,
             "sample-order",
             "owner",
-            "owner",
-            "1",
             DateTimeOffset.UtcNow);
-
-        while (state.Version < version)
-        {
-            state.RegisterMutation();
-        }
-
-        return state;
-    }
 
     private static string NewObjectId() => $"object-{Guid.NewGuid():N}";
 

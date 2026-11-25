@@ -1,5 +1,7 @@
 using AxData.Api.Development;
+using AxData.Application.Ports;
 using AxData.Application.Ports.Axpert;
+using AxData.Integration.Axpert.Initialization;
 using AxData.Integration.Axpert.AxGet;
 using AxData.Integration.Axpert.Development;
 using AxData.Integration.Axpert.FieldEngine;
@@ -61,8 +63,9 @@ public sealed class RealDataReviewCompositionTests
             Environment(Environments.Development));
 
         Assert.True(enabled);
-        Assert.Contains(services, IsRegistration<IAxpertDataLoader, AxpertDataLoader>);
-        Assert.Contains(services, IsRegistration<IAxpertFieldEngine, AxpertFieldEngine>);
+        Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IAxpertDataLoader));
+        Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IAxpertFieldEngine));
+        Assert.Contains(services, IsRegistration<IAxpertInitializer, AxpertInitializer>);
         Assert.Contains(services, IsRegistration<IAxpertFillGridRuntimeFactory, AxpertFillGridRuntimeFactory>);
         var options = Assert.IsType<AxpertFillGridQueryOptions>(services.Single(
             descriptor => descriptor.ServiceType == typeof(AxpertFillGridQueryOptions)).ImplementationInstance);
@@ -70,6 +73,8 @@ public sealed class RealDataReviewCompositionTests
         Assert.Equal(1_000, options.MaximumRows);
         Assert.DoesNotContain(services, descriptor =>
             descriptor.ImplementationType == typeof(M1DevelopmentDataLoader));
+        Assert.DoesNotContain(services, descriptor => descriptor.ServiceType == typeof(ISnapshotTransport));
+        Assert.DoesNotContain(services, descriptor => descriptor.ServiceType == typeof(IAxDataSnapshotRepository));
     }
 
     [Theory]
@@ -93,14 +98,16 @@ public sealed class RealDataReviewCompositionTests
             ("AxData:M1:TenantId", "sample-tenant"),
             ("AxData:M1:UserName", "owner"),
             ("AxData:M1:TransId", "sample-order"),
-            ("AxData:Redis:ConnectionString", "localhost:6385"),
-            ("AxData:Postgres:ConnectionString", "Host=localhost;Database=axdata;Username=axdata"));
+            ("AxData:Redis:ConnectionString", "localhost:6385"));
 
         var enabled = services.AddM1DevelopmentMode(configuration, Environment(Environments.Development));
 
         Assert.True(enabled);
         Assert.Contains(services, IsRegistration<IAxpertDataLoader, M1DevelopmentDataLoader>);
         Assert.Contains(services, IsRegistration<IAxpertFieldEngine, M1DevelopmentFieldEngine>);
+        Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IAxpertInitializer));
+        Assert.DoesNotContain(services, descriptor => descriptor.ServiceType == typeof(ISnapshotTransport));
+        Assert.DoesNotContain(services, descriptor => descriptor.ServiceType == typeof(IAxDataSnapshotRepository));
     }
 
     [Fact]
@@ -132,8 +139,7 @@ public sealed class RealDataReviewCompositionTests
             ["AxData:RealDataReview:ConnectionString"] = "Host=axpert-staging;Database=axpert;Username=review",
             ["AxData:RealDataReview:AllowedHosts:0"] = "axpert-staging",
             ["AxData:RealDataReview:Roles:0"] = "reviewer",
-            ["AxData:Redis:ConnectionString"] = "localhost:6385",
-            ["AxData:Postgres:ConnectionString"] = "Host=localhost;Database=axdata;Username=axdata"
+            ["AxData:Redis:ConnectionString"] = "localhost:6385"
         };
         foreach (var (key, value) in overrides)
         {

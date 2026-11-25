@@ -1,36 +1,20 @@
+using System.Collections;
 using System.Globalization;
 using AxData.Application.Ports.Axpert;
 using AxData.Integration.Axpert.Runtime;
-using AxData.Integration.Axpert.StructDef;
 using AxTstructData;
-using Newtonsoft.Json;
 
 namespace AxData.Integration.Axpert.AxGet;
 
 public sealed class AxpertDataSource(
-    IAxpertRuntimeContextFactory contextFactory,
-    IAxpertStructDefSource structDefSource) : IAxpertDataSource
+    IAxpertRuntimeContextFactory contextFactory) : IAxpertDataSource
 {
     public async Task<AxpertDataSourceResult> LoadAsync(
         AxpertDataSourceRequest request,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var current = await structDefSource.LoadCurrentAsync(
-            request.TenantId,
-            request.TransId,
-            cancellationToken).ConfigureAwait(false);
-        if (current is null ||
-            !string.Equals(
-                current.ContentHash,
-                request.PublishedDefinitionVersion,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return Failure("The current StructDef content hash does not match the AxData snapshot.");
-        }
-
-        var runtimeResult = await contextFactory.CreateAsync(request.TenantId, cancellationToken)
-            .ConfigureAwait(false);
+        var runtimeResult = await contextFactory.CreateAsync(request.TenantId, cancellationToken);
         if (!runtimeResult.Succeeded || runtimeResult.Value is null)
         {
             return Failure(runtimeResult.Error ?? "The Axpert runtime could not be created.");
@@ -46,37 +30,10 @@ public sealed class AxpertDataSource(
         try
         {
             var runtime = runtimeResult.Value;
-            var repository = new AxGetRepository(runtime.Common, runtime.TraceService);
-            var attachmentsRepository = new AxAttachmentsRepository(runtime.Common);
-            var attachmentsService = new AxAttachmentsService(
-                runtime.Common,
-                attachmentsRepository,
-                runtime.TraceService);
-            var axGetService = new AxGetService(
-                repository,
-                runtime.Common,
-                runtime.TraceService,
-                attachmentsService,
-                new AxParserProvider(runtime.Common, runtime.TraceService));
-            var input = new AxTstructData.AxGet
-            {
-                ARMSessionId = runtime.SessionId,
-                TransId = request.TransId,
-                RecordId = request.Key.RecordId ?? 0,
-                KeyField = AxpertRecordKeyMapping.Field(request.Key),
-                KeyValue = AxpertRecordKeyMapping.Value(request.Key),
-                Roles = request.Roles.ToList(),
-                UserName = request.UserName,
-                Project = request.TenantId,
-                Action = "view",
-                Trace = false,
-                AxpertWSFormat = false,
-                AxClient_DateFormat = runtime.Common.ApiDateFormat,
-                MilliSecsInTimeStamp = runtime.Common._milliSecsInTimeStamp
-            };
-            input.Dimensions = runtime.Common.GetAxgApplicableDimensionsString();
+            var axGetService = CreateService(runtime);
+            var input = CreateInput(request, runtime);
 
-            var access = await axGetService.CheckTstructViewAccess(input).ConfigureAwait(false);
+            var access = await axGetService.CheckTstructViewAccess(input);
             cancellationToken.ThrowIfCancellationRequested();
             if (!string.IsNullOrWhiteSpace(access.error) ||
                 !TryInt64(access.data, "RecordId", out var recordId))
@@ -85,7 +42,7 @@ public sealed class AxpertDataSource(
             }
 
             input.RecordId = recordId;
-            var loaded = await axGetService.LoadBaselineData(input, access).ConfigureAwait(false);
+            var loaded = await axGetService.LoadBaselineData(input, access);
             cancellationToken.ThrowIfCancellationRequested();
             if (!loaded.success || !string.IsNullOrWhiteSpace(loaded.error) ||
                 !loaded.data.TryGetValue("data", out var payload))
@@ -108,17 +65,75 @@ public sealed class AxpertDataSource(
         }
     }
 
+    internal static AxGetService CreateService(AxpertRuntimeContext runtime)
+    {
+        var repository = new AxGetRepository(runtime.Common, runtime.TraceService);
+        var attachmentsRepository = new AxAttachmentsRepository(runtime.Common);
+        var attachmentsService = new AxAttachmentsService(
+            runtime.Common,
+            attachmentsRepository,
+            runtime.TraceService);
+        return new AxGetService(
+            repository,
+            runtime.Common,
+            runtime.TraceService,
+            attachmentsService,
+            new AxParserProvider(runtime.Common, runtime.TraceService));
+    }
+
+    internal static AxTstructData.AxGet CreateInput(
+        AxpertDataSourceRequest request,
+        AxpertRuntimeContext runtime) =>
+        new()
+        {
+            ARMSessionId = runtime.SessionId,
+            TransId = request.TransId,
+            RecordId = request.Key.RecordId ?? 0,
+            KeyField = AxpertRecordKeyMapping.Field(request.Key),
+            KeyValue = AxpertRecordKeyMapping.Value(request.Key),
+            Roles = request.Roles.ToList(),
+            UserName = request.UserName,
+            Project = request.TenantId,
+            Action = "view",
+            Trace = false,
+            AxpertWSFormat = false,
+            AxClient_DateFormat = runtime.Common.ApiDateFormat,
+            MilliSecsInTimeStamp = runtime.Common._milliSecsInTimeStamp,
+            Dimensions = runtime.Common.GetAxgApplicableDimensionsString()
+        };
+
     internal static IReadOnlyList<AxpertDataContainerResult> ProjectContainers(object payload)
     {
-        var normalized = JsonConvert.DeserializeObject<Dictionary<string, Dictionary<string, Dictionary<string, object?>>>>(
-            JsonConvert.SerializeObject(payload))
-            ?? throw new InvalidOperationException("AxGet returned an invalid data payload.");
+        if (payload is not IDictionary containers)
+        {
+            throw new InvalidOperationException("AxGet returned an invalid data payload.");
+        }
 
-        return normalized.Select(container => new AxpertDataContainerResult(
-            container.Key,
-            container.Value.Select(row =>
+        var projected = new List<AxpertDataContainerResult>(containers.Count);
+        foreach (DictionaryEntry container in containers)
+        {
+            if (container.Key is not string containerName || container.Value is not IDictionary rows)
             {
-                var values = new Dictionary<string, object?>(row.Value, StringComparer.OrdinalIgnoreCase);
+                throw new InvalidOperationException("AxGet returned an invalid data container.");
+            }
+
+            var projectedRows = new List<AxpertDataRowResult>(rows.Count);
+            foreach (DictionaryEntry row in rows)
+            {
+                if (row.Key is not string || row.Value is not IDictionary fields)
+                {
+                    throw new InvalidOperationException("AxGet returned an invalid data row.");
+                }
+
+                var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                foreach (DictionaryEntry field in fields)
+                {
+                    if (field.Key is not string fieldName || !values.TryAdd(fieldName, field.Value))
+                    {
+                        throw new InvalidOperationException("AxGet returned an invalid or duplicate field.");
+                    }
+                }
+
                 var sourceIds = new Dictionary<string, long?>(StringComparer.OrdinalIgnoreCase);
                 long? recordId = null;
                 if (values.Remove("axp_recid", out var rawRecordId) &&
@@ -161,11 +176,132 @@ public sealed class AxpertDataSource(
                     values.Remove(companion);
                 }
 
-                return new AxpertDataRowResult(recordId, values, sourceIds);
-            }).ToArray())).ToArray();
+                projectedRows.Add(new AxpertDataRowResult(recordId, values, sourceIds));
+            }
+
+            projected.Add(new AxpertDataContainerResult(containerName, projectedRows));
+        }
+
+        return projected;
     }
 
-    private static bool TryInt64(
+    //This examines the AxGet result and retains only structural information:
+    //- Container names.
+    //- Rows.
+    //- Row record IDs.
+    //- Which fields were returned.
+    //- Which returned fields were non-null.
+    //It also validates:
+    //- No duplicate fields.
+    //- No duplicate record ID.
+    //- Source-ID companions belong to real fields.
+    //- Source IDs are valid non-negative integers.
+    internal static IReadOnlyList<AxpertLoadedContainerShape> ProjectLoadShape(object payload)
+    {
+        if (payload is not IDictionary containers)
+        {
+            throw new InvalidOperationException("AxGet returned an invalid data payload.");
+        }
+
+        var projected = new List<AxpertLoadedContainerShape>(containers.Count);
+        foreach (DictionaryEntry container in containers)
+        {
+            if (container.Key is not string containerName || container.Value is not IDictionary rows)
+            {
+                throw new InvalidOperationException("AxGet returned an invalid data container.");
+            }
+
+            var projectedRows = new List<AxpertLoadedRowShape>(rows.Count);
+            foreach (DictionaryEntry row in rows)
+            {
+                if (row.Key is not string || row.Value is not IDictionary fields)
+                {
+                    throw new InvalidOperationException("AxGet returned an invalid data row.");
+                }
+
+                long? recordId = null;
+                var recordIdSeen = false;
+                var returnedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var nonNullFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var sourceCompanions = new List<(string Name, object? Value)>();
+                foreach (DictionaryEntry field in fields)
+                {
+                    if (field.Key is not string fieldName)
+                    {
+                        throw new InvalidOperationException("AxGet returned an invalid field.");
+                    }
+
+                    if (string.Equals(fieldName, "axp_recid", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (recordIdSeen)
+                        {
+                            throw new InvalidOperationException("AxGet returned a duplicate record ID.");
+                        }
+
+                        recordIdSeen = true;
+                        if (field.Value is not null &&
+                            long.TryParse(
+                                Convert.ToString(field.Value, CultureInfo.InvariantCulture),
+                                NumberStyles.Integer,
+                                CultureInfo.InvariantCulture,
+                                out var parsedRecordId))
+                        {
+                            recordId = parsedRecordId;
+                        }
+
+                        continue;
+                    }
+
+                    if (fieldName.EndsWith("_sourceid", StringComparison.OrdinalIgnoreCase))
+                    {
+                        sourceCompanions.Add((fieldName, field.Value));
+                        continue;
+                    }
+
+                    if (!returnedFields.Add(fieldName))
+                    {
+                        throw new InvalidOperationException("AxGet returned a duplicate field.");
+                    }
+
+                    if (field.Value is not null)
+                    {
+                        nonNullFields.Add(fieldName);
+                    }
+                }
+
+                var sourceFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var companion in sourceCompanions)
+                {
+                    var baseName = companion.Name[..^"_sourceid".Length];
+                    var actualFieldName = returnedFields.SingleOrDefault(name =>
+                        string.Equals(name, baseName, StringComparison.OrdinalIgnoreCase));
+                    if (actualFieldName is null || !sourceFields.Add(actualFieldName))
+                    {
+                        throw new InvalidOperationException("AxGet returned a conflicting source-ID companion.");
+                    }
+
+                    if (companion.Value is not null &&
+                        !string.IsNullOrWhiteSpace(Convert.ToString(companion.Value, CultureInfo.InvariantCulture)) &&
+                        (!long.TryParse(
+                            Convert.ToString(companion.Value, CultureInfo.InvariantCulture),
+                            NumberStyles.Integer,
+                            CultureInfo.InvariantCulture,
+                            out var parsedSourceId) || parsedSourceId < 0))
+                    {
+                        throw new InvalidOperationException("AxGet returned an invalid source-ID companion.");
+                    }
+                }
+
+                projectedRows.Add(new AxpertLoadedRowShape(recordId, returnedFields, nonNullFields));
+            }
+
+            projected.Add(new AxpertLoadedContainerShape(containerName, projectedRows));
+        }
+
+        return projected;
+    }
+
+    internal static bool TryInt64(
         IReadOnlyDictionary<string, object> values,
         string key,
         out long value)

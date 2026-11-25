@@ -1,17 +1,13 @@
 ## 18. Serialization and compatibility
 
-- Use an explicit `schemaVersion` in serialized AxData snapshots.
-- Do not serialize runtime service objects, database connections, delegates, or credentials.
-- Define deterministic converters for Axpert data types, dates, decimals, nulls, files, and binary references.
-- Keep snapshots backward-readable across rolling deployments or provide an explicit migration/upcaster.
-- Store StructDef version/reference rather than an unnecessary complete duplicate when the existing definition can be reloaded consistently. Whether a definition subset must be embedded for exact recovery requires confirmation.
+- The active DataObject payload has no `schemaVersion` or other format discriminator. The reader accepts only the current positional shape; deployments must clear incompatible Redis objects rather than migrate or upcast them.
+- Do not serialize runtime services, credentials, a StructDef binding/header, Init/AxGet `keyField`/`keyValue` locators, business types, files, or `AxOpen`.
+- Store ordered `[name,flags]` field descriptors once per data container, including empty DCs. Flag bit `1` means static read-only and bit `2` means source key; only `0`, `1`, `2`, and `3` are valid. Every row contains an exact-length `values` array aligned to those ordinals. Non-source-key values remain JSON-native null/string/boolean/number scalars; `{kind,value}` wrappers are invalid.
+- A source-key value is `null` or one packed string `<displayValue>~<non-negative Int64 sourceId>`. Split only a field whose stored source-key flag is set and only at the last tilde; source ID `0` means no resolved ID. Never split an ordinary field, even when its literal string ends in `~digits`.
+- Remove `sourceIds`, `originals`, and `originalSourceIds`. An existing dirty row has an exact-length `oldValues` aligned with `values`: dirty positions hold the encoded baseline and unchanged positions repeat the encoded current value. Omit `oldValues` for clean/new rows and after a full revert.
+- Store PEG workflow data only while a workflow is active or a final-approval save has failed. Omit inactive workflow history from active DataObject state.
+- Fail closed on non-scalar values, duplicate container/row/field identities, malformed field descriptors or unknown flag bits, missing or extra aligned values, malformed/negative/overflowing packed source IDs, legacy sparse properties, misaligned `oldValues`, or `oldValues` with no changed position. Set and AxPut additionally fail closed when stored source-key/static-read-only flags differ from current StructDef.
+- Preserve decimals as JSON numbers and date/binary/reference representations as JSON strings. Query/Get needs no business-type interpretation and does not load StructDef; mutation/Save paths use the current StructDef and never infer a type from a string's appearance.
+- Keep the unchanged tenant-scoped Redis key and one compact value so create-only writes, token-owned Set writes, and AxPut claim/finalization remain atomic.
 
-### 18.1 Snapshot v3 target
-
-- Continue storing only the immutable StructDef content-hash reference; a mismatch remains a fail-closed re-Init condition.
-- Readers remain compatible with schema v1 and v2; all writes after P1D-05B use deterministic schema v3.
-- Store container identity once per container and row identity, order, action, and nullable persisted record ID once per row.
-- Preserve typed field values; do not reduce dates, decimals, nulls, or binary references to undifferentiated strings.
-- For clean fields, serialize current value and optional current source ID only. Serialize original value/source ID only while dirty; dirty state must be derivable or consistency-validated during rehydration.
-- Field names may be represented once per data container and referenced by deterministic ordinal in rows if P1D-05A proves this is required for the capacity envelope.
-- MessagePack, compression, or multi-key partitioning are not assumed. They require measurement, dependency review, backward compatibility, and preservation of atomic Redis CAS/snapshot publication.
+The measured representative and 350,000-field capacity results for this layout are recorded in `docs/reports/AXD-STATE-03-positional-state.md`.

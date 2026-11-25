@@ -55,6 +55,8 @@ public sealed class FakeAxDataLock : IAxDataLock
 
     private sealed class Lease : IAxDataLockLease
     {
+        public string Token { get; } = "fake-lock-token";
+
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

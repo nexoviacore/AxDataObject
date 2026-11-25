@@ -1,6 +1,6 @@
 using AxData.Api.Contracts;
 using AxData.Api.Errors;
-using AxData.Api.Requests;
+using AxData.Api.Middleware;
 using AxData.Api.Routing;
 using AxData.Application.Init;
 using AxData.Application.Query;
@@ -16,79 +16,59 @@ namespace AxData.Api.Controllers;
 [Route(ApiRoutes.BasePath + "/axdata")]
 public sealed class AxDataController : ControllerBase
 {
-    [HttpPost]
+    [HttpPost("init")]
     public async Task<IActionResult> InitializeAsync(
         [FromBody] InitializeAxDataRequest request,
         [FromServices] InitializeAxDataHandler handler,
         CancellationToken cancellationToken)
     {
-        var result = await handler.HandleAsync(request.ToCommand(), cancellationToken).ConfigureAwait(false);
+        var result = await handler.HandleAsync(request.ToCommand(), cancellationToken);
         return result.Succeeded
             ? Ok(InitializeAxDataApiResponse.From(result.Response!, HttpContext.TraceIdentifier))
             : AxDataHttpErrorMapper.Map(result.Error!, HttpContext.TraceIdentifier);
     }
 
-    [HttpPost("{objectId}/query")]
-    public async Task<IActionResult> QueryAsync(
-        [FromRoute] string objectId,
-        [FromBody] QueryAxDataRequest request,
+    [HttpPost("get")]
+    public async Task<IActionResult> GetAsync(
+        [FromBody] GetAxDataRequest request,
         [FromServices] QueryAxDataHandler handler,
         CancellationToken cancellationToken)
     {
-        if (!request.TryToCommand(objectId, out var command))
+        RequestOperationalMetadata.SetObjectId(HttpContext, request.ObjectId);
+        if (!request.TryToCommand(out var command))
         {
             return AxDataHttpErrorMapper.Map(AxDataErrors.InvalidRequest, HttpContext.TraceIdentifier);
         }
 
-        return await ExecuteQueryAsync(command, handler, cancellationToken).ConfigureAwait(false);
+        return await ExecuteQueryAsync(command, handler, cancellationToken);
     }
 
-    [HttpPost("{objectId}/set")]
+    [HttpPost("set")]
     public async Task<IActionResult> SetAsync(
-        [FromRoute] string objectId,
         [FromBody] SetAxDataRequest request,
         [FromServices] SetAxDataHandler handler,
         CancellationToken cancellationToken)
     {
-        var expectedVersion = RequestMetadataParser.GetExpectedVersion(
-            HttpContext.Request,
-            request.ExpectedVersion);
-        if (!request.TryToCommand(
-                objectId,
-                expectedVersion,
-                HttpContext.TraceIdentifier,
-                out var command))
+        RequestOperationalMetadata.SetObjectId(HttpContext, request.ObjectId);
+        if (!request.TryToCommand(HttpContext.TraceIdentifier, out var command))
         {
             return AxDataHttpErrorMapper.Map(AxDataErrors.InvalidRequest, HttpContext.TraceIdentifier);
         }
 
-        var result = await handler.HandleAsync(command, cancellationToken).ConfigureAwait(false);
+        var result = await handler.HandleAsync(command, cancellationToken);
         return result.Succeeded
             ? Ok(SetAxDataApiResponse.From(result.Response!, HttpContext.TraceIdentifier))
-            : AxDataHttpErrorMapper.Map(
-                result.Error!,
-                HttpContext.TraceIdentifier,
-                result.CurrentVersion);
+            : AxDataHttpErrorMapper.Map(result.Error!, HttpContext.TraceIdentifier);
     }
-
-    [HttpGet("{objectId}")]
-    public Task<IActionResult> GetAsync(
-        [FromRoute] string objectId,
-        [FromServices] QueryAxDataHandler handler,
-        CancellationToken cancellationToken) =>
-        ExecuteQueryAsync(
-            new QueryAxDataCommand(objectId, SelectAll: true, []),
-            handler,
-            cancellationToken);
 
     private async Task<IActionResult> ExecuteQueryAsync(
         QueryAxDataCommand command,
         QueryAxDataHandler handler,
         CancellationToken cancellationToken)
     {
-        var result = await handler.HandleAsync(command, cancellationToken).ConfigureAwait(false);
+        var result = await handler.HandleAsync(command, cancellationToken);
         return result.Succeeded
-            ? Ok(QueryAxDataApiResponse.From(result.Response!, HttpContext.TraceIdentifier))
+            ? Ok(GetAxDataApiResponse.From(result.Response!, HttpContext.TraceIdentifier))
             : AxDataHttpErrorMapper.Map(result.Error!, HttpContext.TraceIdentifier);
     }
 

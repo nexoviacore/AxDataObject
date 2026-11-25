@@ -23,8 +23,6 @@ public sealed record OperationalEvent(
     string? TenantId = null,
     string? TransId = null,
     string? ObjectId = null,
-    long? Version = null,
-    long? CurrentVersion = null,
     string? ErrorCode = null,
     string? ReasonCode = null,
     string? Provider = null,
@@ -36,6 +34,7 @@ public sealed record OperationalEvent(
 
 public interface IOperationalEventSink
 {
+    /// <summary>Writes a value-free operational event containing only approved safe identifiers.</summary>
     void Write(OperationalEvent operationalEvent);
 }
 
@@ -47,6 +46,7 @@ public sealed class NullOperationalEventSink : IOperationalEventSink
     {
     }
 
+    /// <summary>Validates and discards an operational event.</summary>
     public void Write(OperationalEvent operationalEvent)
     {
         ArgumentNullException.ThrowIfNull(operationalEvent);

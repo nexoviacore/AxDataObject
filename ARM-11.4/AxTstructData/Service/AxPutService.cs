@@ -149,13 +149,20 @@ namespace AxTstructData
                 APIResult? objectPreparationError = await PrepareDataObjectAsync(putData, objectIdWasSupplied);
                 if (objectPreparationError is not null)
                 {
-                    AddObjectStateToResult(putData, objectPreparationError, _dataObjectContext?.KnownVersion);
+                    AddObjectStateToResult(putData, objectPreparationError);
                     return objectPreparationError;
+                }
+
+                APIResult? claimError = await ClaimExistingDataObjectAsync();
+                if (claimError is not null)
+                {
+                    AddObjectStateToResult(putData, claimError);
+                    return claimError;
                 }
 
                 result = await SaveTstructData(putData);
 
-                AddObjectStateToResult(putData, result, _dataObjectContext?.KnownVersion);
+                AddObjectStateToResult(putData, result);
 
             }
             catch (Exception ex)
@@ -183,8 +190,7 @@ namespace AxTstructData
                             result = ObjectFailure(
                                 "The DataObject Save claim could not be released.",
                                 AxPutObjectErrors.StateUnavailable,
-                                StatusCodes.Status503ServiceUnavailable,
-                                _dataObjectContext.Version);
+                                StatusCodes.Status503ServiceUnavailable);
                         }
                         else
                         {
@@ -196,8 +202,7 @@ namespace AxTstructData
                         result = ObjectFailure(
                             "The DataObject Save claim could not be released.",
                             AxPutObjectErrors.StateUnavailable,
-                            StatusCodes.Status503ServiceUnavailable,
-                            _dataObjectContext.Version);
+                            StatusCodes.Status503ServiceUnavailable);
                     }
                 }
 
@@ -214,7 +219,7 @@ namespace AxTstructData
                 result.data["trace"] = await _traceService.GetTraceFile($"AxPut");
             }
 
-            AddObjectStateToResult(putData, result, _dataObjectContext?.KnownVersion);
+            AddObjectStateToResult(putData, result);
             return result;
 
         }
@@ -399,7 +404,6 @@ namespace AxTstructData
             {
                 resolution = AxPutObjectContractRules.Resolve(
                     putData,
-                    putData.IfMatch,
                     putData.Data is not null,
                     putData.Data?.Count ?? 0,
                     DateTimeOffset.UtcNow);
@@ -416,7 +420,6 @@ namespace AxTstructData
 
             putData.ObjectId = resolution.ObjectId;
             putData.RetainDataObject = resolution.RetainDataObject;
-            putData.ExpectedVersion = resolution.ExpectedVersion;
 
             if (putData.Data is not null)
             {
@@ -443,14 +446,11 @@ namespace AxTstructData
                 {
                     ObjectId = putData.ObjectId!,
                     TenantId = tenantId,
-                    Version = 1,
                     ObjectIdWasSupplied = false,
-                    OwnerUserName = putData.UserName!,
                     InitiatorUserName = putData.UserName!,
-                    TransId = putData.Data![0].TransId,
-                    KeyField = putData.Data[0].KeyField,
-                    KeyValue = putData.Data[0].KeyValue
+                    TransId = putData.Data![0].TransId
                 };
+                LogStructDefBindingBypass(putData, tenantId, _dataObjectContext.TransId);
                 return null;
             }
 
@@ -478,26 +478,24 @@ namespace AxTstructData
                 return ObjectFailure(
                     loadedCheck.Message!,
                     loadedCheck.ErrorCode!,
-                    loadedCheck.HttpStatus,
-                    loadedCheck.CurrentVersion);
+                    loadedCheck.HttpStatus);
             }
 
             _dataObjectContext = new AxPutDataObjectContext
             {
                 ObjectId = putData.ObjectId!,
                 TenantId = tenantId,
-                Version = snapshot!.Version,
                 ObjectIdWasSupplied = true,
-                OwnerUserName = snapshot.OwnerUserName!,
                 InitiatorUserName = snapshot.InitiatorUserName!,
                 TransId = snapshot.TransId!,
-                KeyField = snapshot.KeyField,
-                KeyValue = snapshot.KeyValue,
                 Snapshot = snapshot,
                 Overlay = putData.Data?[0].SubmitData
             };
+            LogStructDefBindingBypass(putData, tenantId, _dataObjectContext.TransId);
 
             string storedAction = snapshot.RecordId is > 0 ? "edit" : "create";
+            string? storedKeyField = snapshot.RecordId is > 0 ? "recordid" : null;
+            string? storedKeyValue = snapshot.RecordId?.ToString(CultureInfo.InvariantCulture);
             if (putData.Data is null)
             {
                 putData.Data =
@@ -506,8 +504,8 @@ namespace AxTstructData
                     {
                         TransId = snapshot.TransId!,
                         Action = storedAction,
-                        KeyField = snapshot.KeyField,
-                        KeyValue = snapshot.KeyValue,
+                        KeyField = storedKeyField,
+                        KeyValue = storedKeyValue,
                         RecordId = snapshot.RecordId ?? 0,
                         SubmitData = new Dictionary<string, Dictionary<string, Dictionary<string, string>>>()
                     }
@@ -527,15 +525,15 @@ namespace AxTstructData
 
                 primary.TransId = snapshot.TransId!;
                 primary.Action = storedAction;
-                primary.KeyField = snapshot.KeyField;
-                primary.KeyValue = snapshot.KeyValue;
+                primary.KeyField = storedKeyField;
+                primary.KeyValue = storedKeyValue;
                 primary.RecordId = snapshot.RecordId ?? 0;
             }
 
             if (isTracing)
             {
                 _traceService.LogMessage(
-                    $"ObjectId state selected: tenant={tenantId}, objectid={snapshot.ObjectId}, version={snapshot.Version}, transid={snapshot.TransId}, action={storedAction}");
+                    $"ObjectId state selected: tenant={tenantId}, objectid={snapshot.ObjectId}, transid={snapshot.TransId}, action={storedAction}");
                 if (_dataObjectContext.Overlay is not null)
                     _traceService.LogMessage("ObjectId payload overlay", JsonConvert.SerializeObject(_dataObjectContext.Overlay));
             }
@@ -543,27 +541,68 @@ namespace AxTstructData
             return null;
         }
 
-        private static APIResult ObjectFailure(string message, string errorCode, int httpStatus, long? currentVersion = null)
+        private void LogStructDefBindingBypass(AxPutInput putData, string tenantId, string transId)
+        {
+            if (!isTracing)
+                return;
+
+            _traceService.LogMessage(
+                "DataObject StructDef binding bypass",
+                $"operation=save tenant={tenantId} transid={transId} objectid={putData.ObjectId} traceid={putData.RequestTraceId}");
+        }
+
+        private async Task<APIResult?> ClaimExistingDataObjectAsync()
+        {
+            if (_dataObjectContext?.Snapshot is null)
+                return null;
+
+            DataObjectSnapshotV3 savingSnapshot = AxPutDataObjectProjection.CreateSavingSnapshot(
+                _dataObjectContext,
+                DateTimeOffset.UtcNow);
+            _dataObjectContext.RollbackSnapshot = _dataObjectContext.Snapshot;
+            AxPutDataObjectStoreResult claim;
+            try
+            {
+                claim = await _dataObjectStore.ClaimAsync(
+                    savingSnapshot,
+                    _dataObjectContext.Snapshot,
+                    _dataObjectContext.ClaimToken,
+                    createOnly: false);
+            }
+            catch (Exception)
+            {
+                return ObjectFailure(
+                    "The DataObject Save claim could not be acquired.",
+                    AxPutObjectErrors.StateUnavailable,
+                    StatusCodes.Status503ServiceUnavailable);
+            }
+
+            if (claim.Status != AxPutDataObjectStoreStatus.Claimed)
+            {
+                return ObjectFailure(
+                    "The DataObject has an active conflicting operation.",
+                    AxPutObjectErrors.ActiveConflict,
+                    StatusCodes.Status409Conflict);
+            }
+
+            _dataObjectContext.IsClaimed = true;
+            return null;
+        }
+
+        private static APIResult ObjectFailure(string message, string errorCode, int httpStatus)
         {
             APIResult result = new(false, message);
             result.data["error"] = message;
             result.data["errorcode"] = errorCode;
             result.data["httpstatus"] = httpStatus;
-            if (currentVersion is long version)
-                result.data["version"] = version;
             return result;
         }
 
-        private void AddObjectStateToResult(AxPutInput putData, APIResult result, long? knownVersion = null)
+        private void AddObjectStateToResult(AxPutInput putData, APIResult result)
         {
             if (!string.IsNullOrWhiteSpace(putData.ObjectId))
             {
                 result.data["objectid"] = putData.ObjectId;
-            }
-
-            if (knownVersion is long version)
-            {
-                result.data["version"] = version;
             }
 
             if (_dataObjectContext?.HasRetainedState == true)
@@ -981,8 +1020,7 @@ namespace AxTstructData
                 return (ObjectFailure(
                     hydrationError,
                     AxPutObjectErrors.InvalidRequest,
-                    StatusCodes.Status400BadRequest,
-                    snapshot.Version), []);
+                    StatusCodes.Status400BadRequest), []);
             }
 
             if (isTracing)
@@ -995,8 +1033,7 @@ namespace AxTstructData
                 return (ObjectFailure(
                     GetValidationMessage(loadResult),
                     AxPutObjectErrors.InvalidRequest,
-                    StatusCodes.Status400BadRequest,
-                    snapshot.Version), []);
+                    StatusCodes.Status400BadRequest), []);
             }
 
             if (_validate._sdef.CancelledTrans)
@@ -1004,8 +1041,7 @@ namespace AxTstructData
                 return (ObjectFailure(
                     _validate._sdef.CancelRemarks,
                     AxPutObjectErrors.InvalidRequest,
-                    StatusCodes.Status400BadRequest,
-                    snapshot.Version), []);
+                    StatusCodes.Status400BadRequest), []);
             }
 
             Dictionary<string, Dictionary<string, Dictionary<string, string>>> overlay =
@@ -1023,8 +1059,7 @@ namespace AxTstructData
                 return (ObjectFailure(
                     overlayError,
                     AxPutObjectErrors.InvalidRequest,
-                    StatusCodes.Status400BadRequest,
-                    snapshot.Version), []);
+                    StatusCodes.Status400BadRequest), []);
             }
 
             TStructRequestDto overlayRequest = new() { Submitdata = overlay };
@@ -1034,8 +1069,7 @@ namespace AxTstructData
                 return (ObjectFailure(
                     GetValidationMessage(overlayResult),
                     AxPutObjectErrors.InvalidRequest,
-                    StatusCodes.Status400BadRequest,
-                    snapshot.Version), []);
+                    StatusCodes.Status400BadRequest), []);
             }
 
             return (null, GetSubmittedFieldAddresses(overlayResult));
@@ -1052,8 +1086,7 @@ namespace AxTstructData
                 : ObjectFailure(
                     error,
                     AxPutObjectErrors.InvalidRequest,
-                    StatusCodes.Status400BadRequest,
-                    _dataObjectContext?.Version);
+                    StatusCodes.Status400BadRequest);
         }
 
         private async Task<APIResult> SaveData(AxPutInput putDataInput)
@@ -1135,8 +1168,7 @@ namespace AxTstructData
                                 result = ObjectFailure(
                                     accessResult.error,
                                     errorCode,
-                                    httpStatus,
-                                    _dataObjectContext?.Snapshot?.Version);
+                                    httpStatus);
                                 result.data["transid"] = putData.TransId;
                                 result.data["index"] = inputTransIndex;
                                 break;
@@ -1146,42 +1178,6 @@ namespace AxTstructData
                                 accessControls[accessControlKey] = accessResult;
                             }
                         }
-                    }
-
-                    if (parentDefIndex == -1 && _dataObjectContext?.Snapshot is DataObjectSnapshotV3 objectSnapshot)
-                    {
-                        AxPutDataObjectCheck versionCheck = AxPutDataObjectProjection.CheckExpectedVersion(
-                            objectSnapshot,
-                            putDataInput.ExpectedVersion);
-                        if (!versionCheck.Success)
-                        {
-                            result = ObjectFailure(
-                                versionCheck.Message!,
-                                versionCheck.ErrorCode!,
-                                versionCheck.HttpStatus,
-                                versionCheck.CurrentVersion);
-                            result.data["transid"] = putData.TransId;
-                            result.data["index"] = inputTransIndex;
-                            break;
-                        }
-
-                        string? currentStructDefVersion = await _repo.GetStructDefVersionAsync(putData.TransId);
-                        AxPutDataObjectCheck definitionCheck = AxPutDataObjectProjection.CheckStructDefVersion(
-                            objectSnapshot,
-                            currentStructDefVersion);
-                        if (!definitionCheck.Success)
-                        {
-                            result = ObjectFailure(
-                                definitionCheck.Message!,
-                                definitionCheck.ErrorCode!,
-                                definitionCheck.HttpStatus,
-                                definitionCheck.CurrentVersion);
-                            result.data["transid"] = putData.TransId;
-                            result.data["index"] = inputTransIndex;
-                            break;
-                        }
-
-                        _dataObjectContext.CurrentStructDefVersion = currentStructDefVersion;
                     }
 
                     var loadStructureResult = await LoadStructure(putDataInput, putData);
@@ -1196,21 +1192,6 @@ namespace AxTstructData
                     if (parentDefIndex == -1 && inputTransIndex == 0 && _dataObjectContext is not null)
                     {
                         _dataObjectContext.RuntimeInitialized = true;
-                        if (string.IsNullOrWhiteSpace(_dataObjectContext.CurrentStructDefVersion))
-                        {
-                            _dataObjectContext.CurrentStructDefVersion = await _repo.GetStructDefVersionAsync(putData.TransId);
-                            if (string.IsNullOrWhiteSpace(_dataObjectContext.CurrentStructDefVersion))
-                            {
-                                result = ObjectFailure(
-                                    "The current transaction definition could not be resolved.",
-                                    AxPutObjectErrors.StateUnavailable,
-                                    StatusCodes.Status503ServiceUnavailable,
-                                    _dataObjectContext.KnownVersion);
-                                result.data["transid"] = putData.TransId;
-                                result.data["index"] = inputTransIndex;
-                                break;
-                            }
-                        }
                     }
 
                     if (parentDefIndex == -1 && _dataObjectContext?.Snapshot is DataObjectSnapshotV3 loadedSnapshot)
@@ -1231,8 +1212,7 @@ namespace AxTstructData
                             result = ObjectFailure(
                                 metadataError,
                                 AxPutObjectErrors.InvalidRequest,
-                                StatusCodes.Status400BadRequest,
-                                loadedSnapshot.Version);
+                                StatusCodes.Status400BadRequest);
                             result.data["transid"] = putData.TransId;
                             result.data["index"] = inputTransIndex;
                             break;
@@ -1256,8 +1236,7 @@ namespace AxTstructData
                             result = ObjectFailure(
                                 "The DataObject primary record identity does not match the authorized record.",
                                 AxPutObjectErrors.InvalidRequest,
-                                StatusCodes.Status400BadRequest,
-                                editSnapshot.Version);
+                                StatusCodes.Status400BadRequest);
                             result.data["transid"] = putData.TransId;
                             result.data["index"] = inputTransIndex;
                             break;
@@ -1270,8 +1249,7 @@ namespace AxTstructData
                             result = ObjectFailure(
                                 string.Join(",", tstructFieldsValidation.Errors),
                                 AxPutObjectErrors.AccessDenied,
-                                StatusCodes.Status403Forbidden,
-                                _dataObjectContext?.Snapshot?.Version);
+                                StatusCodes.Status403Forbidden);
                             result.data["transid"] = putData.TransId;
                             result.data["index"] = inputTransIndex;
                             break;
@@ -1648,7 +1626,6 @@ namespace AxTstructData
                                 _validate._sdef,
                                 _dataObjectContext,
                                 [],
-                                _dataObjectContext.Version,
                                 "Active",
                                 DateTimeOffset.UtcNow);
                         AxPutDataObjectStoreResult claim;
@@ -1656,7 +1633,7 @@ namespace AxTstructData
                         {
                             claim = await _dataObjectStore.ClaimAsync(
                                 savingSnapshot,
-                                _dataObjectContext.Version,
+                                _dataObjectContext.Snapshot,
                                 _dataObjectContext.ClaimToken,
                                 createOnly: _dataObjectContext.Snapshot is null);
                         }
@@ -1665,8 +1642,7 @@ namespace AxTstructData
                             result = ObjectFailure(
                                 "The DataObject Save claim could not be acquired.",
                                 AxPutObjectErrors.StateUnavailable,
-                                StatusCodes.Status503ServiceUnavailable,
-                                _dataObjectContext.KnownVersion);
+                                StatusCodes.Status503ServiceUnavailable);
                             result.data["transid"] = putData.TransId;
                             result.data["index"] = inputTransIndex;
                             break;
@@ -1674,21 +1650,16 @@ namespace AxTstructData
 
                         if (claim.Status != AxPutDataObjectStoreStatus.Claimed)
                         {
-                            bool activeConflict = claim.Status == AxPutDataObjectStoreStatus.ActiveConflict;
                             result = ObjectFailure(
-                                activeConflict
-                                    ? "The DataObject has an active conflicting operation."
-                                    : "The DataObject was changed by another request.",
-                                activeConflict ? AxPutObjectErrors.ActiveConflict : AxPutObjectErrors.StaleVersion,
-                                StatusCodes.Status409Conflict,
-                                claim.CurrentVersion);
+                                "The DataObject has an active conflicting operation.",
+                                AxPutObjectErrors.ActiveConflict,
+                                StatusCodes.Status409Conflict);
                             result.data["transid"] = putData.TransId;
                             result.data["index"] = inputTransIndex;
                             break;
                         }
 
                         _dataObjectContext.IsClaimed = true;
-                        _dataObjectContext.PreviousTtlMilliseconds = claim.PreviousTtlMilliseconds;
                     }
 
                     if (sqlCommands.Count > 0)
@@ -1704,8 +1675,7 @@ namespace AxTstructData
                                 result = ObjectFailure(
                                     capture.Message!,
                                     AxPutObjectErrors.InvalidRequest,
-                                    StatusCodes.Status400BadRequest,
-                                    _dataObjectContext.KnownVersion);
+                                    StatusCodes.Status400BadRequest);
                                 result.data["transid"] = putData.TransId;
                                 result.data["index"] = inputTransIndex;
                                 break;
@@ -1716,8 +1686,7 @@ namespace AxTstructData
                                 _validate._sdef,
                                 _dataObjectContext,
                                 capture.Mappings,
-                                _dataObjectContext.FinalVersion,
-                                putDataInput.RetainDataObject == false ? "Closed" : "Saved",
+                                putDataInput.RetainDataObject == false ? "Closed" : "Active",
                                 DateTimeOffset.UtcNow);
                         }
 

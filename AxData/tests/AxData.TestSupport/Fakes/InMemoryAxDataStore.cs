@@ -10,7 +10,9 @@ public sealed class InMemoryAxDataStore : IAxDataStore
 
     public int WriteCount { get; private set; }
 
-    public long? LastExpectedVersion { get; private set; }
+    public int LoadCount { get; private set; }
+
+    public string? LastLockToken { get; private set; }
 
     public Task<AxDataState?> LoadAsync(
         string tenantId,
@@ -18,6 +20,7 @@ public sealed class InMemoryAxDataStore : IAxDataStore
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        LoadCount++;
         _states.TryGetValue((Normalize(tenantId), Normalize(objectId)), out var stored);
         return Task.FromResult(stored?.State);
     }
@@ -33,34 +36,29 @@ public sealed class InMemoryAxDataStore : IAxDataStore
 
     public Task<AxDataStoreWriteResult> WriteAsync(
         AxDataState state,
-        long? expectedVersion,
+        string? lockToken,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         WriteCount++;
-        LastExpectedVersion = expectedVersion;
+        LastLockToken = lockToken;
         var key = (Normalize(state.TenantId), Normalize(state.ObjectId));
 
-        if (_states.TryGetValue(key, out var current))
+        if (_states.ContainsKey(key) && lockToken is null)
         {
-            if (expectedVersion is null || current.Version != expectedVersion)
-            {
-                return Task.FromResult(new AxDataStoreWriteResult(
-                    AxDataStoreWriteStatus.StaleVersion,
-                    current.Version));
-            }
+            return Task.FromResult(new AxDataStoreWriteResult(AxDataStoreWriteStatus.Conflict));
         }
-        else if (expectedVersion is not null)
+        else if (!_states.ContainsKey(key) && lockToken is not null)
         {
-            return Task.FromResult(new AxDataStoreWriteResult(AxDataStoreWriteStatus.StaleVersion));
+            return Task.FromResult(new AxDataStoreWriteResult(AxDataStoreWriteStatus.Conflict));
         }
 
-        _states[key] = new StoredState(state, state.Version);
-        return Task.FromResult(new AxDataStoreWriteResult(AxDataStoreWriteStatus.Stored, state.Version));
+        _states[key] = new StoredState(state);
+        return Task.FromResult(new AxDataStoreWriteResult(AxDataStoreWriteStatus.Stored));
     }
 
     private static string Normalize(string value) => value.ToUpperInvariant();
 
-    private sealed record StoredState(AxDataState State, long Version);
+    private sealed record StoredState(AxDataState State);
 }
 

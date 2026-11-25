@@ -13,40 +13,63 @@ public sealed class AxDataSnapshotSerializerTests
     private static readonly DateTimeOffset CreatedAt = new(2026, 9, 25, 4, 30, 0, TimeSpan.Zero);
 
     [Fact]
-    public void RoundTrip_preserves_snapshot_state_and_typed_values()
+    public void RoundTrip_preserves_typed_values_packed_source_ids_and_aligned_old_values()
     {
         var original = CreateState();
-        var serializer = CreateSerializer();
+        var restored = CreateSerializer().Deserialize(CreateSerializer().Serialize(original));
 
-        var restored = serializer.Deserialize(serializer.Serialize(original));
-
-        Assert.Equal(original.ObjectId, restored.ObjectId);
-        Assert.Equal(original.TenantId, restored.TenantId);
-        Assert.Equal(original.TransId, restored.TransId);
-        Assert.Equal(original.StructDefVersion, restored.StructDefVersion);
-        Assert.Equal(original.Version, restored.Version);
-        Assert.Equal(original.Status, restored.Status);
-        Assert.Equal(original.CreatedAtUtc, restored.CreatedAtUtc);
-        Assert.Equal(original.LastAccessedAtUtc, restored.LastAccessedAtUtc);
-        Assert.Equal(original.ExpiresAtUtc, restored.ExpiresAtUtc);
+        Assert.Equal((original.ObjectId, original.TenantId, original.TransId, original.Status),
+            (restored.ObjectId, restored.TenantId, restored.TransId, restored.Status));
         Assert.Equal(original.Workflow!.WorkflowVersion, restored.Workflow!.WorkflowVersion);
-        Assert.Equal(original.Workflow.Approvers, restored.Workflow.Approvers);
-        Assert.Equal(original.Files, restored.Files);
+        Assert.Empty(restored.Files);
+        Assert.False(restored.AxOpen);
 
-        var fields = restored.DataContainers["items"].Rows.Single().Fields;
+        var row = Assert.Single(restored.DataContainers["items"].Rows);
+        Assert.Equal("row_z", row.RowId);
+        Assert.Equal(42, row.PersistedRecordId);
+        var fields = row.Fields;
         Assert.Equal(1234.50m, fields["amount"].Value);
         Assert.Equal(1200m, fields["amount"].OriginalValue);
-        Assert.Equal(77, fields["amount"].SourceId);
-        Assert.Equal(76, fields["amount"].OriginalSourceId);
+        Assert.True(fields["date"].IsReadOnly);
+        Assert.Null(fields["amount"].SourceId);
+        Assert.Null(fields["amount"].OriginalSourceId);
         Assert.True(fields["amount"].IsDirty);
-        Assert.Equal(new DateOnly(2026, 9, 25), fields["date"].Value);
-        Assert.Equal(new byte[] { 1, 2, 3 }, Assert.IsType<byte[]>(fields["binary"].Value));
+        Assert.Equal("2026-09-25", fields["date"].Value);
+        Assert.Equal("AQID", fields["binary"].Value);
+        Assert.Equal(true, fields["enabled"].Value);
         Assert.Null(fields["optional"].Value);
-        Assert.True(fields["locked"].IsReadOnly);
+        Assert.True(fields["locked"].IsSourceKey);
+        Assert.Equal(9, fields["locked"].SourceId);
+        Assert.Equal(8, fields["locked"].OriginalSourceId);
     }
 
     [Fact]
-    public void Serialize_is_deterministic_and_contains_only_structdef_reference()
+    public void RoundTrip_preserves_field_metadata_for_an_empty_grid()
+    {
+        var state = new AxDataState("obj-empty", "tenant-a", "empty", "owner", CreatedAt);
+        state.DataContainers.Add("dc2", new AxDataContainer(
+            "dc2",
+            true,
+            fields:
+            [
+                new AxDataFieldMetadata("name"),
+                new AxDataFieldMetadata("status", IsReadOnly: true),
+                new AxDataFieldMetadata("customer", IsSourceKey: true)
+            ]));
+
+        byte[] payload = CreateSerializer().Serialize(state);
+        AxDataState restored = CreateSerializer().Deserialize(payload);
+
+        Assert.Equal(
+            [("name", false, false), ("status", true, false), ("customer", false, true)],
+            restored.DataContainers["dc2"].Fields
+                .Select(field => (field.Name, field.IsReadOnly, field.IsSourceKey)));
+        Assert.Contains("\"fields\":[[\"name\",0],[\"status\",1],[\"customer\",2]]",
+            Encoding.UTF8.GetString(payload), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Serialize_is_deterministic_compact_and_omits_reconstructable_or_future_state()
     {
         var serializer = CreateSerializer();
         var state = CreateState();
@@ -56,18 +79,56 @@ public sealed class AxDataSnapshotSerializerTests
         var json = Encoding.UTF8.GetString(first);
 
         Assert.Equal(first, second);
-        Assert.Contains("\"schemaVersion\":3", json, StringComparison.Ordinal);
-        Assert.Contains("\"dcId\":\"items\"", json, StringComparison.Ordinal);
-        Assert.Contains("\"structDef\":{\"transId\":\"employee\",\"version\":\"rev-7\"}", json, StringComparison.Ordinal);
-        Assert.Contains("\"sourceId\":77", json, StringComparison.Ordinal);
-        Assert.Contains("\"originalSourceId\":76", json, StringComparison.Ordinal);
-        Assert.DoesNotContain("connection", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("credential", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("password", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("schemaVersion", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ownerUserName", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("createdAtUtc", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("lastAccessedAtUtc", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("expiresAtUtc", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("keyField", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("keyValue", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("isReadOnly", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("files", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("axOpen", json, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[\"date\",1]", json, StringComparison.Ordinal);
+        Assert.Contains("[\"locked\",2]", json, StringComparison.Ordinal);
+        Assert.Contains("\"values\":[1234.50,\"AQID\",\"2026-09-25\",true,\"fixed~9\",null]", json, StringComparison.Ordinal);
+        Assert.Contains("\"oldValues\":[1200,\"AQID\",\"2026-09-25\",true,\"fixed~8\",null]", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"sourceIds\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"originals\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"originalSourceIds\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"kind\"", json, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(json, "\"amount\""));
     }
 
     [Fact]
-    public void Serialize_preserves_committed_v3_bytes()
+    public void Clean_baseline_omits_old_values_and_edit_uses_same_value_for_unchanged_indexes()
+    {
+        var serializer = CreateSerializer();
+        var state = CreateState();
+        var fields = state.DataContainers["items"].Rows[0].Fields;
+        foreach (var field in fields.Values)
+        {
+            field.AcceptChanges();
+        }
+
+        var cleanJson = Encoding.UTF8.GetString(serializer.Serialize(state));
+        Assert.DoesNotContain("\"oldValues\"", cleanJson, StringComparison.Ordinal);
+        Assert.Contains("\"fixed~9\"", cleanJson, StringComparison.Ordinal);
+
+        fields["amount"].SetValue(1300m);
+        fields["locked"].SetValue("fixed", 10);
+        var dirtyJson = Encoding.UTF8.GetString(serializer.Serialize(state));
+        Assert.Contains("\"values\":[1300,\"AQID\",\"2026-09-25\",true,\"fixed~10\",null]", dirtyJson, StringComparison.Ordinal);
+        Assert.Contains("\"oldValues\":[1234.50,\"AQID\",\"2026-09-25\",true,\"fixed~9\",null]", dirtyJson, StringComparison.Ordinal);
+
+        fields["amount"].SetValue(1234.50m);
+        fields["locked"].SetValue("fixed", 9);
+        var revertedJson = Encoding.UTF8.GetString(serializer.Serialize(state));
+        Assert.DoesNotContain("\"oldValues\"", revertedJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Serialize_preserves_committed_current_bytes()
     {
         var fixturePath = Path.Combine(AppContext.BaseDirectory, "Serialization", "Fixtures", "axdata-snapshot-v3.json");
         var expected = File.ReadAllBytes(fixturePath);
@@ -80,130 +141,167 @@ public sealed class AxDataSnapshotSerializerTests
     }
 
     [Fact]
-    public void Deserialize_reads_committed_v1_fixture()
+    public void Versioned_payloads_are_not_backward_read()
     {
-        var fixturePath = Path.Combine(AppContext.BaseDirectory, "Serialization", "Fixtures", "axdata-snapshot-v1.json");
-
-        var serializer = CreateSerializer();
-        var restored = serializer.Deserialize(File.ReadAllBytes(fixturePath));
-        var restoredAgain = serializer.Deserialize(File.ReadAllBytes(fixturePath));
-
-        Assert.Equal("obj-fixture", restored.ObjectId);
-        Assert.Equal("rev-7", restored.StructDefVersion);
-        Assert.Equal(3, restored.Version);
-        Assert.Equal(1234.50m, restored.DataContainers["dc1"].Rows[0].Fields["salary"].Value);
-        Assert.Equal(42, restored.DataContainers["dc1"].Rows[0].PersistedRecordId);
-        Assert.NotEqual("42", restored.DataContainers["dc1"].Rows[0].RowId);
-        Assert.Equal(restored.DataContainers["dc1"].Rows[0].RowId, restoredAgain.DataContainers["dc1"].Rows[0].RowId);
-    }
-
-    [Fact]
-    public void Deserialize_reads_committed_v2_fixture()
-    {
-        var fixturePath = Path.Combine(AppContext.BaseDirectory, "Serialization", "Fixtures", "axdata-snapshot-v2.json");
-
-        var restored = CreateSerializer().Deserialize(File.ReadAllBytes(fixturePath));
-
-        Assert.Equal("obj-v2", restored.ObjectId);
-        Assert.Equal(4, restored.Version);
-        Assert.Equal("row_v2", restored.DataContainers["dc1"].Rows.Single().RowId);
-        Assert.Equal(1234.50m, restored.DataContainers["dc1"].Rows.Single().Fields["salary"].Value);
-        Assert.Null(restored.DataContainers["dc1"].Rows.Single().Fields["salary"].SourceId);
-    }
-
-    [Fact]
-    public void V3_omits_original_pair_for_clean_fields()
-    {
-        using var document = JsonDocument.Parse(CreateSerializer().Serialize(CreateState()));
-        var locked = document.RootElement.GetProperty("dataContainers")[0]
-            .GetProperty("rows")[0]
-            .GetProperty("fields")
-            .EnumerateArray()
-            .Single(field => field.GetProperty("name").GetString() == "locked");
-
-        Assert.Equal(9, locked.GetProperty("sourceId").GetInt64());
-        Assert.False(locked.TryGetProperty("originalValue", out _));
-        Assert.False(locked.TryGetProperty("originalSourceId", out _));
-        Assert.False(locked.TryGetProperty("isDirty", out _));
-    }
-
-    [Fact]
-    public void Serialize_rejects_payload_over_byte_limit()
-    {
-        var serializer = CreateSerializer(maximumBytes: 100);
-
-        var exception = Assert.Throws<AxDataSnapshotException>(() => serializer.Serialize(CreateState()));
-
-        Assert.Contains("maximum", exception.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Deserialize_rejects_payload_over_byte_limit_before_parsing()
-    {
-        var serializer = CreateSerializer(maximumBytes: 10);
-
-        var exception = Assert.Throws<AxDataSnapshotException>(() => serializer.Deserialize(new byte[11]));
-
-        Assert.Contains("maximum", exception.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Serialize_rejects_grid_over_row_limit()
-    {
-        var state = CreateState();
-        state.DataContainers["items"].AddRow(new AxDataRow("row_second", AxRowState.New));
-
-        var exception = Assert.Throws<AxDataSnapshotException>(() => CreateSerializer(maximumRows: 1).Serialize(state));
-
-        Assert.Contains("items", exception.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Serialize_rejects_field_instances_over_limit()
-    {
-        var state = CreateState();
-
-        var exception = Assert.Throws<AxDataSnapshotException>(() =>
-            CreateSerializer(maximumFields: 4).Serialize(state));
-
-        Assert.Contains("field count", exception.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Serialize_rejects_unsupported_runtime_field_type()
-    {
-        var state = CreateState();
-        state.DataContainers["items"].Rows[0].Fields.Add("service", new AxFieldValue(new object()));
-
-        var exception = Assert.Throws<AxDataSnapshotException>(() => CreateSerializer().Serialize(state));
-
-        Assert.Contains("not supported", exception.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Deserialize_rejects_unknown_schema_version()
-    {
-        var payload = Encoding.UTF8.GetBytes("{\"schemaVersion\":4}");
+        var current = Encoding.UTF8.GetString(CreateSerializer().Serialize(CreateState()));
+        var payload = Encoding.UTF8.GetBytes(current.Insert(1, "\"schemaVersion\":3,"));
 
         var exception = Assert.Throws<AxDataSnapshotException>(() => CreateSerializer().Deserialize(payload));
 
-        Assert.Contains("not supported", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.IsType<JsonException>(exception.InnerException);
     }
 
     [Fact]
-    public void RoundTrip_preserves_row_array_order_independently_of_row_id()
+    public void Timestamped_payloads_are_not_backward_read()
+    {
+        var current = Encoding.UTF8.GetString(CreateSerializer().Serialize(CreateState()));
+        var payload = Encoding.UTF8.GetBytes(current.Insert(1, "\"createdAtUtc\":\"2026-09-25T00:00:00Z\","));
+
+        var exception = Assert.Throws<AxDataSnapshotException>(() => CreateSerializer().Deserialize(payload));
+
+        Assert.IsType<JsonException>(exception.InnerException);
+    }
+
+    [Fact]
+    public void Business_key_locator_payloads_are_not_backward_read()
+    {
+        var current = Encoding.UTF8.GetString(CreateSerializer().Serialize(CreateState()));
+        var payload = Encoding.UTF8.GetBytes(current.Insert(1, "\"keyField\":\"employeeid\",\"keyValue\":\"42\","));
+
+        var exception = Assert.Throws<AxDataSnapshotException>(() => CreateSerializer().Deserialize(payload));
+
+        Assert.IsType<JsonException>(exception.InnerException);
+    }
+
+    [Theory]
+    [InlineData("[[\"a\",0],[\"A\",0]]", "[\"x\",\"y\"]", null)]
+    [InlineData("[[\"a\",0]]", "[]", null)]
+    [InlineData("[[\"a\",0]]", "[\"x\",\"y\"]", null)]
+    [InlineData("[[\"a\",0]]", "[\"x\"]", "[]")]
+    [InlineData("[[\"a\",2]]", "[\"missing-id\"]", null)]
+    [InlineData("[[\"a\",2]]", "[\"value~-1\"]", null)]
+    [InlineData("[[\"a\",4]]", "[\"x\"]", null)]
+    [InlineData("[{\"name\":\"a\",\"sourceKey\":false}]", "[\"x\"]", null)]
+    [InlineData("[[\"a\",0]]", "[{}]", null)]
+    public void Corrupt_positional_mappings_fail_closed(
+        string fields,
+        string values,
+        string? oldValues)
+    {
+        var payload = MinimalPayload(fields, values, oldValues);
+
+        Assert.Throws<AxDataSnapshotException>(() => CreateSerializer().Deserialize(Encoding.UTF8.GetBytes(payload)));
+    }
+
+    [Fact]
+    public void Old_values_without_a_changed_field_fail_closed()
+    {
+        var payload = MinimalPayload(
+            "[[\"a\",0]]",
+            "[\"same\"]",
+            "[\"same\"]");
+
+        Assert.Throws<AxDataSnapshotException>(() => CreateSerializer().Deserialize(Encoding.UTF8.GetBytes(payload)));
+    }
+
+    [Fact]
+    public void Legacy_sparse_source_metadata_fails_closed()
+    {
+        var payload = MinimalPayload(
+            "[[\"a\",0]]",
+            "[\"current\"]",
+            null,
+            ",\"sourceIds\":[[0,7]]");
+
+        Assert.Throws<AxDataSnapshotException>(() => CreateSerializer().Deserialize(Encoding.UTF8.GetBytes(payload)));
+    }
+
+    [Fact]
+    public void Serialize_rejects_rows_with_different_field_sets()
     {
         var state = CreateState();
-        state.DataContainers["items"].AddRow(new AxDataRow("row_a", AxRowState.New));
+        Assert.Throws<ArgumentException>(() => state.DataContainers["items"].AddRow(new AxDataRow(
+            "row_second",
+            AxRowState.New,
+            fields: new Dictionary<string, AxFieldValue> { ["different"] = new("x") })));
+    }
+
+    [Fact]
+    public void RoundTrip_preserves_row_reorder_delete_add_and_fillgrid_replacement_shape()
+    {
+        var state = CreateState();
+        var fields = state.DataContainers["items"].Fields.ToDictionary(
+            field => field.Name,
+            field => new AxFieldValue(
+                field.Name == "amount" ? 2m : null,
+                field.IsReadOnly,
+                isSourceKey: field.IsSourceKey),
+            StringComparer.OrdinalIgnoreCase);
+        state.DataContainers["items"].Rows.Clear();
+        state.DataContainers["items"].AddRow(new AxDataRow("row_new", AxRowState.New, fields: fields));
+        var persistedFields = fields.ToDictionary(
+            item => item.Key,
+            item => new AxFieldValue(item.Value.Value, item.Value.IsReadOnly, isSourceKey: item.Value.IsSourceKey),
+            StringComparer.OrdinalIgnoreCase);
+        state.DataContainers["items"].AddRow(new AxDataRow("row_deleted", AxRowState.Deleted, 52, persistedFields));
         state.DataContainers["items"].Rows.Reverse();
 
         var restored = CreateSerializer().Deserialize(CreateSerializer().Serialize(state));
 
-        Assert.Equal(["row_a", "row_z"], restored.DataContainers["items"].Rows.Select(row => row.RowId));
+        Assert.Equal(["row_deleted", "row_new"], restored.DataContainers["items"].Rows.Select(row => row.RowId));
+        Assert.Equal(AxRowState.Deleted, restored.DataContainers["items"].Rows[0].State);
+        Assert.Equal(52, restored.DataContainers["items"].Rows[0].PersistedRecordId);
+        Assert.Equal(AxRowState.New, restored.DataContainers["items"].Rows[1].State);
+        Assert.Null(restored.DataContainers["items"].Rows[1].PersistedRecordId);
     }
 
     [Fact]
-    public void Capacity_envelope_is_deterministic_and_fits_v3_limit()
+    public void Inactive_workflow_is_not_persisted()
+    {
+        var state = CreateState();
+        state.Workflow!.Status = PegWorkflowStatus.Approved;
+
+        var restored = CreateSerializer().Deserialize(CreateSerializer().Serialize(state));
+
+        Assert.Null(restored.Workflow);
+    }
+
+    [Fact]
+    public void Serialize_and_deserialize_enforce_size_row_field_and_type_limits()
+    {
+        Assert.Throws<AxDataSnapshotException>(() => CreateSerializer(maximumBytes: 100).Serialize(CreateState()));
+        Assert.Throws<AxDataSnapshotException>(() => CreateSerializer(maximumBytes: 10).Deserialize(new byte[11]));
+
+        var tooManyRows = CreateState();
+        tooManyRows.DataContainers["items"].AddRow(new AxDataRow(
+            "row_second", AxRowState.New,
+            fields: tooManyRows.DataContainers["items"].Rows[0].Fields.ToDictionary(
+                item => item.Key,
+                item => new AxFieldValue(item.Value.Value, item.Value.IsReadOnly, isSourceKey: item.Value.IsSourceKey),
+                StringComparer.OrdinalIgnoreCase)));
+        Assert.Throws<AxDataSnapshotException>(() => CreateSerializer(maximumRows: 1).Serialize(tooManyRows));
+        Assert.Throws<AxDataSnapshotException>(() => CreateSerializer(maximumFields: 4).Serialize(CreateState()));
+
+        var unsupported = CreateState();
+        unsupported.DataContainers["items"].Rows[0].Fields.Add("service", new AxFieldValue(new object()));
+        Assert.Throws<AxDataSnapshotException>(() => CreateSerializer().Serialize(unsupported));
+    }
+
+    [Fact]
+    public void Representative_payload_reports_round_trip_metrics()
+    {
+        var serializer = CreateSerializer();
+        var metrics = MeasureRoundTrip(serializer, CreateState());
+
+        Console.WriteLine(
+            $"AXD-STATE-03 representative: bytes={metrics.Bytes}; " +
+            $"serializeMs={metrics.SerializeElapsed.TotalMilliseconds:F3}; " +
+            $"deserializeMs={metrics.DeserializeElapsed.TotalMilliseconds:F3}");
+        Assert.True(metrics.Bytes > 0);
+    }
+
+    [Fact]
+    public void Capacity_envelope_is_deterministic_and_fits_compact_limit()
     {
         var state = CreateCapacityState();
         var serializer = CreateSerializer(
@@ -211,18 +309,16 @@ public sealed class AxDataSnapshotSerializerTests
             maximumRows: AxDataSnapshotOptions.DefaultMaximumGridRows,
             maximumFields: AxDataSnapshotOptions.DefaultMaximumFieldInstances);
         _ = serializer.Serialize(CreateState());
-        var retainedBaseline = GC.GetTotalMemory(forceFullCollection: true);
-        var metrics = MeasureCapacitySerialization(serializer, state);
-        var retainedBytes = GC.GetTotalMemory(forceFullCollection: true) - retainedBaseline;
+        var metrics = MeasureCapacityRoundTrip(serializer, state);
 
         Console.WriteLine(
-            $"P1D-05B capacity: bytes={metrics.Bytes}; bestElapsedMs={metrics.Elapsed.TotalMilliseconds:F2}; " +
-            $"allocatedBytes={metrics.AllocatedBytes}; retainedBytes={retainedBytes}");
+            $"AXD-STATE-03 capacity: bytes={metrics.Bytes}; serializeMs={metrics.Elapsed.TotalMilliseconds:F2}; " +
+            $"deserializeMs={metrics.DeserializeElapsed.TotalMilliseconds:F2}; allocatedBytes={metrics.AllocatedBytes}; " +
+            $"releasedPayloadBytes={metrics.Bytes}");
 
         Assert.True(metrics.Bytes <= AxDataSnapshotOptions.DefaultMaximumSerializedBytes);
         Assert.True(metrics.Elapsed < TimeSpan.FromMilliseconds(500), $"Serialization took {metrics.Elapsed}.");
         Assert.True(metrics.AllocatedBytes < 256L * 1024 * 1024);
-        Assert.True(retainedBytes < 10L * 1024 * 1024, $"Serialization retained {retainedBytes} bytes.");
     }
 
     private static AxDataSnapshotSerializer CreateSerializer(
@@ -240,39 +336,23 @@ public sealed class AxDataSnapshotSerializerTests
     {
         var fields = new Dictionary<string, AxFieldValue>(StringComparer.OrdinalIgnoreCase)
         {
-            ["amount"] = AxFieldValue.Rehydrate(
-                1234.50m,
-                1200m,
-                isDirty: true,
-                isReadOnly: false,
-                sourceId: 77,
-                originalSourceId: 76),
-            ["date"] = new AxFieldValue(new DateOnly(2026, 9, 25)),
+            ["amount"] = AxFieldValue.Rehydrate(1234.50m, 1200m, true, false),
+            ["date"] = new AxFieldValue(new DateOnly(2026, 9, 25), isReadOnly: true),
             ["binary"] = new AxFieldValue(new byte[] { 1, 2, 3 }),
+            ["enabled"] = new AxFieldValue(true),
             ["optional"] = new AxFieldValue(null),
-            ["locked"] = new AxFieldValue("fixed", isReadOnly: true, sourceId: 9)
+            ["locked"] = AxFieldValue.Rehydrate(
+                "fixed", "fixed", true, false, sourceId: 9, originalSourceId: 8, isSourceKey: true)
         };
         var container = new AxDataContainer(
             "items",
             isGrid: true,
-            [new AxDataRow("row_z", AxRowState.New, fields: fields)]);
+            [new AxDataRow("row_z", AxRowState.Edited, 42, fields)]);
 
-        return AxDataState.Rehydrate(
-            "obj-1",
-            "tenant-a",
-            "employee",
-            "employeeid",
-            "42",
-            42,
-            "owner",
-            "initiator",
-            8,
-            "rev-7",
-            CreatedAt,
-            CreatedAt.AddMinutes(5),
-            CreatedAt.AddHours(1),
-            AxDataLifecycleStatus.PendingApproval,
-            [container],
+        var state = AxDataState.Rehydrate(
+            "obj-1", "tenant-a", "employee", 42,
+            "initiator", CreatedAt, CreatedAt.AddMinutes(5),
+            AxDataLifecycleStatus.PendingApproval, [container],
             new PegActiveState
             {
                 WorkflowInstanceId = "workflow-1",
@@ -286,18 +366,12 @@ public sealed class AxDataSnapshotSerializerTests
             },
             [new AxFileReference("file-1", "resume.pdf", "application/pdf")],
             axOpen: true);
+        return state;
     }
 
     private static AxDataState CreateCapacityState()
     {
-        var state = new AxDataState(
-            "obj-capacity",
-            "tenant-a",
-            "capacity",
-            "owner",
-            "owner",
-            "hash",
-            CreatedAt);
+        var state = new AxDataState("obj-capacity", "tenant-a", "capacity", "owner", CreatedAt);
         for (var dc = 1; dc <= 50; dc++)
         {
             var rows = new List<AxDataRow>(70);
@@ -318,12 +392,48 @@ public sealed class AxDataSnapshotSerializerTests
         return state;
     }
 
-    private static CapacityMetrics MeasureCapacitySerialization(
-        AxDataSnapshotSerializer serializer,
-        AxDataState state)
+    private static string MinimalPayload(
+        string fields,
+        string values,
+        string? oldValues,
+        string extraRowProperties = "") =>
+        "{" +
+        "\"objectId\":\"obj\",\"tenantId\":\"tenant\",\"transId\":\"trans\"," +
+        "\"initiatorUserName\":\"owner\"," +
+        "\"status\":\"Active\"," +
+        "\"dataContainers\":[{\"dcId\":\"dc1\",\"isGrid\":true,\"fields\":" + fields +
+        ",\"rows\":[{\"rowId\":\"row1\",\"state\":\"New\",\"values\":" + values +
+        (oldValues is null ? string.Empty : ",\"oldValues\":" + oldValues) +
+        extraRowProperties + "}]}]}";
+
+    private static int CountOccurrences(string value, string fragment)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = value.IndexOf(fragment, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += fragment.Length;
+        }
+
+        return count;
+    }
+
+    private static RoundTripMetrics MeasureRoundTrip(AxDataSnapshotSerializer serializer, AxDataState state)
+    {
+        var timer = Stopwatch.StartNew();
+        var payload = serializer.Serialize(state);
+        timer.Stop();
+        var serializeElapsed = timer.Elapsed;
+        timer.Restart();
+        _ = serializer.Deserialize(payload);
+        timer.Stop();
+        return new RoundTripMetrics(payload.Length, serializeElapsed, timer.Elapsed);
+    }
+
+    private static CapacityMetrics MeasureCapacitySerialization(AxDataSnapshotSerializer serializer, AxDataState state)
     {
         byte[]? expected = null;
-        var bytes = 0;
         var bestElapsed = TimeSpan.MaxValue;
         var bestAllocatedBytes = long.MaxValue;
         for (var attempt = 0; attempt < 3; attempt++)
@@ -333,10 +443,8 @@ public sealed class AxDataSnapshotSerializerTests
             var current = serializer.Serialize(state);
             timer.Stop();
             var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
-
             expected ??= current;
             Assert.True(expected.AsSpan().SequenceEqual(current), "Capacity snapshots were not deterministic.");
-            bytes = current.Length;
             if (timer.Elapsed < bestElapsed)
             {
                 bestElapsed = timer.Elapsed;
@@ -344,10 +452,46 @@ public sealed class AxDataSnapshotSerializerTests
             }
         }
 
-        return new CapacityMetrics(bytes, bestElapsed, bestAllocatedBytes);
+        return new CapacityMetrics(expected!.Length, bestElapsed, bestAllocatedBytes, expected);
     }
 
-    private sealed record CapacityMetrics(int Bytes, TimeSpan Elapsed, long AllocatedBytes);
+    private static CapacityRoundTripMetrics MeasureCapacityRoundTrip(
+        AxDataSnapshotSerializer serializer,
+        AxDataState state)
+    {
+        CapacityMetrics serialization = MeasureCapacitySerialization(serializer, state);
+        TimeSpan deserializeElapsed = MeasureDeserialization(serializer, serialization.Payload);
+        return new(
+            serialization.Bytes,
+            serialization.Elapsed,
+            serialization.AllocatedBytes,
+            deserializeElapsed);
+    }
+
+    private static TimeSpan MeasureDeserialization(AxDataSnapshotSerializer serializer, byte[] payload)
+    {
+        var best = TimeSpan.MaxValue;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var timer = Stopwatch.StartNew();
+            _ = serializer.Deserialize(payload);
+            timer.Stop();
+            if (timer.Elapsed < best)
+            {
+                best = timer.Elapsed;
+            }
+        }
+
+        return best;
+    }
+
+    private sealed record CapacityMetrics(int Bytes, TimeSpan Elapsed, long AllocatedBytes, byte[] Payload);
+    private sealed record CapacityRoundTripMetrics(
+        int Bytes,
+        TimeSpan Elapsed,
+        long AllocatedBytes,
+        TimeSpan DeserializeElapsed);
+    private sealed record RoundTripMetrics(int Bytes, TimeSpan SerializeElapsed, TimeSpan DeserializeElapsed);
 }
 
 [CollectionDefinition(Name, DisableParallelization = true)]

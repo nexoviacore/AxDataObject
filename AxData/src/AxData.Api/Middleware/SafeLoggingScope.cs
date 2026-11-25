@@ -1,6 +1,5 @@
 using System.Security.Claims;
 using AxData.Api.Identity;
-using AxData.Api.Requests;
 
 namespace AxData.Api.Middleware;
 
@@ -17,7 +16,6 @@ public static class SafeLoggingScope
         Add(values, "UserName", GetUserName(context.User));
         Add(values, "ObjectId", context.Request.RouteValues["objectId"]?.ToString());
         Add(values, "TransId", context.Request.RouteValues["transId"]?.ToString());
-        Add(values, "IdempotencyKey", context.Request.Headers[RequestMetadataParser.IdempotencyKeyHeader].FirstOrDefault());
 
         return values;
     }

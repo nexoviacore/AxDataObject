@@ -10,6 +10,11 @@ using AxData.Application.Ports.Axpert;
 using AxData.Domain.Lifecycle;
 using AxData.Domain.Model;
 using AxData.Integration.Axpert.FieldEngine;
+using AxData.Integration.Axpert.AxGet;
+using AxData.Integration.Axpert.Initialization;
+using AxData.Integration.Axpert.Runtime;
+using AxData.Integration.Axpert.StructDef;
+using AxData.TestSupport.Fakes;
 using AxParserApp;
 using AxStructDef;
 using AxStructDef.Helpers;
@@ -51,8 +56,6 @@ public sealed class AxpertFieldEngineContractTests(ITestOutputHelper output)
 
         Assert.True(completed.Succeeded, completed.Errors.FirstOrDefault()?.Message);
         Assert.Equal(1, factory.CallCount);
-        Assert.Equal(1, factory.LastCreatedRuntime!.HydrationCount);
-        Assert.Equal(1, factory.LastCreatedRuntime.ReadbackCount);
         Assert.Equal(10m, state.DataContainers["dc1"].Rows[0].Fields["qty"].Value);
         Assert.Equal(11m, state.DataContainers["dc1"].Rows[0].Fields["rate"].Value);
         Assert.Equal(110m, state.DataContainers["dc1"].Rows[0].Fields["amount"].Value);
@@ -173,8 +176,75 @@ public sealed class AxpertFieldEngineContractTests(ITestOutputHelper output)
         Assert.True(result.Succeeded, result.Errors.FirstOrDefault()?.Message);
         Assert.Equal(25m, state.DataContainers["dc1"].Rows[0].Fields["amount"].Value);
         Assert.Equal(1, factory.CallCount);
-        Assert.Equal(1, factory.LastCreatedRuntime!.HydrationCount);
-        Assert.Equal(1, factory.LastCreatedRuntime.ReadbackCount);
+    }
+
+    [Fact]
+    public async Task New_init_uses_one_loaded_definition_runtime()
+    {
+        SelectionDbHelper.Create(new DataTable(), out IDbHelper dbHelper);
+        var seedRuntime = LegacyFixture.CreateRuntime(dbHelper: dbHelper);
+        var defaultedField = seedRuntime.Validate._sdef.GetField("qty")!;
+        defaultedField.SaveValue = true;
+        defaultedField.Cexp = "2 + 3";
+        defaultedField.Exprn = 0;
+        var context = new AxpertRuntimeContext(
+            seedRuntime.Validate._common,
+            seedRuntime.Validate.TraceService,
+            User.Roles.ToArray(),
+            "ARM-sample-tenant-test");
+        var source = new CountingStructDefRuntimeSource(
+            new AxpertStructDefRuntime(context, seedRuntime.Validate._sdef));
+        var loader = new AxpertDataLoader(
+            new NeverDataSource(),
+            new FakeRowIdGenerator("row_new"));
+        var initializer = new AxpertInitializer(source, loader);
+
+        var result = await initializer.InitializeAsync(
+            User.TenantId,
+            "sample-order",
+            new AxRecordKey(null, null, null),
+            User,
+            default);
+
+        Assert.True(result.Succeeded, result.Error);
+        Assert.Equal(1, source.CallCount);
+        var container = Assert.Single(result.Data!.DataContainers, container => container.Name == "dc1");
+        Assert.Equal("row_new", Assert.Single(container.Rows).RowId);
+        Assert.Equal(5m, container.Rows[0].Fields["qty"].Value);
+        Assert.Equal(5m, container.Rows[0].Fields["qty"].OriginalValue);
+        Assert.All(
+            result.Data.DataContainers.SelectMany(container => container.Rows).SelectMany(row => row.Fields.Values),
+            field => Assert.False(field.IsDirty));
+    }
+
+    [Fact]
+    public async Task Independent_init_runtimes_can_load_concurrently()
+    {
+        var source = new ConcurrentStructDefRuntimeSource(CreateInitRuntime);
+        var first = new AxpertInitializer(
+            source,
+            new AxpertDataLoader(new NeverDataSource(), new FakeRowIdGenerator("row_first")));
+        var second = new AxpertInitializer(
+            source,
+            new AxpertDataLoader(new NeverDataSource(), new FakeRowIdGenerator("row_second")));
+
+        var results = await Task.WhenAll(
+            first.InitializeAsync(
+                User.TenantId,
+                "sample-order",
+                new AxRecordKey(null, null, null),
+                User,
+                default),
+            second.InitializeAsync(
+                User.TenantId,
+                "sample-order",
+                new AxRecordKey(null, null, null),
+                User,
+                default));
+
+        Assert.All(results, result => Assert.True(result.Succeeded, result.Error));
+        Assert.Equal(2, source.MaximumConcurrentLoads);
+        Assert.Equal(2, source.Definitions.Distinct(ReferenceEqualityComparer.Instance).Count());
     }
 
     [Fact]
@@ -209,7 +279,41 @@ public sealed class AxpertFieldEngineContractTests(ITestOutputHelper output)
         Assert.True(result.Succeeded, result.Errors.FirstOrDefault()?.Message);
         Assert.Equal(12.50m, state.DataContainers["dc1"].Rows[0].Fields["amount"].Value);
         Assert.Equal(1, factory.CallCount);
-        Assert.Equal(1, factory.LastCreatedRuntime!.ReadbackCount);
+    }
+
+    [Fact]
+    public async Task New_on_load_processing_defers_required_value_validation_until_edit_or_save()
+    {
+        var state = CreateState();
+        var row = state.DataContainers["dc1"].Rows[0];
+        row.Fields["rate"].SetValue(null);
+        row.Fields["amount"].SetValue(null);
+        var adapter = new AxpertFieldEngine(new LegacyRuntimeFactory());
+        var started = await adapter.CreateOperationAsync(state, User, default);
+
+        Assert.True(started.Succeeded, started.Error);
+        await using (var operation = started.Operation!)
+        {
+            var initialized = await operation.InitializeOnLoadAsync(default);
+
+            Assert.True(initialized.Succeeded, initialized.Errors.FirstOrDefault()?.Message);
+        }
+
+        var editState = CreateState();
+        var editRow = editState.DataContainers["dc1"].Rows[0];
+        var editStarted = await adapter.CreateOperationAsync(editState, User, default);
+
+        Assert.True(editStarted.Succeeded, editStarted.Error);
+        await using var editOperation = editStarted.Operation!;
+        var edited = await editOperation.EvaluateAsync(
+            new FieldAddress("dc1", editRow.RowId, "rate"),
+            null,
+            default);
+
+        Assert.False(edited.Succeeded);
+        Assert.Contains(edited.Errors, error =>
+            error.Address == new FieldAddress("dc1", editRow.RowId, "rate") &&
+            error.Code == "AXD-VAL-001");
     }
 
     [Fact]
@@ -429,8 +533,6 @@ public sealed class AxpertFieldEngineContractTests(ITestOutputHelper output)
 
         Assert.True(completed.Succeeded, completed.Errors.FirstOrDefault()?.Message);
         Assert.Equal(2, factory.CallCount);
-        Assert.Equal([1, 1], factory.CreatedRuntimes.Select(runtime => runtime.HydrationCount));
-        Assert.Equal([0, 1], factory.CreatedRuntimes.Select(runtime => runtime.ReadbackCount));
         Assert.Equal(1m, state.DataContainers["dc1"].Rows[0].Fields["qty"].Value);
         Assert.Equal(20m, state.DataContainers["dc1"].Rows[0].Fields["amount"].Value);
     }
@@ -439,7 +541,7 @@ public sealed class AxpertFieldEngineContractTests(ITestOutputHelper output)
     public async Task Hydration_and_readback_preserve_normalized_source_ids()
     {
         var state = CreateState();
-        state.DataContainers["dc1"].Rows[0].Fields["qty"] = new AxFieldValue(1m, sourceId: 501);
+        state.DataContainers["dc1"].Rows[0].Fields["qty"] = new AxFieldValue(1m, sourceId: 501, isSourceKey: true);
         var factory = new LegacyRuntimeFactory(sourceKeyField: true);
         var adapter = new AxpertFieldEngine(factory);
         var started = await adapter.CreateOperationAsync(state, User, default);
@@ -468,16 +570,10 @@ public sealed class AxpertFieldEngineContractTests(ITestOutputHelper output)
             "object-2",
             secondUser.TenantId,
             secondState.TransId,
-            secondState.KeyField,
-            secondState.KeyValue,
             secondState.RecordId,
-            secondState.OwnerUserName,
             secondState.InitiatorUserName,
-            secondState.Version,
-            secondState.StructDefVersion,
             secondState.CreatedAtUtc,
             secondState.LastAccessedAtUtc,
-            secondState.ExpiresAtUtc,
             secondState.Status,
             secondState.DataContainers.Values,
             secondState.Workflow,
@@ -645,7 +741,7 @@ public sealed class AxpertFieldEngineContractTests(ITestOutputHelper output)
             ["amount"] = new(2m)
         };
         var state = new AxDataState(
-            "object-1", "sample-tenant", "sample-order", "owner", "owner", "1", DateTimeOffset.UnixEpoch);
+            "object-1", "sample-tenant", "sample-order", "owner", DateTimeOffset.UnixEpoch);
         state.DataContainers.Add("dc1", new AxDataContainer("dc1", true,
         [
             new AxDataRow("row_b", AxRowState.Unchanged, 202, fields),
@@ -836,8 +932,6 @@ public sealed class AxpertFieldEngineContractTests(ITestOutputHelper output)
             "sample-tenant",
             "sample-order",
             "owner",
-            "owner",
-            "1",
             DateTimeOffset.UnixEpoch)
         {
             RecordId = recordId
@@ -912,6 +1006,91 @@ public sealed class AxpertFieldEngineContractTests(ITestOutputHelper output)
             return Task.FromResult(AxpertOperationResult<AxpertFieldRuntime>.Success(
                 LastCreatedRuntime));
         }
+    }
+
+    private sealed class CountingStructDefRuntimeSource(AxpertStructDefRuntime runtime) :
+        IAxpertStructDefRuntimeSource
+    {
+        public int CallCount { get; private set; }
+
+        public Task<AxpertStructDefRuntime?> LoadCurrentRuntimeAsync(
+            string tenantId,
+            string transId,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            return Task.FromResult<AxpertStructDefRuntime?>(runtime);
+        }
+    }
+
+    private sealed class ConcurrentStructDefRuntimeSource(Func<AxpertStructDefRuntime> factory) :
+        IAxpertStructDefRuntimeSource
+    {
+        private int _activeLoads;
+        private int _maximumConcurrentLoads;
+
+        public int MaximumConcurrentLoads => _maximumConcurrentLoads;
+
+        public List<StructDef> Definitions { get; } = [];
+
+        public async Task<AxpertStructDefRuntime?> LoadCurrentRuntimeAsync(
+            string tenantId,
+            string transId,
+            CancellationToken cancellationToken)
+        {
+            var active = Interlocked.Increment(ref _activeLoads);
+            var observedMaximum = Volatile.Read(ref _maximumConcurrentLoads);
+            while (active > observedMaximum)
+            {
+                var previous = Interlocked.CompareExchange(
+                    ref _maximumConcurrentLoads,
+                    active,
+                    observedMaximum);
+                if (previous == observedMaximum)
+                {
+                    break;
+                }
+
+                observedMaximum = previous;
+            }
+            try
+            {
+                await Task.Delay(50, cancellationToken);
+                var runtime = factory();
+                lock (Definitions)
+                {
+                    Definitions.Add(runtime.Definition);
+                }
+
+                return runtime;
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeLoads);
+            }
+        }
+    }
+
+    private static AxpertStructDefRuntime CreateInitRuntime()
+    {
+        SelectionDbHelper.Create(new DataTable(), out IDbHelper dbHelper);
+        var runtime = LegacyFixture.CreateRuntime(dbHelper: dbHelper);
+        return new AxpertStructDefRuntime(
+            new AxpertRuntimeContext(
+                runtime.Validate._common,
+                runtime.Validate.TraceService,
+                User.Roles.ToArray(),
+                "ARM-sample-tenant-test"),
+            runtime.Validate._sdef);
+    }
+
+    private sealed class NeverDataSource : IAxpertDataSource
+    {
+        public Task<AxpertDataSourceResult> LoadAsync(
+            AxpertDataSourceRequest request,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("The combined Init adapter must not invoke the standalone data source.");
     }
 
     private static class LegacyFixture

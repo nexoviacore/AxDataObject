@@ -5,13 +5,11 @@ public sealed record AxDataErrorResponse(
     string Code,
     string Message,
     string CorrelationId,
-    long? CurrentVersion,
     IReadOnlyList<object> Errors)
 {
     public static AxDataErrorResponse Create(
         string code,
         string message,
-        string correlationId,
-        long? currentVersion = null) =>
-        new("error", code, message, correlationId, currentVersion, []);
+        string correlationId) =>
+        new("error", code, message, correlationId, []);
 }

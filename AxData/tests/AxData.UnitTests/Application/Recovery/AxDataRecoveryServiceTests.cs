@@ -88,21 +88,6 @@ public sealed class AxDataRecoveryServiceTests
     }
 
     [Fact]
-    public async Task StructDef_hash_mismatch_returns_D28_conflict_without_restore()
-    {
-        var mismatch = SampleStructDefFixture.Definition with { Version = "changed" };
-        var (service, active, durable, _, actor) = CreateFixture(definition: mismatch);
-        durable.Seed(SampleStructDefFixture.CreateState());
-
-        var result = await service.RecoverAsync(actor, "object-1", AxAuthorizationOperation.Query, CancellationToken.None);
-
-        Assert.Equal("AXD-CONC-003", result.Error!.Code);
-        Assert.Equal(409, result.Error.HttpStatusCode);
-        Assert.Null(await active.LoadAsync(actor.TenantId, "object-1", CancellationToken.None));
-        Assert.Equal(SnapshotReadStatus.Found, (await durable.LoadLatestAsync(actor.TenantId, "object-1", CancellationToken.None)).Status);
-    }
-
-    [Fact]
     public async Task Unauthorized_actor_cannot_restore_by_object_id()
     {
         var (service, active, durable, authorization, _) = CreateFixture();

@@ -49,13 +49,13 @@ public sealed class AxpertReviewStartupGuard(AxpertReviewRuntimeOptions options)
         helper.ConnectionString = options.ConnectionString;
         try
         {
-            await helper.OpenDBConnectionAsync().ConfigureAwait(false);
+            await helper.OpenDBConnectionAsync();
             cancellationToken.ThrowIfCancellationRequested();
             var result = await helper.ExecuteScalarAsync(
                 ReadOnlyAuditSql,
                 ["@schema"],
                 [DbType.String],
-                [options.TenantId]).ConfigureAwait(false);
+                [options.TenantId]);
             cancellationToken.ThrowIfCancellationRequested();
             return string.IsNullOrWhiteSpace(result.error) &&
                    result.result is not null &&
@@ -71,7 +71,7 @@ public sealed class AxpertReviewStartupGuard(AxpertReviewRuntimeOptions options)
         }
         finally
         {
-            await helper.CloseDBConnectionAsync().ConfigureAwait(false);
+            await helper.CloseDBConnectionAsync();
         }
     }
 }

@@ -418,3 +418,130 @@ Format:
 - Decisions: AxData owns exactly-once orchestration while AxValidate owns Accept/Calculate/default semantics; existing AxGet/AxPut/AxDelete defaults and deferred parser compatibility remain unchanged.
 - Tests: serial build, 8 focused on-load, 7 Init unit, 16 loader/endpoint, 165 full unit, 42 integration, 32 ARM checks, and E2E pass; full contracts are 185 passed with 2 deferred parser-guard failures.
 - Next: production review may exercise representative keyed and empty transactions; implement the separately approved parser guards later. Postman: not applicable.
+
+## DataObject state redesign split approved (2026-11-13)
+- Planned: AXD-STATE-01..06 split snapshot-worker deferral, version/StructDef bypass, positional compaction, owner removal, object-version removal, and final regression review into separate chats.
+- Decisions: keep `AXD:{SCHEMANAME}:{OBJECTID}` with no migration; authorization and concurrency slices stop until enforceable server-side replacements are separately approved.
+- Scope: documentation only; no AxData runtime or `ARM-11.4/` files changed. Tests: not run. Postman: not applicable.
+- Next: run AXD-STATE-01 in a fresh chat, then continue in order.
+
+## AXD-STATE-01 done (2026-11-13)
+- Done: Set writes Redis directly; Redis misses return not found; snapshot transport/repository/worker requirements were removed from active composition, CI, walkthroughs, and configuration documentation.
+- Decisions: Dormant snapshot source remains compiled but unwired; Redis is the only active DataObject-state store, and missing state is `404 / AXD-NOTFOUND-001` with no database recovery attempt.
+- Tests: focused Set/Query/composition/endpoints pass; 165 unit and the full integration suite pass; contracts are 185 passed with the two documented parser-guard failures.
+- Next: AXD-STATE-02. Postman: updated with the Redis-only happy path and exact-key deletion negative.
+
+## AXD-STATE-02 done (2026-11-13)
+- Done: Active state and AxPut no longer persist or enforce StructDef headers, versions, or hashes; every behavior path loads the current definition, while legacy v1/v2 snapshots remain readable.
+- Decisions: D38 is implemented; `schemaVersion` remains only as an internal format discriminator pending AXD-STATE-03, `AXD-CONC-003` is removed, and clients cannot control binding bypass.
+- Tests: no-restore solution build, 164 unit, 42 integration, E2E, and 184 contracts pass; the two documented parser-guard failures remain. Postman JSON and diff checks pass.
+- Next: AXD-STATE-03 positional compaction. Postman: removed the obsolete StructDef-mismatch flow and documented the current-definition contract.
+
+## AXD-STATE-03 done (2026-11-15)
+- Done: DataObject state is current-only positional JSON: deterministic fields once per DC, aligned typed row values, sparse source IDs/originals, and only active workflow state; retained AxPut Save returns to `Active`.
+- Decisions: no `schemaVersion`, backward reader, or migration; incompatible Redis state is cleared, read-only metadata is rebuilt from current StructDef, and files/`AxOpen` are omitted.
+- Tests: no-restore build, 17 serializer capacity/round-trip, 63 focused contracts, 167 unit, 45 integration, and E2E pass; full contracts are 185 passed with the same 2 parser-guard failures.
+- Next: AXD-STATE-04. Postman: retained Save → Query → Set and stale-version negative added; collection/template JSON validates.
+
+## AXD-STATE-04 done (2026-11-15)
+- Done: Removed `ownerUserName` from DataObject state, Redis/SQL serialization, and AxPut; trusted initiator identity now provides same-user access across live sessions.
+- Decisions: D40 uses the D29-resolved username plus persisted `initiatorUserName`; ObjectId possession, a former owner value, or a different authenticated user grants no access.
+- Tests: serial no-restore build, focused authorization/authentication/AxPut/serializer/Redis/SQL, 167 unit, 45 integration, and E2E pass; full contracts are 186 passed with the same 2 parser-guard failures.
+- Next: AXD-STATE-05. Postman: added unrelated-session AxPut `403 / AXD-AUTH-002`; collection/template JSON validates.
+
+## AXD-STATE-05 done (2026-11-16)
+- Done: Removed object version, `If-Match`/`expectedVersion`, `AXD-CONC-001`, version CAS, and versioned snapshot/SQL fields; Set now commits only while its shared Redis lease token is still owned, while AxPut claims `Saving` before existing-object work.
+- Decisions: D41 is implemented; overlap returns `409 / AXD-CONC-002`, sequential operations are accepted last-completed-wins, timed-out AxPut is not automatically retried, and `Idempotency-Key` remains future work.
+- Tests: serial no-restore builds pass; 166 unit and 44 integration tests pass; contracts are 172 passed with the same 2 documented parser-guard failures; E2E exits successfully. Postman removes version chaining and includes manual Set/AxPut active-conflict assertions.
+- Next: AXD-STATE-06 final regression review.
+
+## AXD-STATE-03 corrective split approved (2026-11-16)
+- Planned: AXD-STATE-03A corrects native values/array-pair sparse metadata, 03B establishes a clean Init baseline, and 03C removes active-state timestamps before final review.
+- Decisions: D42-D44 fix the reviewed Redis shape; empty sparse properties are omitted and Redis TTL/PTTL is authoritative.
+- Scope: documentation only; no runtime or ARM files changed. Tests: not run. Postman: not applicable.
+- Next: run AXD-STATE-03A, 03B, and 03C in separate chats, with separate approval for each stated ARM cross-project section.
+
+## AXD-STATE-03A done (2026-11-16)
+- Done: Shared AxData/AxPut Redis state now uses native null/string/boolean/number values and omitted-when-empty sparse `[ordinal,value]` pair arrays through write, restore, claim, release, finalize, and close.
+- Decisions: D42 implemented; current StructDef metadata controls business interpretation, strings are never type-guessed, and incompatible wrapper/object-map payloads fail closed with no migration.
+- Tests: serial no-restore build, 13 focused contracts, 20 serializer, 7 Redis lifecycle, 166 unit, 48 integration, and E2E pass; full contracts are 173 passed with the same 2 documented parser-guard failures.
+- Next: AXD-STATE-03B clean Init baseline. Postman: not applicable; no HTTP request/response or AXD error contract changed.
+
+## AXD-STATE-03B done (2026-11-16)
+- Done: Successful new/existing Init on-load values and source IDs become the clean baseline before Redis storage; collision retries reuse that accepted state, and retained Save finalization remains clean.
+- Decisions: D43 implemented; later Set changes alone create sparse originals, reverting removes them, and current source IDs remain available without dirty baseline duplication.
+- Tests: serial no-restore builds, focused Init/Set/serializer/AxPut contracts, 167 unit, 49 integration, and E2E pass; full contracts are 173 passed with the same 2 documented parser-guard failures.
+- Next: AXD-STATE-03C. Postman: not applicable; no endpoint, request/response shape, or AXD error contract changed.
+
+## AXD-STATE-03C done (2026-11-16)
+- Done: Active Redis DataObjects and AxPut claim/release/final snapshots contain no creation, access, or expiry timestamps; Init still calculates and returns `expiresAt` without storing it.
+- Decisions: D44 implemented; Redis TTL/PTTL is authoritative, and AxPut restores the captured positive TTL after release or retained finalization.
+- Tests: focused paths and 43 ARM characterization checks pass; 167 unit and 50 integration pass; contracts are 173 passed with the same 2 documented parser-guard failures.
+- Next: AXD-STATE-06 final regression review. Postman: not applicable.
+
+## Set unpersisted-row correction (2026-11-16)
+- Done: Set accepts server-issued active rows before Save, keeps edited unpersisted rows `New`, and removes them on delete; the Development lease is 60 seconds for real Axpert evaluation.
+- Decisions: `rowId` is mutation identity; `persistedRecordId` remains nullable until Save and is not a Set eligibility check. No ARM-11.4 change.
+- Tests: serial Application/API/unit builds, 32 focused Set tests, 170 full unit tests, and 13 Redis store/lock integration tests pass; legacy API dependencies retain pre-existing warnings. Next: AXD-STATE-06 final regression review. Postman: not applicable.
+
+## AXD-STATE-03D done (2026-11-16)
+- Done: Removed persisted `keyField`/`keyValue` from domain, Redis/shared snapshots, dormant SQL snapshots, and AxPut state; Init still accepts a business locator only for AxGet.
+- Decisions: D45 implemented; canonical nullable `recordId` is the only persisted record locator, and ObjectId-aware AxPut derives the legacy `recordid` request pair server-side.
+- Tests: no-restore production builds, 170 unit, 51 integration, 175 contracts (same 2 documented parser guards excluded), and all AxSave characterization checks pass. Next: AXD-STATE-06 final regression review. Postman: not applicable.
+
+## Init runtime consolidation done (2026-11-16)
+- Done: Real Init now uses one operation-scoped current StructDef/Validate/Parser runtime through AxGet baseline loading, on-load processing, and readback; new Init skips AxGet.
+- Decisions: mutable legacy state remains request-local under the full-operation global gate; standalone Query/Set adapters and M1 fakes retain their existing ports. No ARM-11.4 change.
+- Tests: serial no-restore Integration/API builds, 170 unit, and 176 contracts pass; the same 2 documented parser-guard failures remain. Next: AXD-STATE-06 final regression review. Postman: not applicable.
+
+## AXD-STATE-03E done (2026-11-17)
+- Done: Removed per-row source/original arrays; source-key values now use last-tilde `value~id`, while dirty existing rows use exact-length aligned `oldValues` with current-value copies at unchanged positions.
+- Decisions: D46 implemented; `sourceKey` is stored once per field and validated against current StructDef, ID `0` is unresolved, ordinary tilde strings are literal, and clean/new/reverted rows omit `oldValues`.
+- Tests: serial no-restore solution build, 22 serializer, 39 focused contracts, 172 unit, 50 integration, E2E, and AxSave characterization pass; full contracts are 180 passed with the same 2 documented parser-guard failures.
+- Next: AXD-STATE-06 final regression review. Postman: not applicable; no HTTP or AXD error contract changed.
+
+## AXD-STATE-03F done (2026-11-18)
+- Done: Field metadata is stored once per DC as `[name,flags]` (`1` static read-only, `2` source key); Query/Get validates and projects from it without loading StructDef.
+- Decisions: D47 implemented; live permissions remain mandatory, while Set and AxPut still load current StructDef and validate both stored flags.
+- Tests: serial no-restore solution build, 25 serializer, 17 Query, 33 Set, 43 focused contracts, 172 unit, 53 integration, empty E2E, and 47 AxSave characterization checks pass; full contracts are 182 passed with the same 2 documented parser-guard failures.
+- Next: AXD-STATE-06 final regression review. Postman: not applicable; no HTTP or AXD error contract changed.
+
+## Init single-StructDef simplification done (2026-11-19)
+- Done: Real Init now loads one mutable legacy StructDef and uses it directly for AxGet, DataObject construction, Validate/Parser, on-load processing, and readback; raw-props hashing, revision DTOs, the projected-definition cache, and preflight loads were removed.
+- Decisions: D48 keeps the neutral Application definition only at the dependency boundary and retains the request-local legacy runtime gate; no ARM-11.4 change.
+- Tests: serial no-restore solution build, 170 unit, 53 integration, and 180 contracts pass; the same 2 documented parser-guard failures remain excluded.
+- Next: AXD-STATE-06 final regression review. Postman: not applicable; no HTTP request/response or AXD error contract changed.
+
+## Init legacy-first final-state construction done (2026-11-19)
+- Done: Real Init now completes baseline population and one on-load pass in its request-owned StructDef before constructing one clean DataObject; temporary state hydration/readback, JSON remodeling, and Init gate acquisition were removed.
+- Decisions: D48 now follows AxTstructData runtime isolation for Init; Set/FillGrid gates remain, authorized AxGet shape and fail-closed unknown metadata checks are preserved, and no ARM-11.4 change was needed.
+- Tests: serial no-restore API/Unit/Contract builds, 170 unit tests, and 181 contracts pass with the same 2 documented parser-guard failures excluded; focused Init/concurrency/composition verification passes. Next: AXD-STATE-06 final regression review. Postman: not applicable.
+
+## Persistent active DataObject state (2026-11-19)
+- Done: Removed active-state inactivity TTL, Init `expiresAt`, dead `ExpiresAtUtc` state metadata, AxPut PTTL capture/restore, and the Init diagnostic stage tracker. Active writes now remove any legacy expiry; concurrency lock leases remain bounded.
+- Decisions: D49 supersedes D44's Redis-expiry rule because Redis has no active durable fallback. Documentation and Postman now state the persistent-key contract.
+- Tests: serial no-restore solution build succeeds with zero errors; 7 focused Init unit, 3 Init HTTP contract, and 13 Redis store/lock/AxPut lifecycle tests pass. Postman assertions confirm Init omits `expiresAt`.
+
+## Init payload and load-shape optimization (2026-11-19)
+- Done: Real Init now projects only AxGet row/field presence, returns an initialization payload, and creates the final DataObject in the handler; production hydration/readback counters and dangling await semicolons were removed.
+- Decisions: D48 parity order and fail-closed payload checks remain unchanged; the neutral port/M1 path retains its adapter state while production avoids temporary DataObject construction.
+- Tests: serial no-restore solution build, 170 unit, 53 integration, and 181 contracts pass; the same 2 documented parser-guard contracts fail when included. Next: AXD-STATE-06 final regression. Postman: not applicable.
+
+## Project-wide follow-up register (2026-11-23)
+- Tracking: `docs/slices/axdata-follow-ups.md` now separates pending cross-cutting work, roadmap-owned deferrals, retained safeguards, and completed optimizations across all AxData areas.
+- Scope: documentation only; no runtime, API, Postman, or ARM behavior changed. Tests: not run. Next: AXD-STATE-06 remains the next implementation slice.
+
+## AXD-SET-01 done (2026-11-23)
+- Done: Set now loads state once, owns one current StructDef/Validate/Parser runtime through metadata, reconstruction, and FillGrid, builds a fresh candidate, and performs one token-owned write.
+- Decisions: Set/Save are initiator-only; generic administrator relation and AxPut's literal `admin` bypass are removed; D3 rejected-field rebuild/continuation remains.
+- Tests: focused Set/runtime/FillGrid/auth/identity/AxPut pass; full 165 unit, 53 integration, 181 contracts (2 documented parser guards excluded), and AxSave characterization pass.
+- Next: AXD-STATE-06 cross-flow regression and documentation closeout. Postman: not applicable; HTTP shapes, statuses, and AXD codes are unchanged.
+
+## Init authorization wrapper cleanup (2026-11-24)
+- Done: Init now uses the explicit create-permission result directly instead of wrapping it in the generic actor-relation authorization policy; denial order, logging, and errors are unchanged.
+- Tests: serial no-restore Application build and 7 focused Init unit tests pass. Next: AXD-STATE-06 cross-flow regression. Postman: not applicable.
+
+## Explicit Init/Get/Set POST endpoints (2026-11-24)
+- Done: Replaced the mixed AxData routes with `POST /init`, `POST /get`, and `POST /set`; Get and Set now receive ObjectId in the JSON body, and Get retains full/selective projection.
+- Decisions: Former route aliases are removed; health remains a GET probe; AxPut Save is unchanged. Body-bound ObjectId is shared with operational middleware without parsing or logging request bodies.
+- Tests: serial no-restore solution build succeeds; 24 focused endpoint/middleware contracts and the real-data walkthrough syntax check pass; Postman JSON audit confirms 19 AxData requests on the three POST routes with body ObjectIds and 13 unchanged-route AxPut requests.

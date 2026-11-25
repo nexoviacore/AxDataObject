@@ -32,7 +32,7 @@ public sealed class HttpUserContextTests
 
         Assert.Equal("tenant-a", user.TenantId);
         Assert.Equal("user-a", user.UserName);
-        Assert.False(user.IsAdministrator);
+        Assert.Null(typeof(AxUserContext).GetProperty("IsAdministrator"));
         Assert.Contains("approver", user.Roles);
         Assert.DoesNotContain("attacker-role", user.Roles);
     }

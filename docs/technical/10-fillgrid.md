@@ -10,4 +10,4 @@ public sealed record FillGridResult(
     IReadOnlyList<AxError> Errors);
 ```
 
-The application layer applies the returned mutation so it can version, audit, and persist the complete object consistently.
+The Set operation reuses its already loaded StructDef/query metadata. The application validates every returned operation, target, mode, field mapping, value set, and generated row identity into one complete plan before applying any operation. It then applies the plan to the fresh candidate and persists that complete object once under the Set lease.

@@ -33,6 +33,8 @@ public sealed class RedisAxDataLock : IAxDataLock
         _leaseDuration = options.LockLeaseDuration;
     }
 
+    /// <summary>Acquires a short token-owned Redis lease for a tenant-scoped object.</summary>
+    /// <returns>The lease, or <see langword="null"/> when the key is already owned.</returns>
     public async Task<IAxDataLockLease?> TryAcquireAsync(
         string tenantId,
         string objectId,
@@ -43,17 +45,16 @@ public sealed class RedisAxDataLock : IAxDataLock
 
         cancellationToken.ThrowIfCancellationRequested();
         var acquired = await _database.StringSetAsync(key, token, _leaseDuration, When.NotExists)
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
+            .WaitAsync(cancellationToken);
 
         return acquired ? new RedisAxDataLockLease(_database, key, token) : null;
     }
 
-    private static RedisKey BuildKey(string tenantId, string objectId)
+    internal static RedisKey BuildKey(string tenantId, string objectId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(objectId);
-        return $"AXD:LOCK:{tenantId.ToUpperInvariant()}:{objectId.ToUpperInvariant()}";
+        return $"AXD:LOCK:{{{tenantId.ToUpperInvariant()}}}:{objectId.ToUpperInvariant()}";
     }
 
     private sealed class RedisAxDataLockLease(
@@ -63,6 +64,9 @@ public sealed class RedisAxDataLock : IAxDataLock
     {
         private int _released;
 
+        public string Token => token.ToString();
+
+        /// <summary>Atomically releases the lease only when its ownership token still matches.</summary>
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _released, 1) != 0)
@@ -72,8 +76,7 @@ public sealed class RedisAxDataLock : IAxDataLock
 
             try
             {
-                await database.ScriptEvaluateAsync(ReleaseScript, [key], [token])
-                    .ConfigureAwait(false);
+                await database.ScriptEvaluateAsync(ReleaseScript, [key], [token]);
             }
             catch
             {

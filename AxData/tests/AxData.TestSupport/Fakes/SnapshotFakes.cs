@@ -69,11 +69,10 @@ public sealed class InMemorySnapshotTransport(IAxDataStore store) : ISnapshotTra
 
     public Task<AxDataStoreWriteResult> PublishAsync(
         SnapshotEnvelope envelope,
-        long expectedVersion,
         CancellationToken cancellationToken)
     {
         Published.Add(envelope);
-        return store.WriteAsync(envelope.Snapshot, expectedVersion, cancellationToken);
+        return store.WriteAsync(envelope.Snapshot, "snapshot-transport", cancellationToken);
     }
 
     public Task<IReadOnlyList<SnapshotDelivery>> ReadAsync(
@@ -96,7 +95,6 @@ public sealed class InMemorySnapshotTransport(IAxDataStore store) : ISnapshotTra
 
     public Task AcknowledgeAsync(
         SnapshotDelivery delivery,
-        long durableVersion,
         string consumerGroup,
         CancellationToken cancellationToken)
     {
